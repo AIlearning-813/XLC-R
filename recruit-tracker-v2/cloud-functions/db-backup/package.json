@@ -1,0 +1,9 @@
+{
+  "name": "db-backup",
+  "version": "1.0.0",
+  "description": "数据库每日备份云函数",
+  "main": "index.js",
+  "dependencies": {
+    "@cloudbase/node-sdk": "^3.0.0"
+  }
+}

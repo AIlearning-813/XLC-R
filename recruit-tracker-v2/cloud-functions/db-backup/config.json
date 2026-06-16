@@ -1,0 +1,11 @@
+{
+  "timeout": 300,
+  "memorySize": 512,
+  "triggers": [
+    {
+      "name": "daily-backup",
+      "type": "timer",
+      "config": "0 3 * * *"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "timeout": 60,
+  "memorySize": 256,
+  "triggers": [
+    {
+      "name": "health-check",
+      "type": "timer",
+      "config": "*/30 * * * *"
+    }
+  ]
+}
