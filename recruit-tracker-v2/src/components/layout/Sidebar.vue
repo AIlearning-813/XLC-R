@@ -49,7 +49,12 @@ function navigate(path) {
 }
 
 function isActive(path) {
-  return route.path.startsWith(path);
+  // 精确匹配
+  if (route.path === path) return true;
+  // 子路由前缀匹配：/candidates/123 应激活 /candidates
+  // 但 /import/resume 不应激活 /import（两者是独立功能）
+  if (path === '/import' && route.path.startsWith('/import/')) return false;
+  return route.path.startsWith(path + '/');
 }
 </script>
 
