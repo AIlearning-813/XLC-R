@@ -17,7 +17,7 @@ async function handleLogin() {
 
   const ok = await auth.initAuth();
   if (!ok) {
-    error.value = 'CloudBase 连接失败，请检查网络或配置';
+    error.value = auth.loginError || 'CloudBase 连接失败，请检查网络或配置';
     loading.value = false;
     return;
   }

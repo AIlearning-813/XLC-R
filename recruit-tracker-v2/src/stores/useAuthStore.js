@@ -10,6 +10,7 @@ export const useAuthStore = defineStore('auth', () => {
   const userRole = ref(null);          // 'admin' | 'recruiter'
   const userName = ref('');            // 显示名称
   const loginState = ref('idle');      // 'idle' | 'loading' | 'error'
+  const loginError = ref('');          // 登录失败的具体原因
 
   // 计算属性
   const isLoggedIn = computed(() => !!currentUser.value);
@@ -20,21 +21,29 @@ export const useAuthStore = defineStore('auth', () => {
     loginState.value = 'loading';
     try {
       const auth = cloudbase.auth({ persistence: 'local' });
-      const loginState = await auth.getLoginState();
+      if (!auth) {
+        throw new Error('CloudBase 未初始化，请检查 ENV_ID 配置');
+      }
 
-      if (!loginState) {
+      const loginResp = await auth.getLoginState();
+
+      if (!loginResp) {
         // 匿名登录
         await auth.anonymousAuthProvider().signIn();
         const newState = await auth.getLoginState();
+        if (!newState) {
+          throw new Error('匿名登录后获取用户状态失败');
+        }
         currentUser.value = newState.user;
       } else {
-        currentUser.value = loginState.user;
+        currentUser.value = loginResp.user;
       }
       loginState.value = 'idle';
       return true;
     } catch (err) {
       console.error('CloudBase 登录失败:', err);
       loginState.value = 'error';
+      loginError.value = err.message || '未知错误';
       return false;
     }
   }
@@ -64,6 +73,7 @@ export const useAuthStore = defineStore('auth', () => {
     userRole,
     userName,
     loginState,
+    loginError,
     isLoggedIn,
     isAdmin,
     initAuth,

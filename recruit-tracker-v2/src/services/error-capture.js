@@ -1,20 +1,50 @@
 /* 新励成招聘管理系统 V2.0 — 全局错误捕获 */
 
+import cloudbase from './cloudbase';
+
 // 错误日志缓冲（避免频繁写数据库）
 let errorBuffer = [];
 let flushTimer = null;
 const FLUSH_INTERVAL = 5000; // 5 秒合并写入
 const MAX_BUFFER = 20;
 
-function flushErrors() {
+async function flushErrors() {
   if (errorBuffer.length === 0) return;
 
   const errors = errorBuffer.splice(0);
-  // TODO: 阶段 1 后续 → 写入 CloudBase ErrorLog 集合
-  // 当前阶段仅控制台输出，不阻塞 UI
+
+  // 控制台输出（开发调试）
   errors.forEach((e) => {
     console.error('[ErrorCapture]', e.type, e.message, e.context);
   });
+
+  // 写入 CloudBase ErrorLog 集合
+  try {
+    const db = cloudbase.db();
+    if (!db) return; // CloudBase 未初始化时跳过
+
+    const collection = db.collection('ErrorLog');
+    // CloudBase SDK 不支持批量 add，逐条写入（非阻塞）
+    for (const e of errors) {
+      collection.add({
+        type: 'client',
+        source: 'frontend',
+        message: e.message,
+        stack: e.context?.stack || null,
+        context: {
+          ...e.context,
+          url: window.location.href,
+          userAgent: navigator.userAgent,
+        },
+        severity: 'warning',
+        createdAt: new Date(),
+      }).catch(() => {
+        // 写入失败静默忽略，避免无限递归
+      });
+    }
+  } catch {
+    // CloudBase 写入失败静默忽略
+  }
 }
 
 export function setupErrorCapture(app) {
