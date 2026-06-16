@@ -41,12 +41,14 @@ function storage() {
   const app = getApp();
   if (!app) return null;
   // 兼容不同版本的 CloudBase JS SDK
-  // v3.x 某些版本 storage 是属性而非方法
-  if (typeof app.storage === 'function') {
-    return app.storage();
+  // v3.x 某些版本 storage 是 getter，不允许双重访问
+  // 必须先缓存引用再判断，避免 getter 两次返回不同值
+  const storageRef = app.storage;
+  if (typeof storageRef === 'function') {
+    return storageRef();
   }
-  if (app.storage) {
-    return app.storage;
+  if (storageRef && typeof storageRef === 'object') {
+    return storageRef;
   }
   console.warn('⚠️ CloudBase SDK 不支持 storage，文件上传功能不可用');
   return null;
