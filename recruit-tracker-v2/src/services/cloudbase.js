@@ -40,7 +40,16 @@ function auth(options) {
 function storage() {
   const app = getApp();
   if (!app) return null;
-  return app.storage();
+  // 兼容不同版本的 CloudBase JS SDK
+  // v3.x 某些版本 storage 是属性而非方法
+  if (typeof app.storage === 'function') {
+    return app.storage();
+  }
+  if (app.storage) {
+    return app.storage;
+  }
+  console.warn('⚠️ CloudBase SDK 不支持 storage，文件上传功能不可用');
+  return null;
 }
 
 // 调用云函数
