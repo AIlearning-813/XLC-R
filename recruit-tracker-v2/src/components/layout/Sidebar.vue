@@ -9,15 +9,15 @@ const router = useRouter();
 const route = useRoute();
 const auth = useAuthStore();
 
-/* SVG 图标（内联，避免 emoji） */
+/* SVG 图标（内联） */
 const icons = {
-  dashboard: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>',
-  pipeline: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="5" rx="1"/><rect x="3" y="10" width="18" height="5" rx="1"/><rect x="3" y="17" width="18" height="5" rx="1"/></svg>',
+  dashboard: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>',
+  pipeline: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="5" rx="1.5"/><rect x="3" y="10" width="18" height="5" rx="1.5"/><rect x="3" y="17" width="18" height="5" rx="1.5"/></svg>',
   candidates: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="7" r="4"/><path d="M3 21v-2a4 4 0 014-4h4a4 4 0 014 4v2"/><circle cx="17" cy="9" r="3"/><path d="M18 21v-2a3 3 0 00-3-3h-1"/></svg>',
   reports: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>',
   review: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>',
-  import: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4m7-10l5 5-5 5m5-5H3"/></svg>',
-  settings: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>',
+  import: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
+  settings: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4"/></svg>',
 };
 
 function getIcon(name) {
@@ -49,10 +49,7 @@ function navigate(path) {
 }
 
 function isActive(path) {
-  // 精确匹配
   if (route.path === path) return true;
-  // 子路由前缀匹配：/candidates/123 应激活 /candidates
-  // 但 /import/resume 不应激活 /import（两者是独立功能）
   if (path === '/import' && route.path.startsWith('/import/')) return false;
   return route.path.startsWith(path + '/');
 }
@@ -60,12 +57,12 @@ function isActive(path) {
 
 <template>
   <aside class="sidebar">
-    <!-- 头部 -->
+    <!-- Logo -->
     <div class="sidebar-header">
       <div class="sidebar-logo">
-        <svg viewBox="0 0 32 32" fill="none">
-          <rect width="32" height="32" rx="8" fill="currentColor" fill-opacity="0.12"/>
-          <text x="16" y="21" text-anchor="middle" fill="currentColor" font-size="15" font-weight="700">XL</text>
+        <svg viewBox="0 0 36 36" fill="none">
+          <rect width="36" height="36" rx="10" fill="currentColor" fill-opacity="0.15"/>
+          <text x="18" y="24" text-anchor="middle" fill="currentColor" font-size="17" font-weight="700" letter-spacing="-0.5">XL</text>
         </svg>
       </div>
       <div class="sidebar-brand">
@@ -117,26 +114,24 @@ function isActive(path) {
   left: 0;
   width: var(--sidebar-w);
   height: 100vh;
-  background: var(--bg-sidebar);
-  color: var(--gray-600);
+  background: var(--sidebar-bg);
   display: flex;
   flex-direction: column;
   z-index: 200;
-  border-right: 1px solid var(--gray-100);
 }
 
-/* === 头部 === */
+/* === Logo === */
 .sidebar-header {
   display: flex;
   align-items: center;
   gap: var(--spacing-sm);
-  padding: var(--spacing-lg) var(--spacing-md);
+  padding: 20px var(--spacing-md);
 }
 
 .sidebar-logo {
   width: 36px;
   height: 36px;
-  color: var(--primary);
+  color: var(--sidebar-logo-color);
   flex-shrink: 0;
 }
 
@@ -154,23 +149,23 @@ function isActive(path) {
 .sidebar-brand-name {
   font-size: var(--font-size-sm);
   font-weight: 700;
-  color: var(--gray-700);
+  color: var(--sidebar-text-active);
   letter-spacing: -0.01em;
 }
 
 .sidebar-brand-version {
   font-size: 11px;
-  color: var(--gray-300);
+  color: var(--sidebar-text-muted);
   font-weight: 500;
 }
 
 /* === 导航 === */
 .sidebar-nav {
   flex: 1;
-  padding: var(--spacing-sm) var(--spacing-sm);
+  padding: var(--spacing-sm) 10px;
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
   overflow-y: auto;
 }
 
@@ -178,11 +173,11 @@ function isActive(path) {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 9px var(--spacing-md);
+  padding: 10px 12px;
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--gray-500);
+  color: var(--sidebar-text);
   font-size: var(--font-size-base);
   font-weight: 500;
   text-align: left;
@@ -190,17 +185,31 @@ function isActive(path) {
   cursor: pointer;
   width: 100%;
   font-family: inherit;
+  position: relative;
 }
 
 .sidebar-item:hover {
-  background: var(--bg-sidebar-hover);
-  color: var(--gray-700);
+  background: var(--sidebar-bg-hover);
+  color: var(--sidebar-text-active);
 }
 
 .sidebar-item.active {
-  background: var(--bg-sidebar-active);
-  color: var(--primary);
+  background: var(--sidebar-bg-active);
+  color: var(--sidebar-text-active);
   font-weight: 600;
+}
+
+/* 激活态左侧竖线 */
+.sidebar-item.active::before {
+  content: '';
+  position: absolute;
+  left: -6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 20px;
+  background: var(--sidebar-active-bar);
+  border-radius: 0 2px 2px 0;
 }
 
 .sidebar-item-icon {
@@ -210,6 +219,16 @@ function isActive(path) {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  color: var(--sidebar-icon);
+  transition: color var(--transition);
+}
+
+.sidebar-item.active .sidebar-item-icon {
+  color: var(--sidebar-icon-active);
+}
+
+.sidebar-item:hover .sidebar-item-icon {
+  color: var(--sidebar-icon-active);
 }
 
 .sidebar-item-icon :deep(svg) {
@@ -218,12 +237,12 @@ function isActive(path) {
 
 /* === 底部 === */
 .sidebar-footer {
-  padding: var(--spacing-sm) var(--spacing-md) var(--spacing-md);
+  padding: var(--spacing-sm) var(--spacing-sm) var(--spacing-md);
 }
 
 .sidebar-divider {
   height: 1px;
-  background: var(--gray-100);
+  background: var(--sidebar-divider);
   margin-bottom: var(--spacing-sm);
 }
 
@@ -236,11 +255,11 @@ function isActive(path) {
 }
 
 .sidebar-user-avatar {
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   border-radius: var(--radius-sm);
-  background: var(--primary);
-  color: #fff;
+  background: var(--sidebar-logo-bg);
+  color: var(--sidebar-logo-color);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -259,21 +278,21 @@ function isActive(path) {
   display: block;
   font-size: var(--font-size-sm);
   font-weight: 500;
-  color: var(--gray-700);
+  color: var(--sidebar-text-active);
 }
 
 .sidebar-user-role {
   font-size: 11px;
-  color: var(--gray-400);
+  color: var(--sidebar-text-muted);
 }
 
 .sidebar-logout {
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--gray-300);
+  color: var(--sidebar-text-muted);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -282,7 +301,7 @@ function isActive(path) {
 }
 
 .sidebar-logout:hover {
-  background: var(--danger-bg);
-  color: var(--danger);
+  background: rgba(194, 84, 80, 0.15);
+  color: var(--danger-light);
 }
 </style>

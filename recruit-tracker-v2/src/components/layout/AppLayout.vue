@@ -34,6 +34,7 @@ const auth = useAuthStore();
 .app-layout {
   display: flex;
   min-height: 100vh;
+  background: var(--bg-page-gradient);
 }
 
 .app-main {
@@ -50,9 +51,10 @@ const auth = useAuthStore();
   align-items: center;
   justify-content: space-between;
   padding: 14px var(--spacing-xl);
-  background: rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(12px);
-  border-bottom: 1px solid var(--gray-100);
+  background: rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
   position: sticky;
   top: 0;
   z-index: 100;
