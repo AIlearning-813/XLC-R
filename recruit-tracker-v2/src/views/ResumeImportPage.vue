@@ -4,6 +4,7 @@
 import { reactive, ref, computed, provide } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/useAuthStore';
+import { useToast } from '../composables/useToast';
 import cloudbase from '../services/cloudbase';
 import { extractText, parseWithDeepSeek, computeFileHash } from '../services/resume-parser';
 import { detectDuplicates } from '../services/duplicate-detector';
@@ -13,6 +14,7 @@ import CandidateForm from '../components/resume/CandidateForm.vue';
 
 const router = useRouter();
 const auth = useAuthStore();
+const toast = useToast();
 const db = cloudbase.db();
 const storage = cloudbase.storage();
 
@@ -263,17 +265,17 @@ async function onCreateCandidate(data) {
     // 成功 → 区分文件上传状态给出不同提示
     const candidateName = candidateData.name || '未知';
     if (fileStatus === 'failed') {
-      alert(`候选人 "${candidateName}" 创建成功，但简历文件上传失败（${uploadErrorMsg}）。\n\n请在候选人详情页重新上传简历文件。`);
+      toast.warning(`"${candidateName}" 创建成功，但简历文件上传失败（${uploadErrorMsg}），请在候选人详情页重新上传。`, 0);
     } else if (fileStatus === 'uploaded') {
-      alert(`候选人 "${candidateName}" 创建成功，简历文件已保存。`);
+      toast.success(`"${candidateName}" 创建成功，简历文件已保存`);
     } else {
-      alert(`候选人 "${candidateName}" 创建成功！`);
+      toast.success(`"${candidateName}" 创建成功`);
     }
     router.push(`/candidates/${candidateId}`);
   } catch (err) {
     console.error('[ResumeImport] 创建候选人失败:', err);
     // 错误已由 error-capture.js 全局捕获，这里额外提示
-    alert(`创建失败: ${err.message || '未知错误'}`);
+    toast.error(`创建失败: ${err.message || '未知错误'}`, 0);
   } finally {
     submitting.value = false;
   }

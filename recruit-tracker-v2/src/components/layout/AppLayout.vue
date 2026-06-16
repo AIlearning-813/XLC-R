@@ -2,6 +2,7 @@
 /* 新励成招聘管理系统 V2.0 — 主布局壳 */
 
 import Sidebar from './Sidebar.vue';
+import ToastContainer from '../common/ToastContainer.vue';
 import { useAuthStore } from '../../stores/useAuthStore';
 
 const auth = useAuthStore();
@@ -24,6 +25,7 @@ const auth = useAuthStore();
       <div class="app-content">
         <router-view />
       </div>
+      <ToastContainer />
     </main>
   </div>
 </template>
