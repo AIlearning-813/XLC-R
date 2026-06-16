@@ -1,12 +1,12 @@
 /* 新励成招聘管理系统 V2.0 — 通用组件样式 */
 
-/* 按钮 */
+/* === 按钮 === */
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: var(--spacing-xs);
-  padding: 8px 16px;
+  padding: 10px 20px;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   font-weight: 500;
@@ -14,22 +14,21 @@
   transition: all var(--transition);
   white-space: nowrap;
   user-select: none;
+  letter-spacing: 0.01em;
 }
 
 .btn:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
 .btn-primary {
   background: var(--primary);
   color: #fff;
-  border-color: var(--primary);
 }
 
 .btn-primary:hover:not(:disabled) {
   background: var(--primary-light);
-  border-color: var(--primary-light);
 }
 
 .btn-secondary {
@@ -46,17 +45,15 @@
 .btn-danger {
   background: var(--danger);
   color: #fff;
-  border-color: var(--danger);
 }
 
 .btn-danger:hover:not(:disabled) {
-  background: #c53030;
+  background: #A84542;
 }
 
 .btn-ghost {
   background: transparent;
   color: var(--gray-500);
-  border-color: transparent;
 }
 
 .btn-ghost:hover:not(:disabled) {
@@ -65,27 +62,21 @@
 }
 
 .btn-sm {
-  padding: 4px 10px;
+  padding: 6px 12px;
   font-size: var(--font-size-sm);
 }
 
 .btn-lg {
-  padding: 12px 24px;
+  padding: 14px 28px;
   font-size: var(--font-size-md);
 }
 
-/* 卡片 */
+/* === 卡片 === */
 .card {
   background: var(--card-bg);
-  backdrop-filter: blur(10px);
   border-radius: var(--radius);
+  border: var(--card-border);
   box-shadow: var(--shadow);
-  border: 1px solid rgba(255, 255, 255, 0.6);
-}
-
-.card-solid {
-  background: var(--card-bg-solid);
-  backdrop-filter: none;
 }
 
 .card-header {
@@ -100,14 +91,14 @@
   padding: var(--spacing-lg);
 }
 
-/* 表单 */
+/* === 表单 === */
 .form-group {
   margin-bottom: var(--spacing-md);
 }
 
 .form-label {
   display: block;
-  margin-bottom: var(--spacing-xs);
+  margin-bottom: 6px;
   font-weight: 500;
   color: var(--gray-600);
   font-size: var(--font-size-sm);
@@ -115,12 +106,13 @@
 
 .form-input {
   width: 100%;
-  padding: 8px 12px;
+  padding: 10px 14px;
   border: 1px solid var(--gray-200);
   border-radius: var(--radius-sm);
   background: #fff;
   color: var(--gray-700);
-  transition: border-color var(--transition);
+  transition: border-color var(--transition), box-shadow var(--transition);
+  font-size: var(--font-size-base);
 }
 
 .form-input:focus {
@@ -135,7 +127,7 @@
 
 .form-select {
   width: 100%;
-  padding: 8px 12px;
+  padding: 10px 14px;
   border: 1px solid var(--gray-200);
   border-radius: var(--radius-sm);
   background: #fff;
@@ -143,14 +135,15 @@
   cursor: pointer;
 }
 
-/* 徽章 */
+/* === 徽章 === */
 .badge {
   display: inline-flex;
   align-items: center;
-  padding: 2px 8px;
-  border-radius: 12px;
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
   font-size: var(--font-size-xs);
   font-weight: 600;
+  letter-spacing: 0.02em;
 }
 
 .badge-success {
@@ -173,7 +166,7 @@
   color: var(--primary);
 }
 
-/* 加载 */
+/* === 加载 === */
 .spinner {
   width: 20px;
   height: 20px;
@@ -187,27 +180,30 @@
   to { transform: rotate(360deg); }
 }
 
-/* 空状态 */
+/* === 空状态 === */
 .empty-state {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: var(--spacing-2xl);
+  padding: var(--spacing-3xl) var(--spacing-lg);
   color: var(--gray-300);
 }
 
 .empty-state-icon {
-  font-size: 48px;
+  font-size: 40px;
   margin-bottom: var(--spacing-md);
+  opacity: 0.6;
 }
 
 .empty-state-text {
   font-size: var(--font-size-md);
-  margin-bottom: var(--spacing-md);
+  font-weight: 500;
+  color: var(--gray-400);
+  margin-bottom: var(--spacing-sm);
 }
 
-/* Toast 提示 */
+/* === Toast === */
 .toast-container {
   position: fixed;
   top: 16px;
@@ -220,34 +216,17 @@
 
 .toast {
   padding: 12px 20px;
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   box-shadow: var(--shadow-md);
   font-size: var(--font-size-sm);
   animation: toast-in 0.3s ease;
 }
 
-.toast-success {
-  background: var(--success);
-  color: #fff;
-}
-
-.toast-error {
-  background: var(--danger);
-  color: #fff;
-}
-
-.toast-warning {
-  background: var(--warning);
-  color: #fff;
-}
+.toast-success { background: var(--success); color: #fff; }
+.toast-error { background: var(--danger); color: #fff; }
+.toast-warning { background: var(--warning); color: #fff; }
 
 @keyframes toast-in {
-  from {
-    opacity: 0;
-    transform: translateX(100%);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
+  from { opacity: 0; transform: translateX(100%); }
+  to { opacity: 1; transform: translateX(0); }
 }

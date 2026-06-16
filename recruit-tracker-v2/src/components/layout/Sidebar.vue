@@ -9,20 +9,19 @@ const router = useRouter();
 const route = useRoute();
 const auth = useAuthStore();
 
-// 导航菜单项
 const menuItems = computed(() => {
   const items = [
-    { path: '/dashboard', title: '工作台', icon: '📊' },
-    { path: '/pipeline', title: '招聘看板', icon: '📋' },
-    { path: '/candidates', title: '候选人', icon: '👤' },
-    { path: '/reports', title: '数据分析', icon: '📈' },
+    { path: '/dashboard', title: '工作台', icon: 'dashboard' },
+    { path: '/pipeline', title: '招聘看板', icon: 'pipeline' },
+    { path: '/candidates', title: '候选人', icon: 'candidates' },
+    { path: '/reports', title: '数据分析', icon: 'reports' },
   ];
 
   if (auth.isAdmin) {
     items.push(
-      { path: '/admin-review', title: '变更审核', icon: '✅' },
-      { path: '/import', title: '数据导入', icon: '📥' },
-      { path: '/settings', title: '系统设置', icon: '⚙️' },
+      { path: '/admin-review', title: '变更审核', icon: 'review' },
+      { path: '/import', title: '数据导入', icon: 'import' },
+      { path: '/settings', title: '系统设置', icon: 'settings' },
     );
   }
 
@@ -40,14 +39,21 @@ function isActive(path) {
 
 <template>
   <aside class="sidebar">
+    <!-- 头部 -->
     <div class="sidebar-header">
-      <div class="sidebar-logo">XL</div>
+      <div class="sidebar-logo">
+        <svg viewBox="0 0 32 32" fill="none">
+          <rect width="32" height="32" rx="8" fill="currentColor" fill-opacity="0.12"/>
+          <text x="16" y="21" text-anchor="middle" fill="currentColor" font-size="15" font-weight="700">XL</text>
+        </svg>
+      </div>
       <div class="sidebar-brand">
         <span class="sidebar-brand-name">新励成招聘</span>
         <span class="sidebar-brand-version">V2.0</span>
       </div>
     </div>
 
+    <!-- 导航 -->
     <nav class="sidebar-nav">
       <button
         v-for="item in menuItems"
@@ -56,24 +62,48 @@ function isActive(path) {
         :class="{ active: isActive(item.path) }"
         @click="navigate(item.path)"
       >
-        <span class="sidebar-item-icon">{{ item.icon }}</span>
+        <span class="sidebar-item-icon" v-html="getIcon(item.icon)"></span>
         <span class="sidebar-item-title">{{ item.title }}</span>
       </button>
     </nav>
 
+    <!-- 底部用户 -->
     <div class="sidebar-footer">
+      <div class="sidebar-divider"></div>
       <div class="sidebar-user-card">
         <div class="sidebar-user-avatar">
           {{ auth.userName.charAt(0) || '?' }}
         </div>
         <div class="sidebar-user-info">
           <span class="sidebar-user-name">{{ auth.userName }}</span>
-          <span class="sidebar-user-role">{{ auth.isAdmin ? '管理员' : '专员' }}</span>
+          <span class="sidebar-user-role">{{ auth.isAdmin ? '管理员' : '招聘专员' }}</span>
         </div>
+        <button class="sidebar-logout" @click="auth.logout()" title="退出登录">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4m7 14l5-5-5-5m5 5H9"/>
+          </svg>
+        </button>
       </div>
     </div>
   </aside>
 </template>
+
+<script>
+/* SVG 图标（内联，避免 emoji） */
+const icons = {
+  dashboard: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>',
+  pipeline: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="5" rx="1"/><rect x="3" y="10" width="18" height="5" rx="1"/><rect x="3" y="17" width="18" height="5" rx="1"/></svg>',
+  candidates: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="7" r="4"/><path d="M3 21v-2a4 4 0 014-4h4a4 4 0 014 4v2"/><circle cx="17" cy="9" r="3"/><path d="M18 21v-2a3 3 0 00-3-3h-1"/></svg>',
+  reports: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>',
+  review: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>',
+  import: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4m7-10l5 5-5 5m5-5H3"/></svg>',
+  settings: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>',
+};
+
+function getIcon(name) {
+  return icons[name] || '';
+}
+</script>
 
 <style scoped>
 .sidebar {
@@ -82,100 +112,114 @@ function isActive(path) {
   left: 0;
   width: var(--sidebar-w);
   height: 100vh;
-  background: var(--gray-800);
-  color: #fff;
+  background: var(--bg-sidebar);
+  color: var(--gray-600);
   display: flex;
   flex-direction: column;
   z-index: 200;
-  overflow-y: auto;
+  border-right: 1px solid var(--gray-100);
 }
 
-/* 头部 */
+/* === 头部 === */
 .sidebar-header {
   display: flex;
   align-items: center;
-  gap: var(--spacing-md);
+  gap: var(--spacing-sm);
   padding: var(--spacing-lg) var(--spacing-md);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .sidebar-logo {
-  width: 40px;
-  height: 40px;
-  border-radius: var(--radius-sm);
-  background: var(--primary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
-  font-size: var(--font-size-md);
+  width: 36px;
+  height: 36px;
+  color: var(--primary);
   flex-shrink: 0;
+}
+
+.sidebar-logo svg {
+  width: 100%;
+  height: 100%;
 }
 
 .sidebar-brand {
   display: flex;
   flex-direction: column;
+  line-height: 1.2;
 }
 
 .sidebar-brand-name {
   font-size: var(--font-size-sm);
-  font-weight: 600;
+  font-weight: 700;
+  color: var(--gray-700);
+  letter-spacing: -0.01em;
 }
 
 .sidebar-brand-version {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--gray-300);
+  font-weight: 500;
 }
 
-/* 导航 */
+/* === 导航 === */
 .sidebar-nav {
   flex: 1;
-  padding: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-sm);
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
+  overflow-y: auto;
 }
 
 .sidebar-item {
   display: flex;
   align-items: center;
-  gap: var(--spacing-sm);
-  padding: 10px var(--spacing-md);
+  gap: 10px;
+  padding: 9px var(--spacing-md);
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
-  color: rgba(255, 255, 255, 0.65);
+  color: var(--gray-500);
   font-size: var(--font-size-base);
+  font-weight: 500;
   text-align: left;
   transition: all var(--transition);
   cursor: pointer;
   width: 100%;
+  font-family: inherit;
 }
 
 .sidebar-item:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: #fff;
+  background: var(--bg-sidebar-hover);
+  color: var(--gray-700);
 }
 
 .sidebar-item.active {
-  background: var(--primary);
-  color: #fff;
+  background: var(--bg-sidebar-active);
+  color: var(--primary);
+  font-weight: 600;
 }
 
 .sidebar-item-icon {
-  font-size: 18px;
-  width: 24px;
-  text-align: center;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
-.sidebar-item-title {
-  font-weight: 500;
+.sidebar-item-icon :deep(svg) {
+  display: block;
 }
 
-/* 底部用户 */
+/* === 底部 === */
 .sidebar-footer {
-  padding: var(--spacing-md);
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding: var(--spacing-sm) var(--spacing-md) var(--spacing-md);
+}
+
+.sidebar-divider {
+  height: 1px;
+  background: var(--gray-100);
+  margin-bottom: var(--spacing-sm);
 }
 
 .sidebar-user-card {
@@ -184,14 +228,14 @@ function isActive(path) {
   gap: var(--spacing-sm);
   padding: var(--spacing-sm);
   border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, 0.05);
 }
 
 .sidebar-user-avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background: var(--primary-light);
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  background: var(--primary);
+  color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -201,20 +245,39 @@ function isActive(path) {
 }
 
 .sidebar-user-info {
-  display: flex;
-  flex-direction: column;
+  flex: 1;
   min-width: 0;
+  line-height: 1.3;
 }
 
 .sidebar-user-name {
+  display: block;
   font-size: var(--font-size-sm);
   font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  color: var(--gray-700);
 }
 
 .sidebar-user-role {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--gray-400);
+}
+
+.sidebar-logout {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--gray-300);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.sidebar-logout:hover {
+  background: var(--danger-bg);
+  color: var(--danger);
 }
 </style>

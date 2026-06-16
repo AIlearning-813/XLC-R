@@ -12,15 +12,13 @@ const auth = useAuthStore();
     <Sidebar />
     <main class="app-main">
       <header class="app-topbar">
-        <div class="topbar-breadcrumb">
+        <div class="topbar-left">
           <span class="topbar-title">{{ $route.meta.title || '工作台' }}</span>
         </div>
-        <div class="topbar-actions">
-          <span class="topbar-role-badge" :class="auth.isAdmin ? 'badge-info' : ''">
-            {{ auth.isAdmin ? '管理员' : '招聘专员' }}
+        <div class="topbar-right">
+          <span class="topbar-role-badge" :class="{ admin: auth.isAdmin }">
+            {{ auth.isAdmin ? '管理员' : '专员' }}
           </span>
-          <span class="topbar-user">{{ auth.userName }}</span>
-          <button class="btn btn-ghost btn-sm" @click="auth.logout()">退出</button>
         </div>
       </header>
       <div class="app-content">
@@ -44,53 +42,55 @@ const auth = useAuthStore();
   min-height: 100vh;
 }
 
+/* === 顶栏 === */
 .app-topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px var(--spacing-lg);
-  background: var(--card-bg);
-  backdrop-filter: blur(10px);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.6);
+  padding: 14px var(--spacing-xl);
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--gray-100);
   position: sticky;
   top: 0;
   z-index: 100;
 }
 
-.topbar-breadcrumb {
+.topbar-left {
   display: flex;
   align-items: center;
 }
 
 .topbar-title {
-  font-size: var(--font-size-lg);
+  font-size: var(--font-size-md);
   font-weight: 600;
   color: var(--gray-700);
+  letter-spacing: -0.01em;
 }
 
-.topbar-actions {
+.topbar-right {
   display: flex;
   align-items: center;
-  gap: var(--spacing-md);
+  gap: var(--spacing-sm);
 }
 
 .topbar-role-badge {
-  padding: 2px 10px;
-  border-radius: 12px;
+  padding: 4px 12px;
+  border-radius: var(--radius-full);
   font-size: var(--font-size-xs);
   font-weight: 600;
-  background: var(--gray-100);
+  background: var(--gray-50);
   color: var(--gray-500);
 }
 
-.topbar-user {
-  font-size: var(--font-size-sm);
-  color: var(--gray-500);
+.topbar-role-badge.admin {
+  background: var(--primary-bg);
+  color: var(--primary);
 }
 
+/* === 内容区 === */
 .app-content {
   flex: 1;
-  padding: var(--spacing-lg);
-  overflow-y: auto;
+  padding: var(--spacing-xl);
 }
 </style>

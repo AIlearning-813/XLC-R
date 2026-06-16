@@ -1,4 +1,5 @@
 {
+  "runtime": "Nodejs20.19",
   "timeout": 300,
   "memorySize": 512,
   "triggers": [
