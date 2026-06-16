@@ -1,0 +1,9 @@
+{
+  "name": "resume-parser-proxy",
+  "version": "1.0.0",
+  "description": "新励成招聘系统 V2.0 — DeepSeek API 代理云函数（简历结构化解析）",
+  "main": "index.js",
+  "dependencies": {
+    "@cloudbase/node-sdk": "^3.4.0"
+  }
+}

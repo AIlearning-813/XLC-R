@@ -58,3 +58,65 @@ export const RESUME_SOURCES = ['email', 'manual', 'import'];
 
 // 解析置信度
 export const PARSE_CONFIDENCE_LEVELS = ['high', 'medium', 'low'];
+
+// ===== 阶段 2：简历录入常量 =====
+
+// 文件上传限制
+export const UPLOAD_MAX_SIZE = 20 * 1024 * 1024; // 单文件 20MB
+export const UPLOAD_MAX_TOTAL_SIZE = 100 * 1024 * 1024; // 合计 100MB
+
+// 允许的 MIME 类型白名单
+export const ALLOWED_MIME_TYPES = [
+  'application/pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // DOCX
+  'application/msword', // DOC
+  'text/plain',
+  'image/png',
+  'image/jpeg',
+  'image/bmp',
+  'image/tiff',
+  'image/webp',
+  'application/rtf', // 可能不标准
+  'text/rtf',
+  'text/html',
+  'application/zip',
+  'application/x-rar-compressed',
+  'application/vnd.rar',
+];
+
+// 允许的文件扩展名白名单（用于回退检测，MIME 不可靠时按扩展名判断）
+export const ALLOWED_EXTENSIONS = [
+  '.pdf', '.docx', '.doc', '.txt',
+  '.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif', '.webp',
+  '.rtf', '.html', '.htm',
+  '.zip', '.rar',
+];
+
+// 浏览器端可直接提取文本的格式（不需要 OCR）
+export const BROWSER_EXTRACTABLE_MIME = [
+  'application/pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'text/plain',
+  'text/rtf',
+  'application/rtf',
+  'text/html',
+];
+
+// 需要 OCR 的图片格式
+export const OCR_REQUIRED_MIME = [
+  'image/png',
+  'image/jpeg',
+  'image/bmp',
+  'image/tiff',
+  'image/webp',
+];
+
+// 重复检测匹配级别
+export const DUPLICATE_MATCH_LEVELS = {
+  EXACT: { level: 'exact', label: '文件完全相同', confidence: 1.0 },
+  HIGH: { level: 'high', label: '高置信度重复', confidence: 0.95 },
+  MEDIUM: { level: 'medium', label: '可能重复', confidence: 0.7 },
+};
+
+// 弱匹配所需的最低交叉维度数
+export const DUPLICATE_WEAK_MATCH_MIN_DIMENSIONS = 2;

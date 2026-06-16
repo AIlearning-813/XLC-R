@@ -27,6 +27,7 @@ function getIcon(name) {
 const menuItems = computed(() => {
   const items = [
     { path: '/dashboard', title: '工作台', icon: 'dashboard' },
+    { path: '/import/resume', title: '录入简历', icon: 'import' },
     { path: '/pipeline', title: '招聘看板', icon: 'pipeline' },
     { path: '/candidates', title: '候选人', icon: 'candidates' },
     { path: '/reports', title: '数据分析', icon: 'reports' },
@@ -35,7 +36,7 @@ const menuItems = computed(() => {
   if (auth.isAdmin) {
     items.push(
       { path: '/admin-review', title: '变更审核', icon: 'review' },
-      { path: '/import', title: '数据导入', icon: 'import' },
+      { path: '/import', title: '历史导入', icon: 'import' },
       { path: '/settings', title: '系统设置', icon: 'settings' },
     );
   }

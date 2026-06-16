@@ -45,10 +45,16 @@ const routes = [
     meta: { title: '系统设置', icon: 'settings', requireAdmin: true },
   },
   {
+    path: '/import/resume',
+    name: 'ResumeImport',
+    component: () => import('../views/ResumeImportPage.vue'),
+    meta: { title: '录入简历', icon: 'import' },
+  },
+  {
     path: '/import',
     name: 'Import',
     component: () => import('../views/ImportPage.vue'),
-    meta: { title: '数据导入', icon: 'import', requireAdmin: true },
+    meta: { title: '历史数据导入', icon: 'import', requireAdmin: true },
   },
   {
     path: '/admin-review',

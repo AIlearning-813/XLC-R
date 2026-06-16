@@ -1,8 +1,29 @@
 <script setup>
 /* 新励成招聘管理系统 V2.0 — 工作台 */
 
+import { ref, onMounted, computed } from 'vue';
 import { useAuthStore } from '../stores/useAuthStore';
+import cloudbase from '../services/cloudbase';
+
 const auth = useAuthStore();
+const db = cloudbase.db();
+
+// 解析统计（阶段 2 数据）
+const parseStats = ref({ pending: 0, total: 0 });
+
+const isAdmin = computed(() => auth.isAdmin);
+
+onMounted(async () => {
+  try {
+    // 尝试获取 ParseQueue 待处理数量
+    const pendingResult = await db.collection('ParseQueue')
+      .where({ status: 'pending' })
+      .count();
+    parseStats.value.pending = pendingResult.total || 0;
+  } catch {
+    // 集合可能尚未创建，静默
+  }
+});
 </script>
 
 <template>
@@ -33,9 +54,9 @@ const auth = useAuthStore();
         <div class="stat-hint">阶段 5 实现</div>
       </div>
       <div class="stat-card card">
-        <div class="stat-label">解析成功率</div>
-        <div class="stat-value">—</div>
-        <div class="stat-hint">阶段 5 实现</div>
+        <div class="stat-label">待解析简历</div>
+        <div class="stat-value">{{ parseStats.pending }}</div>
+        <div class="stat-hint">ParseQueue 队列</div>
       </div>
     </div>
 
@@ -44,6 +65,13 @@ const auth = useAuthStore();
       <h3>快捷操作</h3>
     </div>
     <div class="quick-grid">
+      <router-link to="/import/resume" class="quick-card card">
+        <span class="quick-icon q-import">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        </span>
+        <span class="quick-title">录入简历</span>
+        <span class="quick-desc">上传简历 · AI 解析</span>
+      </router-link>
       <router-link to="/pipeline" class="quick-card card">
         <span class="quick-icon">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="5" rx="1"/><rect x="3" y="10" width="18" height="5" rx="1"/><rect x="3" y="17" width="18" height="5" rx="1"/></svg>

@@ -1,0 +1,9 @@
+{
+  "name": "parse-queue-processor",
+  "version": "1.0.0",
+  "description": "新励成招聘系统 V2.0 — ParseQueue 消费云函数（文件解析 → 创建 Candidate）",
+  "main": "index.js",
+  "dependencies": {
+    "@cloudbase/node-sdk": "^3.4.0"
+  }
+}
