@@ -1,8 +1,5 @@
 {
   "timeout": 30,
   "runtime": "Nodejs20.19",
-  "memorySize": 256,
-  "envVariables": {
-    "DEEPSEEK_API_KEY": ""
-  }
+  "memorySize": 256
 }
