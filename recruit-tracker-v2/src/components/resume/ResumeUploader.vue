@@ -271,7 +271,7 @@ defineExpose({ setExtracting, addFiles });
 .uploader-dropzone {
   border: 2px dashed var(--gray-200);
   border-radius: var(--radius);
-  padding: var(--spacing-2xl);
+  padding: var(--spacing-xl) var(--spacing-lg);
   text-align: center;
   cursor: pointer;
   transition: all var(--transition);
@@ -296,9 +296,9 @@ defineExpose({ setExtracting, addFiles });
 
 /* === 上传图标 === */
 .uploader-icon {
-  width: 56px;
-  height: 56px;
-  margin: 0 auto var(--spacing-md);
+  width: 44px;
+  height: 44px;
+  margin: 0 auto var(--spacing-sm);
   color: var(--gray-300);
   transition: color var(--transition);
 }

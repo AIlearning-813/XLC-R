@@ -401,32 +401,34 @@ function onCancel() {
   margin: 0 auto;
 }
 
+/* === 页面头部 === */
 .page-header {
-  margin-bottom: var(--spacing-xl);
+  margin-bottom: var(--spacing-lg);
 }
 
 .page-title {
   font-size: var(--font-size-2xl);
   font-weight: 700;
-  color: var(--gray-700);
+  color: var(--gray-800);
   letter-spacing: -0.02em;
 }
 
 .page-subtitle {
   font-size: var(--font-size-base);
   color: var(--gray-400);
-  margin-top: var(--spacing-xs);
+  margin-top: 2px;
 }
 
 /* === 步骤指示器 === */
 .steps-indicator {
   display: flex;
   align-items: center;
-  margin-bottom: var(--spacing-2xl);
-  padding: var(--spacing-lg);
+  margin-bottom: var(--spacing-lg);
+  padding: var(--spacing-md) var(--spacing-lg);
   background: var(--card-bg, #fff);
   border-radius: var(--radius);
   border: 1px solid var(--gray-100);
+  box-shadow: var(--shadow);
 }
 
 .step-item {
@@ -450,8 +452,8 @@ function onCancel() {
 }
 
 .step-dot {
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -498,14 +500,19 @@ function onCancel() {
 
 /* === 步骤内容 === */
 .step-content {
-  min-height: 300px;
+  min-height: 200px;
 }
 
 .manual-entry-hint {
-  margin-top: var(--spacing-xl);
-  padding: var(--spacing-md);
-  background: var(--gray-50);
+  margin-top: var(--spacing-lg);
+  padding: var(--spacing-md) var(--spacing-lg);
+  background: var(--warning-bg);
   border-radius: var(--radius-sm);
   text-align: center;
+  border: 1px solid rgba(212, 162, 78, 0.15);
+}
+
+.manual-entry-hint .text-muted {
+  margin-bottom: var(--spacing-sm);
 }
 </style>
