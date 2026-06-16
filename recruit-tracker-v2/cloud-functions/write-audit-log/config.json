@@ -1,0 +1,5 @@
+{
+  "timeout": 10,
+  "runtime": "Nodejs20.19",
+  "memorySize": 128
+}

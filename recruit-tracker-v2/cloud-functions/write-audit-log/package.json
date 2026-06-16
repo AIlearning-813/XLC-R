@@ -1,0 +1,6 @@
+{
+  "name": "write-audit-log",
+  "dependencies": {
+    "@cloudbase/node-sdk": "latest"
+  }
+}

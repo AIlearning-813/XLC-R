@@ -235,9 +235,9 @@ async function onCreateCandidate(data) {
       }
     }
 
-    // 5. 写入 AuditLog
+    // 5. 写入 AuditLog（通过云函数，避免前端安全规则限制）
     try {
-      await db.collection('AuditLog').add({
+      await cloudbase.callFunction('write-audit-log', {
         action: 'candidate_created',
         entityType: 'Candidate',
         entityIds: [candidateId],
@@ -247,7 +247,6 @@ async function onCreateCandidate(data) {
           parsedFields: Object.keys(parseResult.value?.basic_info || {}),
         },
         operator: auth.currentUser?.uid || '',
-        timestamp: new Date(),
       });
     } catch (err) {
       console.warn('[ResumeImport] AuditLog 写入失败:', err.message);
