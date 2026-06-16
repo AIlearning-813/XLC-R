@@ -1,0 +1,9 @@
+{
+  "name": "health-monitor",
+  "version": "1.0.0",
+  "description": "新励成招聘系统 — 健康监控云函数",
+  "main": "index.js",
+  "dependencies": {
+    "@cloudbase/node-sdk": "^3.4.0"
+  }
+}

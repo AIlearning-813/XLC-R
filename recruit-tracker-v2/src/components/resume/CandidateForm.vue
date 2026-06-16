@@ -169,8 +169,11 @@ function handleSubmit() {
             </template>
           </option>
         </select>
-        <span class="form-hint">
-          如果未显示目标岗位，请先在"系统设置"中创建岗位。
+        <span v-if="jobs.length === 0 && !jobsLoading" class="form-hint form-hint-warning">
+          ⚠️ 系统中暂无活跃岗位，请联系管理员创建岗位或运行初始化脚本（scripts/seed-data.js）。
+        </span>
+        <span v-else class="form-hint">
+          如果未显示目标岗位，请联系管理员在"系统设置"中添加。
         </span>
       </div>
     </section>
@@ -301,6 +304,11 @@ function handleSubmit() {
   font-size: var(--font-size-xs);
   color: var(--gray-300);
   margin-top: 4px;
+}
+
+.form-hint-warning {
+  color: var(--warning, #d4a24e);
+  font-weight: 500;
 }
 
 /* === 重复检测 === */

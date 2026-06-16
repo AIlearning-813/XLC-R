@@ -1,0 +1,12 @@
+{
+  "timeout": 300,
+  "runtime": "Nodejs20.19",
+  "memorySize": 512,
+  "triggers": [
+    {
+      "name": "daily-backup",
+      "type": "timer",
+      "config": "0 0 3 * * * *"
+    }
+  ]
+}

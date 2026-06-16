@@ -172,7 +172,11 @@ async function onCreateCandidate(data) {
 
     // 1. 上传文件到云存储
     let fileId = null;
+    let fileStatus = 'none'; // 'none' | 'uploading' | 'uploaded' | 'failed'
+    let uploadErrorMsg = '';
+
     if (files.value.length > 0 && storage) {
+      fileStatus = 'uploading';
       try {
         const file = files.value[0];
         const cloudPath = `resumes/${Date.now()}_${file.name}`;
@@ -181,9 +185,12 @@ async function onCreateCandidate(data) {
           filePath: file, // CloudBase JS SDK 浏览器端接受 File 对象
         });
         fileId = uploadResult.fileID;
+        fileStatus = 'uploaded';
       } catch (uploadErr) {
         console.error('[ResumeImport] 文件上传失败:', uploadErr);
-        // 文件上传失败不阻塞候选创建，继续（文件已在内存中）
+        fileStatus = 'failed';
+        uploadErrorMsg = uploadErr.message || '未知上传错误';
+        // 文件上传失败不阻塞候选创建，但记录状态供后续补救
       }
     }
 
@@ -197,6 +204,7 @@ async function onCreateCandidate(data) {
       fileHash: fileHash.value,
       fileId: fileId || '',
       fileName: files.value[0]?.name || '',
+      fileStatus, // 🆕 追踪文件上传状态：'none' | 'uploaded' | 'failed'
       createdBy: auth.currentUser?.uid || '',
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -252,8 +260,15 @@ async function onCreateCandidate(data) {
       console.warn('[ResumeImport] AuditLog 写入失败:', err.message);
     }
 
-    // 成功 → Toast + 跳转
-    alert(`候选人 "${candidateData.name || '未知'}" 创建成功！`);
+    // 成功 → 区分文件上传状态给出不同提示
+    const candidateName = candidateData.name || '未知';
+    if (fileStatus === 'failed') {
+      alert(`候选人 "${candidateName}" 创建成功，但简历文件上传失败（${uploadErrorMsg}）。\n\n请在候选人详情页重新上传简历文件。`);
+    } else if (fileStatus === 'uploaded') {
+      alert(`候选人 "${candidateName}" 创建成功，简历文件已保存。`);
+    } else {
+      alert(`候选人 "${candidateName}" 创建成功！`);
+    }
     router.push(`/candidates/${candidateId}`);
   } catch (err) {
     console.error('[ResumeImport] 创建候选人失败:', err);
