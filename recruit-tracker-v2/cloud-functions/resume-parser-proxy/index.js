@@ -132,14 +132,14 @@ exports.main = async (event, context) => {
         'Authorization': `Bearer ${DEEPSEEK_API_KEY}`,
       },
       body: JSON.stringify({
-        model: 'deepseek-v4-flash',
+        model: 'deepseek-chat',
         temperature: 0,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: resumeText },
         ],
         tools: [EXTRACT_RESUME_TOOL],
-        tool_choice: { type: 'function', function: { name: 'extract_resume' } },
+        tool_choice: 'required',
       }),
       signal: AbortSignal.timeout(25000), // 25 秒超时（云函数 30s 超时留 5s buffer）
     });
