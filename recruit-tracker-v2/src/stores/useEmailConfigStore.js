@@ -13,11 +13,13 @@ import {
   testImapConnection,
   triggerManualScan,
 } from '../services/email-config';
+import { useAuthStore } from './useAuthStore';
 import { isCryptoReady } from '../services/crypto-browser';
 import { useToast } from '../composables/useToast';
 
 export const useEmailConfigStore = defineStore('emailConfig', () => {
   const toast = useToast();
+  const auth = useAuthStore();
 
   // 状态
   const configs = ref([]);
@@ -38,7 +40,8 @@ export const useEmailConfigStore = defineStore('emailConfig', () => {
     loading.value = true;
     error.value = '';
     try {
-      configs.value = await getEmailConfigs();
+      const uid = auth.currentUser?.uid;
+      configs.value = uid ? await getEmailConfigs(uid) : [];
     } catch (err) {
       error.value = err.message || '获取邮箱配置失败';
       toast.error(error.value);

@@ -12,16 +12,19 @@ const db = cloudbase.db;
 
 /**
  * 获取当前用户的所有邮箱配置
+ * @param {string} userId - 当前用户的 uid
  * @returns {Promise<Array>}
  */
-export async function getEmailConfigs() {
+export async function getEmailConfigs(userId) {
   try {
-    const result = await db().collection('EmailConfig').get();
+    const result = await db()
+      .collection('EmailConfig')
+      .where({ userId })
+      .get();
     return result.data || [];
   } catch (err) {
-    // 403 = 安全规则未部署，静默返回空数组
     if (err.code === 'PERMISSION_DENIED' || err.message?.includes('403')) {
-      console.warn('⚠️ EmailConfig 集合安全规则未部署，请在 CloudBase 控制台创建集合并设置权限');
+      console.warn('⚠️ EmailConfig 权限不足，请检查安全规则');
       return [];
     }
     throw err;
