@@ -119,8 +119,7 @@ exports.main = async (event, context) => {
 
   try {
     // 构建增强 System Prompt（含修正案例库 few-shot examples）
-    const correctionCollection = db.collection('ParseCorrectionBank');
-    const systemPrompt = await buildSystemPrompt(correctionCollection, BASE_SYSTEM_PROMPT);
+    const systemPrompt = await buildSystemPrompt(db, BASE_SYSTEM_PROMPT);
 
     console.log(`[resume-parser-proxy] 开始解析，文本长度: ${resumeText.length}`);
 

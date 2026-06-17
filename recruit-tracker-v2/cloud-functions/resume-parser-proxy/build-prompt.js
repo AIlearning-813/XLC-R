@@ -8,15 +8,16 @@
 
 /**
  * 构建增强 System Prompt
- * @param {Object} collection - CloudBase 数据库集合引用 (ParseCorrectionBank)
+ * @param {Object} db - CloudBase 数据库实例
  * @param {string} basePrompt - 基础 System Prompt
  * @returns {Promise<string>} 增强后的 System Prompt
  */
-async function buildSystemPrompt(collection, basePrompt) {
+async function buildSystemPrompt(db, basePrompt) {
   try {
+    const collection = db.collection('ParseCorrectionBank');
     const { data: stats } = await collection
       .where({
-        correctionCount: require('@cloudbase/node-sdk').db.command.gte(10),
+        correctionCount: db.command.gte(10),
       })
       .orderBy('correctionCount', 'desc')
       .limit(5)
