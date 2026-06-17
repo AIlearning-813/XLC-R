@@ -8,11 +8,8 @@
     "imapflow": "^1.0.0",
     "mammoth": "^1.12.0",
     "pdfjs-dist": "^6.0.227",
-    "sharp": "^0.33.0",
     "adm-zip": "^0.5.0",
-    "node-unrar-js": "^1.0.0",
-    "word-extractor": "^1.0.0",
     "rtf-parser": "^1.0.0",
-    "node-fetch": "^3.0.0"
+    "iconv-lite": "^0.6.3"
   }
 }

@@ -75,42 +75,75 @@ export async function createEmailConfig(config) {
 }
 
 /**
- * 更新邮箱配置
+ * 更新邮箱配置（通过云函数，绕过前端直接操作数据库的权限问题）
  * @param {string} id - 配置 ID
  * @param {object} updates - 要更新的字段（如果包含 imapPassword，需先加密）
  * @returns {Promise<void>}
  */
 export async function updateEmailConfig(id, updates) {
-  const updateData = { ...updates, updatedAt: new Date() };
+  const updateData = { ...updates };
 
   // 如果更新密码，先加密
   if (updateData.imapPassword && updateData.imapPassword.length < 50) {
-    // 长度 < 50 说明是明文密码，需要加密
     updateData.imapPassword = await encryptPassword(updateData.imapPassword);
   }
 
-  await db().collection('EmailConfig').doc(id).update(updateData);
+  const result = await cloudbase.callFunction('email-scanner', {
+    action: 'updateConfig',
+    id,
+    updates: updateData,
+  });
+
+  if (!result || !result.success) {
+    throw new Error(result?.message || '更新邮箱配置失败');
+  }
 }
 
 /**
- * 删除邮箱配置
+ * 删除邮箱配置（通过云函数，绕过前端直接操作数据库的权限问题）
  * @param {string} id
  * @returns {Promise<void>}
  */
 export async function deleteEmailConfig(id) {
-  await db().collection('EmailConfig').doc(id).remove();
+  const result = await cloudbase.callFunction('email-scanner', {
+    action: 'deleteConfig',
+    id,
+  });
+
+  if (!result || !result.success) {
+    throw new Error(result?.message || '删除邮箱配置失败');
+  }
 }
 
 /**
- * 更新邮箱启用状态
+ * 诊断邮箱：测试连接 + 获取最近发件人列表
+ * @param {object} config - { email, imapHost, imapPort, imapUser, imapPassword(明文) }
+ * @returns {Promise<object>}
+ */
+export async function diagnoseEmail(config) {
+  const encryptedPassword = await encryptPassword(config.imapPassword);
+
+  const result = await cloudbase.callFunction('email-scanner', {
+    action: 'diagnose',
+    config: {
+      email: config.email,
+      imapHost: config.imapHost,
+      imapPort: config.imapPort,
+      imapUser: config.imapUser || config.email,
+      imapPassword: encryptedPassword,
+    },
+  });
+
+  return result || { success: false, message: '诊断失败' };
+}
+
+/**
+ * 更新邮箱启用状态（通过云函数）
  * @param {string} id
  * @param {boolean} enabled
  */
 export async function toggleEmailConfig(id, enabled) {
-  await db().collection('EmailConfig').doc(id).update({
-    enabled,
-    updatedAt: new Date(),
-  });
+  await updateEmailConfig(id, { enabled });
 }
 
 /**
@@ -122,8 +155,7 @@ export async function testImapConnection(config) {
   // 加密密码后传给云函数
   const encryptedPassword = await encryptPassword(config.imapPassword);
 
-  const cloudbaseModule = await import('./cloudbase');
-  const result = await cloudbaseModule.default.callFunction('email-scanner', {
+  const result = await cloudbase.callFunction('email-scanner', {
     action: 'test',
     config: {
       email: config.email,
@@ -134,7 +166,7 @@ export async function testImapConnection(config) {
     },
   });
 
-  return result.result || { success: false, message: '未知错误' };
+  return result || { success: false, message: '未知错误' };
 }
 
 /**
@@ -142,9 +174,8 @@ export async function testImapConnection(config) {
  * @returns {Promise<object>}
  */
 export async function triggerManualScan() {
-  const cloudbaseModule = await import('./cloudbase');
-  const result = await cloudbaseModule.default.callFunction('email-scanner', {
+  const result = await cloudbase.callFunction('email-scanner', {
     action: 'scan',
   });
-  return result.result || { success: false };
+  return result || { success: false };
 }

@@ -126,10 +126,10 @@ export const useEmailConfigStore = defineStore('emailConfig', () => {
       const result = await triggerManualScan();
       if (result.success) {
         toast.success(
-          `扫描完成：发现 ${result.summary?.emailsFound || 0} 封邮件，新增 ${result.summary?.parseQueueCreated || 0} 份简历`
+          result.message || `扫描完成：发现 ${result.totalEmails || 0} 封邮件，新增 ${result.newResumes || 0} 份简历`
         );
       } else {
-        toast.error(result.error || '扫描失败');
+        toast.error(result.message || '扫描失败');
       }
       return result;
     } catch (err) {

@@ -1,19 +1,20 @@
 /**
  * format-router.js — 简历文件格式识别与文本提取
  *
- * 支持 15 种文件格式，按 MIME 类型 → 扩展名两级匹配，自动分发到对应提取策略。
+ * 支持的文件格式，按 MIME 类型 → 扩展名两级匹配，自动分发到对应提取策略。
  * 同时部署于 email-scanner 和 parse-queue-processor 两个云函数中。
  *
+ * 注意：仅使用纯 JS 依赖（无原生 C++ 模块），确保 CloudBase SCF 兼容。
+ *
  * 格式覆盖：
- *   PDF, DOCX, DOC, PNG, JPG/JPEG, BMP, TIFF, WebP,
- *   TXT, RTF, HTML, ZIP, RAR, Apple Pages
+ *   PDF, DOCX, PNG, JPG/JPEG, BMP, TIFF, WebP,
+ *   TXT, RTF, HTML, ZIP, Apple Pages
  */
 
-const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-// ===== 懒加载依赖（仅在实际使用时 require）=====
+// ===== 懒加载依赖（仅在实际使用时 require，纯 JS 库）=====
 
 let pdfjsLib = null;
 function getPdfJs() {
@@ -29,14 +30,6 @@ function getMammoth() {
     mammoth = require('mammoth');
   }
   return mammoth;
-}
-
-let sharp = null;
-function getSharp() {
-  if (!sharp) {
-    sharp = require('sharp');
-  }
-  return sharp;
 }
 
 let AdmZip = null;
@@ -68,7 +61,6 @@ const MIME_TO_FORMAT = {
   'application/x-iwork-pages-sffpages': 'pages',
 };
 
-// 扩展名 → 格式映射（MIME 不可靠时的降级方案）
 const EXT_TO_FORMAT = {
   '.pdf': 'pdf',
   '.docx': 'docx',
@@ -89,75 +81,48 @@ const EXT_TO_FORMAT = {
   '.pages': 'pages',
 };
 
-// 压缩包内可提取的格式（递归处理）
 const ARCHIVE_EXTRACTABLE = new Set([
-  'pdf', 'docx', 'doc', 'png', 'jpg', 'bmp', 'tiff', 'webp', 'txt', 'rtf', 'html',
+  'pdf', 'docx', 'png', 'jpg', 'bmp', 'tiff', 'webp', 'txt', 'rtf', 'html',
 ]);
 
 // ===== 编码检测 =====
 
-/**
- * 检测文本 buffer 的编码（UTF-8 / GBK / GB2312）
- * 简单启发式：先尝试 UTF-8 解码，失败则尝试 GBK
- */
 function detectAndDecode(buffer) {
-  // 检查 BOM
   if (buffer.length >= 3 && buffer[0] === 0xEF && buffer[1] === 0xBB && buffer[2] === 0xBF) {
     return buffer.subarray(3).toString('utf-8');
   }
-
-  // 先尝试 UTF-8
   try {
     const text = buffer.toString('utf-8');
-    // 检查是否有替换字符（�），如果有说明 UTF-8 解码有问题
-    if (!text.includes('�')) {
-      return text;
-    }
-  } catch {
-    // UTF-8 解码失败
-  }
+    if (!text.includes('�')) return text;
+  } catch { /* fall through */ }
 
-  // 降级到 GBK
   try {
     const iconv = require('iconv-lite');
     return iconv.decode(buffer, 'gbk');
   } catch {
-    // 如果 iconv-lite 不可用，返回 UTF-8 结果
     return buffer.toString('utf-8');
   }
 }
 
 // ===== 各格式提取策略 =====
 
-/**
- * 提取 PDF 文本
- */
 async function extractPdf(buffer) {
   const pdfjs = getPdfJs();
   const data = new Uint8Array(buffer);
   const doc = await pdfjs.getDocument({ data, disableAutoFetch: true }).promise;
-
   const pages = [];
   for (let i = 1; i <= doc.numPages; i++) {
     const page = await doc.getPage(i);
     const content = await page.getTextContent();
-    const pageText = content.items.map((item) => item.str).join(' ');
-    pages.push(pageText);
+    pages.push(content.items.map((item) => item.str).join(' '));
   }
-
   const fullText = pages.join('\n').trim();
-
-  // 检测是否为扫描件（文本太少）
   if (fullText.length < 20) {
     throw new Error('PDF 文本量过少，可能是扫描件，请使用 OCR 处理');
   }
-
   return fullText;
 }
 
-/**
- * 提取 DOCX 文本
- */
 async function extractDocx(buffer) {
   const mammothInstance = getMammoth();
   const result = await mammothInstance.extractRawText({ buffer });
@@ -165,52 +130,19 @@ async function extractDocx(buffer) {
 }
 
 /**
- * 提取 DOC 文本（使用 word-extractor）
- */
-async function extractDoc(buffer) {
-  try {
-    const WordExtractor = require('word-extractor');
-    const extractor = new WordExtractor();
-    const doc = await extractor.extract(buffer);
-    return doc.getBody().trim();
-  } catch (err) {
-    throw new Error(`DOC 文件提取失败：${err.message}`);
-  }
-}
-
-/**
- * 提取图片文本（通过腾讯云 OCR）
- * @param {Buffer} buffer - 图片 buffer
- * @param {string} format - 图片格式 (png/jpg/bmp/tiff/webp)
+ * 提取图片文本（通过腾讯云 OCR，不做本地预处理）
+ * sharp 是原生 C++ 模块，CloudBase SCF 不兼容，直接传原图给 OCR
  */
 async function extractImage(buffer, format) {
-  // 预处理：使用 sharp 统一转为 PNG（优化 OCR 识别率）
-  let processedBuffer = buffer;
-  try {
-    const sharpInstance = getSharp();
-    processedBuffer = await sharpInstance(buffer)
-      .resize(2000, 2000, { fit: 'inside', withoutEnlargement: true })
-      .png()
-      .toBuffer();
-  } catch (sharpErr) {
-    // sharp 处理失败时尝试直接用原图
-    console.warn('[format-router] sharp 预处理失败，使用原图:', sharpErr.message);
-    processedBuffer = buffer;
-  }
-
-  // 调用腾讯云 OCR
-  return callTencentOCR(processedBuffer);
+  return callTencentOCR(buffer);
 }
 
-/**
- * 提取纯文本（自动编码检测）
- */
 function extractText(buffer) {
   return detectAndDecode(buffer);
 }
 
 /**
- * 提取 RTF 文本
+ * 提取 RTF 文本（纯 JS rtf-parser）
  */
 async function extractRtf(buffer) {
   try {
@@ -218,7 +150,6 @@ async function extractRtf(buffer) {
     return new Promise((resolve, reject) => {
       rtfParser.string(buffer, (err, doc) => {
         if (err) return reject(err);
-        // 递归提取所有文本段落
         function extractParagraphs(node) {
           if (typeof node === 'string') return node;
           if (Array.isArray(node)) return node.map(extractParagraphs).join('\n');
@@ -233,12 +164,8 @@ async function extractRtf(buffer) {
   }
 }
 
-/**
- * 提取 HTML 文本（去除标签）
- */
 function extractHtml(buffer) {
   const html = detectAndDecode(buffer);
-  // 简单去除 HTML 标签
   return html
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
@@ -252,29 +179,18 @@ function extractHtml(buffer) {
     .trim();
 }
 
-/**
- * 提取 ZIP 压缩包文本（递归处理）
- */
 async function extractZip(buffer) {
   const AdmZipClass = getAdmZip();
   const zip = new AdmZipClass(buffer);
   const entries = zip.getEntries();
-
   const results = [];
-
   for (const entry of entries) {
     if (entry.isDirectory) continue;
-
     const entryName = entry.entryName;
     const ext = path.extname(entryName).toLowerCase();
     const format = EXT_TO_FORMAT[ext];
-
-    // 跳过不支持的格式和非简历文件
     if (!format || !ARCHIVE_EXTRACTABLE.has(format)) continue;
-
-    // 跳过明显的系统文件
     if (entryName.startsWith('__MACOSX') || entryName.startsWith('.')) continue;
-
     try {
       const entryBuffer = entry.getData();
       const result = await route(entryBuffer, entryName, null);
@@ -285,85 +201,26 @@ async function extractZip(buffer) {
       console.warn(`[format-router] ZIP 内文件 "${entryName}" 提取失败:`, err.message);
     }
   }
-
-  // 合并所有文本
-  const combinedText = results
-    .map((r) => `--- ${r.fileName} (${r.format}) ---\n${r.text}`)
-    .join('\n\n');
-
-  return combinedText || '';
+  return results.map((r) => `--- ${r.fileName} (${r.format}) ---\n${r.text}`).join('\n\n') || '';
 }
 
-/**
- * 提取 RAR 压缩包文本
- */
-async function extractRar(buffer) {
-  try {
-    const unrar = require('node-unrar-js');
-    const extractor = await unrar.createExtractorFromData({ data: buffer });
-    const extracted = extractor.extractAll();
-
-    if (!extracted || !extracted.files) {
-      return '';
-    }
-
-    const results = [];
-    for (const file of extracted.files) {
-      if (file.fileHeader.flags.directory) continue;
-
-      const ext = path.extname(file.fileHeader.name).toLowerCase();
-      const format = EXT_TO_FORMAT[ext];
-      if (!format || !ARCHIVE_EXTRACTABLE.has(format)) continue;
-
-      try {
-        const fileBuffer = Buffer.from(file.extraction);
-        const result = await route(fileBuffer, file.fileHeader.name, null);
-        if (result.text) {
-          results.push({ text: result.text, fileName: file.fileHeader.name, format: result.format });
-        }
-      } catch (err) {
-        console.warn(`[format-router] RAR 内文件 "${file.fileHeader.name}" 提取失败:`, err.message);
-      }
-    }
-
-    return results.map((r) => `--- ${r.fileName} (${r.format}) ---\n${r.text}`).join('\n\n');
-  } catch (err) {
-    throw new Error(`RAR 文件提取失败：${err.message}`);
-  }
-}
-
-/**
- * 提取 Apple Pages 文本（.pages 本质是 ZIP）
- */
 async function extractPages(buffer) {
-  // .pages 文件是 ZIP 格式，内含 preview.pdf 或 index.xml
   const AdmZipClass = getAdmZip();
   const zip = new AdmZipClass(buffer);
-
-  // 优先尝试提取 preview.pdf
   const previewEntry = zip.getEntry('preview.pdf');
   if (previewEntry) {
-    const pdfBuffer = previewEntry.getData();
-    return extractPdf(pdfBuffer);
+    return extractPdf(previewEntry.getData());
   }
-
-  // 降级：提取 index.xml 中的文本
   const indexEntry = zip.getEntry('index.xml');
   if (indexEntry) {
-    const xmlBuffer = indexEntry.getData();
-    const xml = xmlBuffer.toString('utf-8');
-    // 简单去除 XML 标签提取文本
+    const xml = indexEntry.getData().toString('utf-8');
     return xml.replace(/<[^>]+>/g, ' ').replace(/\s{2,}/g, '\n').trim();
   }
-
   throw new Error('Pages 文件中未找到可提取的内容');
 }
 
-// ===== 腾讯云 OCR 调用 =====
+// ===== 腾讯云 OCR 调用（TC3-HMAC-SHA256 签名，纯 JS）=====
 
-/**
- * 调用腾讯云通用印刷体 OCR API（TC3-HMAC-SHA256 签名）
- */
 async function callTencentOCR(imageBuffer) {
   const secretId = process.env.TENCENT_SECRET_ID || '';
   const secretKey = process.env.TENCENT_SECRET_KEY || '';
@@ -372,7 +229,6 @@ async function callTencentOCR(imageBuffer) {
     throw new Error('OCR 服务未配置：请设置 TENCENT_SECRET_ID 和 TENCENT_SECRET_KEY 环境变量');
   }
 
-  // Base64 编码图片（不超过 7MB）
   const imageBase64 = imageBuffer.toString('base64');
   if (imageBase64.length > 7 * 1024 * 1024) {
     throw new Error('图片过大，OCR 限制 7MB');
@@ -380,25 +236,16 @@ async function callTencentOCR(imageBuffer) {
 
   const action = 'GeneralBasicOCR';
   const version = '2018-11-19';
-  const region = 'ap-guangzhou';
   const service = 'ocr';
   const host = 'ocr.tencentcloudapi.com';
   const timestamp = Math.floor(Date.now() / 1000);
   const date = new Date(timestamp * 1000).toISOString().slice(0, 10);
 
-  // 构建请求体
-  const payload = JSON.stringify({
-    ImageBase64: imageBase64,
-    LanguageType: 'zh',
-  });
-
-  // TC3-HMAC-SHA256 签名
+  const payload = JSON.stringify({ ImageBase64: imageBase64, LanguageType: 'zh' });
   const hashedPayload = crypto.createHash('sha256').update(payload).digest('hex');
 
   const canonicalRequest = [
-    'POST',
-    '/',
-    '',
+    'POST', '/', '',
     `content-type:application/json; charset=utf-8\nhost:${host}\n`,
     'content-type;host',
     hashedPayload,
@@ -406,14 +253,8 @@ async function callTencentOCR(imageBuffer) {
 
   const hashedCanonicalRequest = crypto.createHash('sha256').update(canonicalRequest).digest('hex');
   const credentialScope = `${date}/${service}/tc3_request`;
-  const stringToSign = [
-    'TC3-HMAC-SHA256',
-    timestamp,
-    credentialScope,
-    hashedCanonicalRequest,
-  ].join('\n');
+  const stringToSign = ['TC3-HMAC-SHA256', timestamp, credentialScope, hashedCanonicalRequest].join('\n');
 
-  // 派生签名密钥
   const kDate = crypto.createHmac('sha256', `TC3${secretKey}`).update(date).digest();
   const kService = crypto.createHmac('sha256', kDate).update(service).digest();
   const kSigning = crypto.createHmac('sha256', kService).update('tc3_request').digest();
@@ -421,36 +262,44 @@ async function callTencentOCR(imageBuffer) {
 
   const authorization = `TC3-HMAC-SHA256 Credential=${secretId}/${credentialScope}, SignedHeaders=content-type;host, Signature=${signature}`;
 
-  // 发送请求（使用 Node.js 内置 https 模块）
+  // 使用 Node.js 内置 https 模块发请求（不依赖 node-fetch）
   const https = require('https');
-  const fetch = require('node-fetch');
-
-  const response = await fetch(`https://${host}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json; charset=utf-8',
-      Host: host,
-      'X-TC-Action': action,
-      'X-TC-Version': version,
-      'X-TC-Timestamp': timestamp,
-      'X-TC-Region': region,
-      Authorization: authorization,
-    },
-    body: payload,
+  const response = await new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: host,
+      port: 443,
+      path: '/',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Host': host,
+        'X-TC-Action': action,
+        'X-TC-Version': version,
+        'X-TC-Timestamp': timestamp,
+        'X-TC-Region': 'ap-guangzhou',
+        'Authorization': authorization,
+      },
+    }, (res) => {
+      let body = '';
+      res.on('data', (chunk) => body += chunk);
+      res.on('end', () => {
+        try {
+          resolve(JSON.parse(body));
+        } catch (e) {
+          reject(new Error(`OCR 响应解析失败: ${body.slice(0, 200)}`));
+        }
+      });
+    });
+    req.on('error', reject);
+    req.write(payload);
+    req.end();
   });
 
-  if (!response.ok) {
-    throw new Error(`OCR API 请求失败：HTTP ${response.status}`);
+  if (response.Response.Error) {
+    throw new Error(`OCR 识别失败：${response.Response.Error.Code} - ${response.Response.Error.Message}`);
   }
 
-  const result = await response.json();
-
-  if (result.Response.Error) {
-    throw new Error(`OCR 识别失败：${result.Response.Error.Code} - ${result.Response.Error.Message}`);
-  }
-
-  // 提取识别文本
-  const textDetections = result.Response.TextDetections || [];
+  const textDetections = response.Response.TextDetections || [];
   return textDetections.map((item) => item.DetectedText).join('\n');
 }
 
@@ -469,10 +318,7 @@ async function route(buffer, fileName, mimeType) {
     throw new Error('文件内容为空');
   }
 
-  // 第 1 级：MIME 类型匹配
   let format = mimeType ? MIME_TO_FORMAT[mimeType] : null;
-
-  // 第 2 级：扩展名降级匹配
   if (!format && fileName) {
     const ext = path.extname(fileName).toLowerCase();
     format = EXT_TO_FORMAT[ext];
@@ -482,44 +328,25 @@ async function route(buffer, fileName, mimeType) {
     throw new Error(`不支持的文件格式：${fileName || '未知'}（MIME: ${mimeType || '未知'}）`);
   }
 
-  // 分发到对应提取策略
-  let text = '';
+  // 不支持的原生依赖格式：明确提示
+  if (format === 'doc') {
+    throw new Error('DOC 格式暂不支持（需原生依赖），请转换为 DOCX 或 PDF 后重试');
+  }
+  if (format === 'rar') {
+    throw new Error('RAR 格式暂不支持（需原生依赖），请解压为 ZIP 后重试');
+  }
 
+  let text = '';
   switch (format) {
-    case 'pdf':
-      text = await extractPdf(buffer);
-      break;
-    case 'docx':
-      text = await extractDocx(buffer);
-      break;
-    case 'doc':
-      text = await extractDoc(buffer);
-      break;
-    case 'png':
-    case 'jpg':
-    case 'bmp':
-    case 'tiff':
-    case 'webp':
-      text = await extractImage(buffer, format);
-      break;
-    case 'txt':
-      text = extractText(buffer);
-      break;
-    case 'rtf':
-      text = await extractRtf(buffer);
-      break;
-    case 'html':
-      text = extractHtml(buffer);
-      break;
-    case 'zip':
-      text = await extractZip(buffer);
-      break;
-    case 'rar':
-      text = await extractRar(buffer);
-      break;
-    case 'pages':
-      text = await extractPages(buffer);
-      break;
+    case 'pdf': text = await extractPdf(buffer); break;
+    case 'docx': text = await extractDocx(buffer); break;
+    case 'png': case 'jpg': case 'bmp': case 'tiff': case 'webp':
+      text = await extractImage(buffer, format); break;
+    case 'txt': text = extractText(buffer); break;
+    case 'rtf': text = await extractRtf(buffer); break;
+    case 'html': text = extractHtml(buffer); break;
+    case 'zip': text = await extractZip(buffer); break;
+    case 'pages': text = await extractPages(buffer); break;
     default:
       throw new Error(`格式 "${format}" 暂不支持自动提取`);
   }
