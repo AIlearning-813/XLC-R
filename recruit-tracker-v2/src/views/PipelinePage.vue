@@ -1,34 +1,406 @@
 <script setup>
-/* 新励成招聘管理系统 V2.0 — 招聘看板（阶段 4 实现） */
+/* 新励成招聘管理系统 V2.0 — 招聘看板 */
+
+import { ref, computed, watch, onMounted } from 'vue';
+import { useRouter } from 'vue-router';
+import { useJobStore } from '../stores/useJobStore';
+import { useApplicationStore } from '../stores/useApplicationStore';
+import { useAuthStore } from '../stores/useAuthStore';
+import cloudbase from '../services/cloudbase';
+import { FUNNEL_STAGES } from '../config/constants';
+import KanbanBoard from '../components/pipeline/KanbanBoard.vue';
+import StageTransitionDialog from '../components/pipeline/StageTransitionDialog.vue';
+
+const router = useRouter();
+const jobStore = useJobStore();
+const appStore = useApplicationStore();
+const auth = useAuthStore();
+const db = cloudbase.db;
+
+// ===== 状态 =====
+const selectedJobId = ref('');
+const applications = ref([]);
+const candidatesMap = ref({});
+const loading = ref(false);
+const error = ref('');
+
+// 流转确认弹窗
+const dialogVisible = ref(false);
+const pendingTransition = ref(null);
+const selectedCandidate = ref(null);
+const selectedApplication = ref(null);
+
+// 结束流程：显示"淘汰"和"放弃"拖放区
+const showEndZones = ref(false);
+
+// ===== 计算属性 =====
+const jobs = computed(() => jobStore.activeJobs);
+
+const visibleStages = computed(() => {
+  // 根据岗位类型过滤不需要的面试阶段
+  if (!selectedJob.value) return FUNNEL_STAGES;
+
+  const jobType = selectedJob.value.type || selectedJob.value.jobType;
+  const rounds = getInterviewRounds(jobType);
+
+  return FUNNEL_STAGES.filter((stage) => {
+    // 隐藏不需要的面试轮次
+    if (rounds < 3) {
+      if (stage.key === 'final_interview' || stage.key === 'final_pass') return false;
+    }
+    if (rounds < 2) {
+      if (stage.key === 'second_interview' || stage.key === 'second_pass') return false;
+    }
+    return true;
+  });
+});
+
+const selectedJob = computed(() => {
+  return jobs.value.find((j) => j._id === selectedJobId.value) || null;
+});
+
+// ===== 方法 =====
+
+function getInterviewRounds(jobType) {
+  // 默认 3 轮面试，根据岗位类型调整
+  const roundsMap = {
+    CC: 3,
+    'LTC负责人': 3,
+    '讲师': 3,
+    CR: 2,
+    '人事出纳': 2,
+    TMK: 2,
+  };
+  return roundsMap[jobType] || 3;
+}
+
+// 加载岗位列表
+async function loadJobs() {
+  try {
+    await jobStore.fetchActive();
+    // 默认选第一个岗位
+    if (!selectedJobId.value && jobs.value.length > 0) {
+      selectedJobId.value = jobs.value[0]._id;
+    }
+  } catch (err) {
+    error.value = '加载岗位失败：' + err.message;
+  }
+}
+
+// 加载选中岗位的申请和候选人
+async function loadApplications() {
+  if (!selectedJobId.value) {
+    applications.value = [];
+    return;
+  }
+
+  loading.value = true;
+  error.value = '';
+
+  try {
+    // 获取该岗位所有活跃申请
+    const dbInstance = db();
+    const { data: apps } = await dbInstance
+      .collection('Application')
+      .where({
+        jobId: selectedJobId.value,
+        status: 'active',
+      })
+      .orderBy('createdAt', 'desc')
+      .get();
+
+    const appList = apps || [];
+
+    // 批量获取候选人信息
+    if (appList.length > 0) {
+      const candidateIds = [...new Set(appList.map((a) => a.candidateId).filter(Boolean))];
+      const newCandidatesMap = { ...candidatesMap.value };
+
+      // 分批获取候选人（CloudBase in 查询限制 100 条）
+      const batchSize = 50;
+      for (let i = 0; i < candidateIds.length; i += batchSize) {
+        const batch = candidateIds.slice(i, i + batchSize);
+        try {
+          const { data: candidates } = await dbInstance
+            .collection('Candidate')
+            .where({
+              _id: dbInstance.command.in(batch),
+            })
+            .get();
+
+          for (const c of (candidates || [])) {
+            newCandidatesMap[c._id] = c;
+          }
+        } catch (err) {
+          console.warn('[PipelinePage] 批量获取候选人失败:', err.message);
+          // 降级：逐个获取
+          for (const id of batch) {
+            if (newCandidatesMap[id]) continue;
+            try {
+              const { data } = await dbInstance.collection('Candidate').doc(id).get();
+              if (data?.[0]) newCandidatesMap[id] = data[0];
+            } catch { /* skip */ }
+          }
+        }
+      }
+
+      candidatesMap.value = newCandidatesMap;
+    }
+
+    applications.value = appList;
+  } catch (err) {
+    console.error('[PipelinePage] 加载申请失败:', err.message);
+    error.value = '加载申请失败：' + err.message;
+  } finally {
+    loading.value = false;
+  }
+}
+
+// 处理拖拽移动
+function handleCardMove({ applicationId, fromStage, toStage }) {
+  const app = applications.value.find((a) => a._id === applicationId);
+  if (!app) {
+    console.warn('[PipelinePage] 未找到申请记录:', applicationId);
+    refreshBoard();
+    return;
+  }
+
+  const candidate = candidatesMap.value[app.candidateId] || {};
+
+  // 检查是否是结束操作（拖到 rejected/withdrawn 列）
+  if (toStage === 'rejected' || toStage === 'withdrawn') {
+    // 直接弹出确认
+    pendingTransition.value = { applicationId, fromStage, toStage };
+    selectedCandidate.value = candidate;
+    selectedApplication.value = app;
+    dialogVisible.value = true;
+    return;
+  }
+
+  // 普通流转 —— 弹出确认
+  pendingTransition.value = { applicationId, fromStage, toStage };
+  selectedCandidate.value = candidate;
+  selectedApplication.value = app;
+  dialogVisible.value = true;
+}
+
+// 确认流转
+async function handleTransitionConfirm({ note, reason }) {
+  if (!pendingTransition.value) return;
+
+  const { applicationId, fromStage, toStage } = pendingTransition.value;
+
+  try {
+    if (toStage === 'rejected' || toStage === 'withdrawn') {
+      // 结束流程
+      await appStore.endApplication(
+        applicationId,
+        toStage,
+        reason || note || '未指定原因',
+        { operatorId: auth.userName }
+      );
+    } else {
+      // 普通流转
+      await appStore.moveStage(applicationId, toStage, {
+        note,
+        operatorId: auth.userName,
+      });
+    }
+
+    dialogVisible.value = false;
+    pendingTransition.value = null;
+
+    // 刷新看板
+    await refreshBoard();
+  } catch (err) {
+    console.error('[PipelinePage] 流转失败:', err.message);
+    alert('流转失败：' + err.message);
+    refreshBoard();
+  }
+}
+
+// 取消流转
+function handleTransitionCancel() {
+  dialogVisible.value = false;
+  pendingTransition.value = null;
+  // 回退 DOM 变更 —— 重新加载
+  refreshBoard();
+}
+
+// 刷新看板数据
+async function refreshBoard() {
+  await loadApplications();
+}
+
+// 点击卡片 → 跳转详情
+function handleCardClick({ candidate, application }) {
+  router.push(`/candidates/${candidate._id}`);
+}
+
+// 岗位切换
+watch(selectedJobId, () => {
+  applications.value = [];
+  loadApplications();
+});
+
+onMounted(() => {
+  loadJobs();
+});
 </script>
 
 <template>
   <div class="pipeline-page">
-    <h2 class="page-title">招聘看板</h2>
-    <p class="page-desc">拖拽式管道管理，按岗位切换视图</p>
+    <!-- 顶部工具栏 -->
+    <div class="pipeline-toolbar">
+      <div class="toolbar-left">
+        <h2 class="page-title">招聘看板</h2>
+        <!-- 岗位选择器 -->
+        <div class="job-selector">
+          <select
+            v-model="selectedJobId"
+            class="form-select job-select"
+            :disabled="jobs.length === 0"
+          >
+            <option value="" disabled>选择岗位...</option>
+            <option v-for="job in jobs" :key="job._id" :value="job._id">
+              {{ job.title || job.name || job._id }}
+            </option>
+          </select>
+          <span class="job-count" v-if="selectedJobId">
+            {{ applications.length }} 人
+          </span>
+        </div>
+      </div>
 
-    <div class="card card-solid empty-state">
-      <div class="empty-state-icon">📋</div>
-      <div class="empty-state-text">看板管道</div>
-      <p class="text-muted">阶段 4 实现 — SortableJS 拖拽 + 12 步漏斗 + 自动回填</p>
+      <div class="toolbar-right">
+        <!-- 快捷操作 -->
+        <button
+          class="btn btn-sm btn-secondary"
+          @click="refreshBoard"
+          :disabled="loading"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/>
+          </svg>
+          刷新
+        </button>
+      </div>
     </div>
+
+    <!-- 错误提示 -->
+    <div v-if="error" class="pipeline-error">
+      {{ error }}
+      <button class="btn btn-sm btn-secondary" @click="refreshBoard">重试</button>
+    </div>
+
+    <!-- 看板区域 -->
+    <div class="pipeline-board-container">
+      <!-- 无岗位提示 -->
+      <div v-if="jobs.length === 0" class="card card-solid empty-state" style="margin: var(--spacing-xl) 0;">
+        <div class="empty-state-icon">📋</div>
+        <div class="empty-state-text">暂无活跃岗位</div>
+        <p class="text-muted">请先在设置中创建招聘岗位</p>
+      </div>
+
+      <!-- 看板 -->
+      <KanbanBoard
+        v-else-if="selectedJobId"
+        :stages="visibleStages"
+        :applications="applications"
+        :candidates-map="candidatesMap"
+        :job="selectedJob"
+        :loading="loading"
+        @card-move="handleCardMove"
+        @card-click="handleCardClick"
+      />
+    </div>
+
+    <!-- 流转确认弹窗 -->
+    <StageTransitionDialog
+      :visible="dialogVisible"
+      :candidate="selectedCandidate"
+      :application="selectedApplication"
+      :job="selectedJob"
+      :from-stage="pendingTransition?.fromStage || ''"
+      :to-stage="pendingTransition?.toStage || ''"
+      @confirm="handleTransitionConfirm"
+      @cancel="handleTransitionCancel"
+    />
   </div>
 </template>
 
 <style scoped>
 .pipeline-page {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 130px);
   max-width: 100%;
 }
 
-.page-title {
-  font-size: var(--font-size-2xl);
-  font-weight: 700;
-  color: var(--gray-700);
-  margin-bottom: var(--spacing-xs);
+/* === 工具栏 === */
+.pipeline-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--spacing-md);
+  flex-shrink: 0;
 }
 
-.page-desc {
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-lg);
+}
+
+.page-title {
+  font-size: var(--font-size-xl);
+  font-weight: 700;
+  color: var(--gray-700);
+  margin: 0;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+
+.job-selector {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.job-select {
+  width: 200px;
+}
+
+.job-count {
+  font-size: var(--font-size-sm);
   color: var(--gray-400);
-  margin-bottom: var(--spacing-lg);
+  white-space: nowrap;
+}
+
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+/* === 错误 === */
+.pipeline-error {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--danger-bg);
+  color: var(--danger);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  margin-bottom: var(--spacing-md);
+  flex-shrink: 0;
+}
+
+/* === 看板容器 === */
+.pipeline-board-container {
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
 }
 </style>

@@ -178,6 +178,24 @@ export const useApplicationStore = defineStore('application', () => {
 
     await db.collection('Application').doc(id).update(updateData);
 
+    // 写入审计日志（异步，不阻塞主流程）
+    try {
+      await cloudbase.callFunction('write-audit-log', {
+        action: 'move_stage',
+        entityType: 'Application',
+        entityIds: [id],
+        detail: {
+          fromStage: oldStage,
+          toStage: newStage,
+          note,
+          funnelKey,
+        },
+        operator: operatorId || 'system',
+      });
+    } catch (err) {
+      console.warn('[useApplicationStore] 审计日志写入失败:', err.message);
+    }
+
     // 更新本地缓存
     const idx = applications.value.findIndex(a => a._id === id);
     if (idx !== -1) {
@@ -219,6 +237,22 @@ export const useApplicationStore = defineStore('application', () => {
     };
 
     await db.collection('Application').doc(id).update(updateData);
+
+    // 写入审计日志（异步，不阻塞主流程）
+    try {
+      await cloudbase.callFunction('write-audit-log', {
+        action: status === 'rejected' ? 'reject_candidate' : 'withdraw_candidate',
+        entityType: 'Application',
+        entityIds: [id],
+        detail: {
+          endStage: current.stage,
+          reason,
+        },
+        operator: options.operatorId || 'system',
+      });
+    } catch (err) {
+      console.warn('[useApplicationStore] 审计日志写入失败:', err.message);
+    }
 
     // 更新本地缓存
     const idx = applications.value.findIndex(a => a._id === id);
