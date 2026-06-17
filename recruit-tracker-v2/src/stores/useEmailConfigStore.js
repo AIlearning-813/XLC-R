@@ -120,10 +120,10 @@ export const useEmailConfigStore = defineStore('emailConfig', () => {
     }
   }
 
-  async function scanNow() {
+  async function scanNow(force = false) {
     scanning.value = true;
     try {
-      const result = await triggerManualScan();
+      const result = await triggerManualScan(force);
       if (result.success) {
         toast.success(
           result.message || `扫描完成：发现 ${result.totalEmails || 0} 封邮件，新增 ${result.newResumes || 0} 份简历`

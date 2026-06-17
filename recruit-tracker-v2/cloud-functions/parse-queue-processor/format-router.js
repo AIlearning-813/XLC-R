@@ -16,12 +16,12 @@ const crypto = require('crypto');
 
 // ===== 懒加载依赖（仅在实际使用时 require，纯 JS 库）=====
 
-let pdfjsLib = null;
-function getPdfJs() {
-  if (!pdfjsLib) {
-    pdfjsLib = require('pdfjs-dist');
+let pdfParse = null;
+function getPdfParse() {
+  if (!pdfParse) {
+    pdfParse = require('pdf-parse');
   }
-  return pdfjsLib;
+  return pdfParse;
 }
 
 let mammoth = null;
@@ -85,6 +85,70 @@ const ARCHIVE_EXTRACTABLE = new Set([
   'pdf', 'docx', 'png', 'jpg', 'bmp', 'tiff', 'webp', 'txt', 'rtf', 'html',
 ]);
 
+// ===== 文件内容魔数检测（用于无扩展名或 application/octet-stream）=====
+
+function detectFormatByContent(buffer) {
+  if (!buffer || buffer.length < 4) return null;
+
+  // ZIP/DOCX: PK\x03\x04
+  if (buffer[0] === 0x50 && buffer[1] === 0x4B && buffer[2] === 0x03 && buffer[3] === 0x04) {
+    // DOCX 本质是 ZIP，BOSS直聘简历通常为 DOCX
+    return 'docx';
+  }
+
+  // PDF: %PDF
+  if (buffer[0] === 0x25 && buffer[1] === 0x50 && buffer[2] === 0x44 && buffer[3] === 0x46) {
+    return 'pdf';
+  }
+
+  // PNG: \x89PNG
+  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47) {
+    return 'png';
+  }
+
+  // JPEG: \xFF\xD8\xFF
+  if (buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) {
+    return 'jpg';
+  }
+
+  // BMP: BM
+  if (buffer[0] === 0x42 && buffer[1] === 0x4D) {
+    return 'bmp';
+  }
+
+  // TIFF: II or MM
+  if ((buffer[0] === 0x49 && buffer[1] === 0x49) || (buffer[0] === 0x4D && buffer[1] === 0x4D)) {
+    return 'tiff';
+  }
+
+  // WebP: RIFF....WEBP
+  if (buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46 &&
+      buffer[8] === 0x57 && buffer[9] === 0x45 && buffer[10] === 0x42 && buffer[11] === 0x50) {
+    return 'webp';
+  }
+
+  // RTF: {\rtf
+  if (buffer[0] === 0x7B && buffer[1] === 0x5C && buffer[2] === 0x72 && buffer[3] === 0x74) {
+    return 'rtf';
+  }
+
+  // HTML: <htm or <!DO
+  const head = buffer.toString('ascii', 0, 10).trim().toLowerCase();
+  if (head.startsWith('<htm') || head.startsWith('<!do')) {
+    return 'html';
+  }
+
+  // 纯文本回退
+  try {
+    const test = buffer.toString('utf-8', 0, 512);
+    if (/^[\x20-\x7E一-鿿　-〿＀-￯\r\n\t]+/.test(test)) {
+      return 'txt';
+    }
+  } catch { /* ignore */ }
+
+  return null;
+}
+
 // ===== 编码检测 =====
 
 function detectAndDecode(buffer) {
@@ -107,16 +171,9 @@ function detectAndDecode(buffer) {
 // ===== 各格式提取策略 =====
 
 async function extractPdf(buffer) {
-  const pdfjs = getPdfJs();
-  const data = new Uint8Array(buffer);
-  const doc = await pdfjs.getDocument({ data, disableAutoFetch: true }).promise;
-  const pages = [];
-  for (let i = 1; i <= doc.numPages; i++) {
-    const page = await doc.getPage(i);
-    const content = await page.getTextContent();
-    pages.push(content.items.map((item) => item.str).join(' '));
-  }
-  const fullText = pages.join('\n').trim();
+  const pdfParse = getPdfParse();
+  const data = await pdfParse(buffer);
+  const fullText = (data.text || '').trim();
   if (fullText.length < 20) {
     throw new Error('PDF 文本量过少，可能是扫描件，请使用 OCR 处理');
   }
@@ -322,6 +379,12 @@ async function route(buffer, fileName, mimeType) {
   if (!format && fileName) {
     const ext = path.extname(fileName).toLowerCase();
     format = EXT_TO_FORMAT[ext];
+  }
+
+  if (!format) {
+    // application/octet-stream 或无扩展名文件 → 内容检测
+    format = detectFormatByContent(buffer);
+    console.log(`[format-router] MIME/扩展名无法识别，内容检测结果: ${format} (${fileName}, ${mimeType})`);
   }
 
   if (!format) {

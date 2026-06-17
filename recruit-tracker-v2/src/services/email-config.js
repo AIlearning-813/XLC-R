@@ -171,11 +171,13 @@ export async function testImapConnection(config) {
 
 /**
  * 触发手动邮箱扫描
+ * @param {boolean} force - 是否强制重扫（清除去重记录）
  * @returns {Promise<object>}
  */
-export async function triggerManualScan() {
+export async function triggerManualScan(force = false) {
   const result = await cloudbase.callFunction('email-scanner', {
     action: 'scan',
+    force,
   });
   return result || { success: false };
 }

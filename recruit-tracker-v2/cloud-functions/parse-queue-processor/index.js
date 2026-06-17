@@ -13,11 +13,19 @@
  */
 
 const cloudbase = require('@cloudbase/node-sdk');
-const { route: extractText } = require('./format-router');
+
+// format-router 可能因依赖问题加载失败，用 try-catch 保护
+let extractText = null;
+try {
+  extractText = require('./format-router').route;
+  console.log('[parse-queue-processor] ✅ format-router 加载成功');
+} catch (err) {
+  console.warn('[parse-queue-processor] ⚠️ format-router 加载失败，将依赖 preExtractedText:', err.message);
+}
 
 const app = cloudbase.init({ env: cloudbase.SYMBOL_CURRENT_ENV });
 const db = app.database();
-const storage = app.storage();
+// app.storage() 在 SDK v3.x 中不可用，直接使用 app.downloadFile()
 
 // 配置
 const BATCH_SIZE = 20;
@@ -79,7 +87,7 @@ exports.main = async (event, context) => {
       }
 
       try {
-        await processOneEntry(db, storage, entry, summary);
+        await processOneEntry(db, entry, summary);
       } catch (err) {
         console.error(`[parse-queue-processor] 处理条目 ${entry._id} 异常:`, err.message);
         summary.errors.push(`${entry._id}: ${err.message}`);
@@ -98,7 +106,7 @@ exports.main = async (event, context) => {
 /**
  * 处理单个 ParseQueue 条目
  */
-async function processOneEntry(db, storage, entry, summary) {
+async function processOneEntry(db, entry, summary) {
   summary.processed++;
 
   // 检查重试次数
@@ -118,10 +126,15 @@ async function processOneEntry(db, storage, entry, summary) {
   let resumeText = entry.preExtractedText || '';
 
   if (!resumeText) {
+    if (!extractText) {
+      await markEntryFailed(db, entry, 'format-router 未加载，无法提取文本');
+      summary.failed++;
+      return;
+    }
     // 从云存储下载文件并提取文本
     try {
       if (entry.fileId) {
-        const downloadResult = await storage.downloadFile({ fileID: entry.fileId });
+        const downloadResult = await app.downloadFile({ fileID: entry.fileId });
         const fileBuffer = Buffer.from(downloadResult.fileContent);
 
         const extractResult = await extractText(

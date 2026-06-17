@@ -106,6 +106,8 @@ exports.main = async (event, context) => {
       };
     }
 
+    const forceRescan = event?.force === true;
+
     const scanResult = {
       success: true,
       totalEmails: 0,
@@ -140,7 +142,7 @@ exports.main = async (event, context) => {
         }
 
         try {
-          const result = await processMailbox(config, scanResult);
+          const result = await processMailbox(config, scanResult, forceRescan);
           scanResult.totalEmails += result.totalEmails;
           scanResult.newResumes += result.newResumes;
           scanResult.skipped += result.skipped;
@@ -273,8 +275,24 @@ async function handleDiagnose(event) {
 /**
  * 处理单个邮箱
  */
-async function processMailbox(config, scanResult) {
+async function processMailbox(config, scanResult, forceRescan = false) {
   const stats = { totalEmails: 0, newResumes: 0, skipped: 0 };
+
+  // 强制重扫：清除该邮箱的历史 ParseQueue 记录（避免 Message-ID 去重阻挡）
+  if (forceRescan) {
+    console.log(`[email-scanner] 🔄 强制重扫模式：清除 ${config.email} 的历史 ParseQueue 记录`);
+    try {
+      const { data: oldEntries } = await db.collection('ParseQueue')
+        .where({ sourceEmailConfigId: config._id, source: 'email' })
+        .get();
+      for (const entry of (oldEntries || [])) {
+        await db.collection('ParseQueue').doc(entry._id).remove();
+      }
+      console.log(`[email-scanner] 已清除 ${(oldEntries || []).length} 条旧记录`);
+    } catch (err) {
+      console.warn(`[email-scanner] 清除旧记录失败:`, err.message);
+    }
+  }
 
   // 检查退避：如果 nextRetryAt 未到，跳过
   if (config.nextRetryAt && new Date(config.nextRetryAt) > new Date()) {
@@ -357,9 +375,12 @@ async function processMailbox(config, scanResult) {
           sourceEmailConfigId: config._id,
           fileName: attachment.filename,
           fileType: attachment.contentType,
+          mimeType: attachment.contentType,
           fileSize: attachment.size,
           fileHash,
           fileUrl,
+          fileId: fileUrl,        // parse-queue-processor 使用此字段下载
+          preExtractedText: extractedText,  // parse-queue-processor 优先使用预提取文本
           extractedText,
           extractedFormat,
           status: 'pending',
