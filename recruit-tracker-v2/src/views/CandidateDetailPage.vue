@@ -269,27 +269,23 @@ function goBack() {
 }
 
 // 获取云存储文件并生成 Blob URL（用于预览和下载）
-// 不能用 getTempFileURL 直接给 iframe——CloudBase 返回的链接带 Content-Disposition: attachment，强制下载
+// 通过云函数 get-file-url 代理（管理员身份），绕过前端 storage 权限限制
 async function loadFileUrl() {
   if (!candidate.value?.fileId) return;
   fileLoading.value = true;
   fileError.value = '';
 
   try {
-    const st = cloudbase.storage();
-    if (!st) throw new Error('CloudBase storage 不可用');
-
-    // 1. 获取临时下载链接
-    const result = await st.getTempFileURL({
-      fileList: [candidate.value.fileId],
+    // 1. 通过云函数获取临时下载链接（管理员权限）
+    const result = await cloudbase.callFunction('get-file-url', {
+      fileId: candidate.value.fileId,
     });
-    const fileInfo = result.fileList?.[0];
-    if (!fileInfo?.tempFileURL) {
-      throw new Error('获取下载链接失败: ' + (fileInfo?.code || '未知错误'));
+    if (!result?.success || !result.tempFileURL) {
+      throw new Error(result?.error || '获取下载链接失败');
     }
 
     // 2. 通过 fetch 下载文件内容（绕过 CloudBase 的 Content-Disposition: attachment）
-    const response = await fetch(fileInfo.tempFileURL);
+    const response = await fetch(result.tempFileURL);
     if (!response.ok) throw new Error(`文件请求失败: HTTP ${response.status}`);
 
     const blob = await response.blob();

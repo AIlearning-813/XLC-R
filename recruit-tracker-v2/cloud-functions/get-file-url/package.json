@@ -1,0 +1,9 @@
+{
+  "name": "get-file-url",
+  "version": "1.0.0",
+  "description": "云存储文件临时链接代理",
+  "main": "index.js",
+  "dependencies": {
+    "@cloudbase/node-sdk": "latest"
+  }
+}
