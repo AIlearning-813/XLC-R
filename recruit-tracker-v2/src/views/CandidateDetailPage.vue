@@ -269,26 +269,29 @@ function goBack() {
 }
 
 // 获取云存储文件并生成 Blob URL（用于预览和下载）
-// 通过云函数 get-file-url 代理（管理员身份），绕过前端 storage 权限限制
+// 云函数 get-file-url 用管理员身份下载文件 → 返回 base64 → 前端转 Blob URL
+// 彻底绕过：前端存储权限 + CORS + Content-Disposition 三个问题
 async function loadFileUrl() {
   if (!candidate.value?.fileId) return;
   fileLoading.value = true;
   fileError.value = '';
 
   try {
-    // 1. 通过云函数获取临时下载链接（管理员权限）
+    // 1. 通过云函数下载文件内容（管理员权限，返回 base64）
     const result = await cloudbase.callFunction('get-file-url', {
       fileId: candidate.value.fileId,
     });
-    if (!result?.success || !result.tempFileURL) {
-      throw new Error(result?.error || '获取下载链接失败');
+    if (!result?.success) {
+      throw new Error(result?.error || '获取文件失败');
     }
 
-    // 2. 通过 fetch 下载文件内容（绕过 CloudBase 的 Content-Disposition: attachment）
-    const response = await fetch(result.tempFileURL);
-    if (!response.ok) throw new Error(`文件请求失败: HTTP ${response.status}`);
-
-    const blob = await response.blob();
+    // 2. base64 → Blob
+    const binaryStr = atob(result.data);
+    const bytes = new Uint8Array(binaryStr.length);
+    for (let i = 0; i < binaryStr.length; i++) {
+      bytes[i] = binaryStr.charCodeAt(i);
+    }
+    const blob = new Blob([bytes], { type: result.contentType || 'application/pdf' });
 
     // 3. 生成 Blob URL（浏览器内联显示，不会强制下载）
     if (fileUrl.value && fileUrl.value.startsWith('blob:')) {
