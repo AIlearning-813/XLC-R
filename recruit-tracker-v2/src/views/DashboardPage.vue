@@ -46,7 +46,7 @@ onMounted(async () => {
         </div>
         <div class="stat-label">活跃候选人</div>
         <div class="stat-value-lg">—</div>
-        <div class="stat-hint">看板上线后展示</div>
+        <div class="stat-hint">招聘看板流转中</div>
       </div>
 
       <!-- 本月入职 -->
@@ -58,7 +58,7 @@ onMounted(async () => {
         </div>
         <div class="stat-label">本月入职</div>
         <div class="stat-value-lg">—</div>
-        <div class="stat-hint">阶段 5 实现</div>
+        <div class="stat-hint">已发 Offer 并到岗</div>
       </div>
 
       <!-- 待跟进 -->
@@ -70,7 +70,7 @@ onMounted(async () => {
         </div>
         <div class="stat-label">待跟进</div>
         <div class="stat-value-lg">—</div>
-        <div class="stat-hint">阶段 5 实现</div>
+        <div class="stat-hint">需推进流程的候选人</div>
       </div>
 
       <!-- 待解析 -->

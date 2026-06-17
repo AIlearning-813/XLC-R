@@ -423,8 +423,8 @@ function onCancel() {
 .steps-indicator {
   display: flex;
   align-items: center;
-  margin-bottom: var(--spacing-lg);
-  padding: var(--spacing-md) var(--spacing-lg);
+  margin-bottom: var(--spacing-md);
+  padding: var(--spacing-sm) var(--spacing-lg);
   background: var(--card-bg, #fff);
   border-radius: var(--radius);
   border: 1px solid var(--gray-100);
@@ -500,7 +500,7 @@ function onCancel() {
 
 /* === 步骤内容 === */
 .step-content {
-  min-height: 200px;
+  min-height: 120px;
 }
 
 .manual-entry-hint {
