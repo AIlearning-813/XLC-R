@@ -1,10 +1,11 @@
 {
-  "name": "parse-queue-processor",
+  "name": "email-scanner",
   "version": "1.0.0",
-  "description": "新励成招聘系统 V2.0 — ParseQueue 消费云函数（文件解析 → 创建 Candidate）",
+  "description": "新励成招聘系统 V2.0 — 邮箱自动扫描云函数（IMAP → ParseQueue）",
   "main": "index.js",
   "dependencies": {
     "@cloudbase/node-sdk": "^3.4.0",
+    "imapflow": "^1.0.0",
     "mammoth": "^1.12.0",
     "pdfjs-dist": "^6.0.227",
     "sharp": "^0.33.0",

@@ -120,3 +120,35 @@ export const DUPLICATE_MATCH_LEVELS = {
 
 // 弱匹配所需的最低交叉维度数
 export const DUPLICATE_WEAK_MATCH_MIN_DIMENSIONS = 2;
+
+// ===== 阶段 3：邮箱自动归集常量 =====
+
+// 招聘平台发件人域名过滤
+export const EMAIL_SENDER_FILTERS = [
+  { domain: '@zhipin.com', label: 'BOSS直聘' },
+  { domain: '@kanzhun.com', label: 'BOSS直聘/看准' },
+  { domain: '@zhaopin.com.cn', label: '智联招聘' },
+  { domain: '@liepin.com', label: '猎聘' },
+];
+
+// 支持的邮箱类型
+export const EMAIL_PROVIDERS = [
+  { value: 'qq', label: 'QQ邮箱', imapHost: 'imap.qq.com', imapPort: 993 },
+  { value: 'exmail', label: '腾讯企业邮箱', imapHost: 'imap.exmail.qq.com', imapPort: 993 },
+  { value: '163', label: '网易163邮箱', imapHost: 'imap.163.com', imapPort: 993 },
+  { value: 'other', label: '其他邮箱', imapHost: '', imapPort: 993 },
+];
+
+// 邮箱扫描间隔（分钟）
+export const EMAIL_SCAN_INTERVAL = 10;
+
+// 邮件附件大小限制
+export const EMAIL_ATTACHMENT_MAX_SIZE = 20 * 1024 * 1024; // 20MB
+
+// 邮件扫描通知类型
+export const NOTIFICATION_TYPES = {
+  parse_success: { label: '解析成功', icon: 'success' },
+  parse_failed: { label: '解析失败', icon: 'danger' },
+  parse_duplicate: { label: '检测到重复', icon: 'warning' },
+  scan_summary: { label: '日报摘要', icon: 'info' },
+};

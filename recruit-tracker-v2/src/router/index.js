@@ -45,6 +45,12 @@ const routes = [
     meta: { title: '系统设置', icon: 'settings', requireAdmin: true },
   },
   {
+    path: '/settings/email',
+    name: 'EmailConfig',
+    component: () => import('../views/EmailConfigPage.vue'),
+    meta: { title: '邮箱配置', requireAdmin: true },
+  },
+  {
     path: '/import/resume',
     name: 'ResumeImport',
     component: () => import('../views/ResumeImportPage.vue'),

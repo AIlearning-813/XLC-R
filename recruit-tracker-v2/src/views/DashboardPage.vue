@@ -3,9 +3,12 @@
 
 import { ref, onMounted, computed } from 'vue';
 import { useAuthStore } from '../stores/useAuthStore';
+import { useNotificationStore } from '../stores/useNotificationStore';
 import cloudbase from '../services/cloudbase';
+import NotificationCard from '../components/dashboard/NotificationCard.vue';
 
 const auth = useAuthStore();
+const notify = useNotificationStore();
 const db = cloudbase.db();
 
 // 解析统计
@@ -14,6 +17,7 @@ const parseStats = ref({ pending: 0, total: 0 });
 const isAdmin = computed(() => auth.isAdmin);
 
 onMounted(async () => {
+  // 查询 ParseQueue 数量
   try {
     const pendingResult = await db.collection('ParseQueue')
       .where({ status: 'pending' })
@@ -21,6 +25,11 @@ onMounted(async () => {
     parseStats.value.pending = pendingResult.total || 0;
   } catch {
     // 集合可能尚未创建，静默
+  }
+
+  // 加载通知
+  if (auth.currentUser?.uid) {
+    notify.fetchNotifications(auth.currentUser.uid);
   }
 });
 </script>
@@ -133,6 +142,12 @@ onMounted(async () => {
         <span class="quick-desc">漏斗转化与趋势</span>
       </router-link>
     </div>
+
+    <!-- 通知卡片 -->
+    <div class="section-header">
+      <h3>最新动态</h3>
+    </div>
+    <NotificationCard />
   </div>
 </template>
 

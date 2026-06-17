@@ -1,0 +1,12 @@
+{
+  "timeout": 300,
+  "runtime": "Nodejs20.19",
+  "memorySize": 1024,
+  "triggers": [
+    {
+      "name": "email-scan-trigger",
+      "type": "timer",
+      "config": "*/10 * * * *"
+    }
+  ]
+}
