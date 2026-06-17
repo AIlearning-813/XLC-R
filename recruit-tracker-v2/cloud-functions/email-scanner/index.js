@@ -167,6 +167,14 @@ exports.main = async (event, context) => {
       if (!scanResult.message) {
         scanResult.message = `扫描完成：发现 ${scanResult.totalEmails} 封邮件，新增 ${scanResult.newResumes} 份简历`;
       }
+
+      // 🔥 立即触发 parse-queue-processor 处理新条目，不等定时器（5分钟→秒级）
+      if (scanResult.newResumes > 0) {
+        app.callFunction({ name: 'parse-queue-processor' }).catch(err => {
+          console.warn('[email-scanner] 触发 parse-queue-processor 失败:', err.message);
+        });
+        console.log('[email-scanner] 已触发 parse-queue-processor 立即处理新简历');
+      }
     } catch (err) {
       console.error('[email-scanner] 扫描异常:', err);
       scanResult.success = false;

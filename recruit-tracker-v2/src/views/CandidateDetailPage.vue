@@ -34,6 +34,10 @@ const editing = ref(false);
 const editForm = ref({});
 const saving = ref(false);
 
+// 原始简历文件预览
+const fileUrl = ref('');
+const fileLoading = ref(false);
+
 // ===== 计算属性 =====
 const candidateId = computed(() => route.params.id);
 
@@ -262,6 +266,50 @@ function getJobTitle(app) {
 function goBack() {
   router.back();
 }
+
+// 获取云存储文件临时下载链接（用于预览和下载）
+async function loadFileUrl() {
+  if (!candidate.value?.fileId) return;
+  fileLoading.value = true;
+  try {
+    const st = cloudbase.storage();
+    if (!st) {
+      console.warn('[CandidateDetail] CloudBase storage 不可用');
+      return;
+    }
+    const result = await st.getTempFileURL({
+      fileList: [candidate.value.fileId],
+    });
+    const fileInfo = result.fileList?.[0];
+    if (fileInfo?.tempFileURL) {
+      fileUrl.value = fileInfo.tempFileURL;
+    } else {
+      console.warn('[CandidateDetail] 获取下载链接失败:', fileInfo);
+    }
+  } catch (err) {
+    console.error('[CandidateDetail] 获取文件链接失败:', err);
+  } finally {
+    fileLoading.value = false;
+  }
+}
+
+// 下载原始简历文件
+function downloadResume() {
+  if (fileUrl.value) {
+    window.open(fileUrl.value, '_blank');
+  } else {
+    loadFileUrl().then(() => {
+      if (fileUrl.value) window.open(fileUrl.value, '_blank');
+    });
+  }
+}
+
+// 切换到简历原文 Tab 时自动加载文件链接
+watch(activeTab, (tab) => {
+  if (tab === 'resume' && candidate.value?.fileId && !fileUrl.value) {
+    loadFileUrl();
+  }
+});
 
 // ===== 生命周期 =====
 onMounted(async () => {
@@ -515,16 +563,57 @@ watch(candidateId, (newId) => {
         <div class="card">
           <div class="card-header">
             <span class="card-header-title">简历原文</span>
-            <span class="card-header-meta" v-if="candidate.sourceEmailFrom">
-              来自：{{ candidate.sourceEmailFrom }}
-            </span>
+            <div class="card-header-actions">
+              <button
+                v-if="candidate.fileId"
+                class="btn btn-sm btn-primary"
+                @click="downloadResume"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                  <polyline points="7 10 12 15 17 10"/>
+                  <line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+                下载原始简历
+              </button>
+              <span class="card-header-meta" v-if="candidate.fileName">
+                {{ candidate.fileName }}
+              </span>
+              <span class="card-header-meta" v-if="candidate.sourceEmailFrom">
+                来自：{{ candidate.sourceEmailFrom }}
+              </span>
+            </div>
           </div>
           <div class="card-body">
-            <pre class="resume-raw" v-if="display.resumeRawText">{{ display.resumeRawText }}</pre>
-            <div v-else class="empty-state" style="padding: var(--spacing-xl);">
+            <!-- 原始文件预览 -->
+            <div v-if="candidate.fileId" class="resume-preview">
+              <div v-if="fileLoading" class="resume-preview-placeholder">
+                <span class="spinner"></span>
+                <span>加载文件中...</span>
+              </div>
+              <iframe
+                v-else-if="fileUrl"
+                :src="fileUrl"
+                class="resume-iframe"
+                frameborder="0"
+              ></iframe>
+              <div v-else class="resume-preview-placeholder">
+                <p class="text-muted">文件加载失败</p>
+                <button class="btn btn-sm btn-secondary" @click="loadFileUrl">重新加载</button>
+              </div>
+            </div>
+
+            <!-- 提取文本（折叠，AI 解析用） -->
+            <details v-if="display.resumeRawText" class="resume-text-details">
+              <summary>📄 提取文本（AI 解析用）</summary>
+              <pre class="resume-raw">{{ display.resumeRawText }}</pre>
+            </details>
+
+            <!-- 什么都没有 -->
+            <div v-if="!candidate.fileId && !display.resumeRawText" class="empty-state" style="padding: var(--spacing-xl);">
               <div class="empty-state-text">简历原文不可用</div>
               <p class="text-muted" style="font-size: var(--font-size-xs);">
-                可能原因：邮箱归集时未保留原文，或通过手动录入未上传原始文件
+                该候选人创建时未保留原始简历文件
               </p>
             </div>
           </div>
@@ -868,8 +957,68 @@ function getFunnelKey(stage) {
   word-break: break-word;
   line-height: 1.6;
   margin: 0;
-  max-height: 600px;
+  max-height: 400px;
   overflow-y: auto;
+}
+
+/* 卡片头操作区 */
+.card-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+/* 简历文件预览 */
+.resume-preview {
+  border: 1px solid var(--gray-100);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  margin-bottom: var(--spacing-md);
+}
+
+.resume-preview-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-sm);
+  min-height: 200px;
+  background: var(--gray-50);
+  color: var(--gray-400);
+  font-size: var(--font-size-sm);
+}
+
+.resume-iframe {
+  width: 100%;
+  height: 700px;
+  border: none;
+  background: #fff;
+}
+
+/* 提取文本折叠区 */
+.resume-text-details {
+  margin-top: var(--spacing-md);
+  border: 1px solid var(--gray-100);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.resume-text-details summary {
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--gray-50);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  color: var(--gray-500);
+  user-select: none;
+}
+
+.resume-text-details summary:hover {
+  background: var(--gray-100);
+}
+
+.resume-text-details .resume-raw {
+  padding: var(--spacing-md);
+  max-height: 300px;
 }
 
 /* === 卡片头复用 === */
