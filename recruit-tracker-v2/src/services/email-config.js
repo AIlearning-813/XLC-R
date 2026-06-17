@@ -15,8 +15,17 @@ const db = cloudbase.db;
  * @returns {Promise<Array>}
  */
 export async function getEmailConfigs() {
-  const result = await db().collection('EmailConfig').get();
-  return result.data || [];
+  try {
+    const result = await db().collection('EmailConfig').get();
+    return result.data || [];
+  } catch (err) {
+    // 403 = 安全规则未部署，静默返回空数组
+    if (err.code === 'PERMISSION_DENIED' || err.message?.includes('403')) {
+      console.warn('⚠️ EmailConfig 集合安全规则未部署，请在 CloudBase 控制台创建集合并设置权限');
+      return [];
+    }
+    throw err;
+  }
 }
 
 /**
