@@ -55,6 +55,33 @@ const stageLabelMap = computed(() => {
 
 const jobTypeOptions = Object.keys(JOB_TYPES);
 
+// 合并顶层字段和 parsedData 降级（兼容旧数据：DeepSeek 结果存在 parsedData 中但未扁平化到顶层）
+const display = computed(() => {
+  const c = candidate.value;
+  if (!c) return {};
+  const p = c.parsedData || {};
+  const b = p.basic_info || {};
+
+  return {
+    // 优先取顶层，没有则从 parsedData 降级
+    name: c.name || b.name || '',
+    gender: c.gender || b.gender || '',
+    phone: c.phone || b.phone || '',
+    email: c.email || b.email || '',
+    age: c.age || b.age || null,
+    city: c.city || b.city || '',
+    yearsOfExperience: c.yearsOfExperience || b.years_of_experience || null,
+    expectedPosition: c.expectedPosition || p.expected_position || '',
+    expectedSalary: c.expectedSalary || p.expected_salary || '',
+    selfEvaluation: c.selfEvaluation || p.self_evaluation || '',
+    education: c.education?.length ? c.education : (p.education || []),
+    workExperience: c.workExperience?.length ? c.workExperience : (p.work_experience || []),
+    skills: c.skills?.length ? c.skills : (p.skills || []),
+    certificates: c.certificates?.length ? c.certificates : (p.certificates || []),
+    resumeRawText: c.resumeRawText || '',
+  };
+});
+
 // ===== 数据加载 =====
 async function loadCandidate() {
   loading.value = true;
@@ -311,31 +338,31 @@ watch(candidateId, (newId) => {
             <div v-if="!editing" class="info-grid">
               <div class="info-item">
                 <label>姓名</label>
-                <span>{{ candidate.name || '—' }}</span>
+                <span>{{ display.name || '—' }}</span>
               </div>
               <div class="info-item">
                 <label>性别</label>
-                <span>{{ candidate.gender || '—' }}</span>
+                <span>{{ display.gender || '—' }}</span>
               </div>
               <div class="info-item">
                 <label>手机</label>
-                <span>{{ candidate.phone || '—' }}</span>
+                <span>{{ display.phone || '—' }}</span>
               </div>
               <div class="info-item">
                 <label>邮箱</label>
-                <span>{{ candidate.email || '—' }}</span>
+                <span>{{ display.email || '—' }}</span>
               </div>
               <div class="info-item">
                 <label>年龄</label>
-                <span>{{ candidate.age || '—' }}</span>
+                <span>{{ display.age || '—' }}</span>
               </div>
               <div class="info-item">
                 <label>城市</label>
-                <span>{{ candidate.city || '—' }}</span>
+                <span>{{ display.city || '—' }}</span>
               </div>
               <div class="info-item">
                 <label>工作年限</label>
-                <span>{{ candidate.yearsOfExperience ? candidate.yearsOfExperience + ' 年' : '—' }}</span>
+                <span>{{ display.yearsOfExperience ? display.yearsOfExperience + ' 年' : '—' }}</span>
               </div>
               <div class="info-item">
                 <label>来源</label>
@@ -343,15 +370,15 @@ watch(candidateId, (newId) => {
               </div>
               <div class="info-item full-width">
                 <label>期望岗位</label>
-                <span>{{ candidate.expectedPosition || '—' }}</span>
+                <span>{{ display.expectedPosition || '—' }}</span>
               </div>
               <div class="info-item">
                 <label>期望薪资</label>
-                <span>{{ candidate.expectedSalary || '—' }}</span>
+                <span>{{ display.expectedSalary || '—' }}</span>
               </div>
               <div class="info-item full-width">
                 <label>自我评价</label>
-                <p class="info-textarea">{{ candidate.selfEvaluation || '—' }}</p>
+                <p class="info-textarea">{{ display.selfEvaluation || '—' }}</p>
               </div>
             </div>
 
@@ -413,13 +440,13 @@ watch(candidateId, (newId) => {
         </div>
 
         <!-- 教育经历 -->
-        <div class="card" style="margin-top: var(--spacing-md);" v-if="candidate.education?.length">
+        <div class="card" style="margin-top: var(--spacing-md);" v-if="display.education?.length">
           <div class="card-header">
             <span class="card-header-title">教育经历</span>
           </div>
           <div class="card-body">
             <div
-              v-for="(edu, i) in candidate.education"
+              v-for="(edu, i) in display.education"
               :key="i"
               class="list-item"
             >
@@ -435,13 +462,13 @@ watch(candidateId, (newId) => {
         </div>
 
         <!-- 工作经历 -->
-        <div class="card" style="margin-top: var(--spacing-md);" v-if="candidate.workExperience?.length">
+        <div class="card" style="margin-top: var(--spacing-md);" v-if="display.workExperience?.length">
           <div class="card-header">
             <span class="card-header-title">工作经历</span>
           </div>
           <div class="card-body">
             <div
-              v-for="(exp, i) in candidate.workExperience"
+              v-for="(exp, i) in display.workExperience"
               :key="i"
               class="list-item"
             >
@@ -459,24 +486,24 @@ watch(candidateId, (newId) => {
 
         <!-- 技能 / 证书 -->
         <div class="info-side-cards" style="margin-top: var(--spacing-md);">
-          <div class="card" v-if="candidate.skills?.length">
+          <div class="card" v-if="display.skills?.length">
             <div class="card-header">
               <span class="card-header-title">技能</span>
             </div>
             <div class="card-body">
               <div class="tag-list">
-                <span v-for="(skill, i) in candidate.skills" :key="i" class="tag-chip">{{ skill }}</span>
+                <span v-for="(skill, i) in display.skills" :key="i" class="tag-chip">{{ skill }}</span>
               </div>
             </div>
           </div>
 
-          <div class="card" v-if="candidate.certificates?.length">
+          <div class="card" v-if="display.certificates?.length">
             <div class="card-header">
               <span class="card-header-title">证书</span>
             </div>
             <div class="card-body">
               <div class="tag-list">
-                <span v-for="(cert, i) in candidate.certificates" :key="i" class="tag-chip cert">{{ cert }}</span>
+                <span v-for="(cert, i) in display.certificates" :key="i" class="tag-chip cert">{{ cert }}</span>
               </div>
             </div>
           </div>
@@ -493,7 +520,7 @@ watch(candidateId, (newId) => {
             </span>
           </div>
           <div class="card-body">
-            <pre class="resume-raw" v-if="candidate.resumeRawText">{{ candidate.resumeRawText }}</pre>
+            <pre class="resume-raw" v-if="display.resumeRawText">{{ display.resumeRawText }}</pre>
             <div v-else class="empty-state" style="padding: var(--spacing-xl);">
               <div class="empty-state-text">简历原文不可用</div>
               <p class="text-muted" style="font-size: var(--font-size-xs);">

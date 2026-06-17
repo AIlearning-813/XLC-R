@@ -196,12 +196,31 @@ async function onCreateCandidate(data) {
       }
     }
 
-    // 2. 创建 Candidate
+    // 2. 创建 Candidate（扁平化 DeepSeek 解析结果到顶层字段）
+    const parsedData = parseResult.value || {};
+    const basicInfo = parsedData.basic_info || {};
+
     const candidateDoc = {
-      name: candidateData.name || '',
-      phone: candidateData.phone || '',
-      email: candidateData.email || '',
-      parsedData: parseResult.value,
+      // 基本信息（顶层，方便直接查询和展示）
+      name: candidateData.name || basicInfo.name || '',
+      gender: basicInfo.gender || '',
+      phone: candidateData.phone || basicInfo.phone || '',
+      email: candidateData.email || basicInfo.email || '',
+      age: basicInfo.age || null,
+      city: basicInfo.city || '',
+      yearsOfExperience: basicInfo.years_of_experience || null,
+      // 结构化数据（从 parsedData 扁平化到顶层）
+      education: parsedData.education || [],
+      workExperience: parsedData.work_experience || [],
+      skills: parsedData.skills || [],
+      certificates: parsedData.certificates || [],
+      expectedPosition: parsedData.expected_position || '',
+      expectedSalary: parsedData.expected_salary || '',
+      selfEvaluation: parsedData.self_evaluation || '',
+      // 简历原文（用于详情页"简历原文"Tab 展示）
+      resumeRawText: extractedTexts.value[0] || '',
+      // 完整解析结果（保留用于调试和后续分析）
+      parsedData,
       parseCorrections: correctionData || [],
       fileHash: fileHash.value,
       fileId: fileId || '',

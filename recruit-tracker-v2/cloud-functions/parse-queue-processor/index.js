@@ -226,13 +226,32 @@ async function processOneEntry(db, entry, summary) {
       return;
     }
 
-    // 创建 Candidate
+    // 创建 Candidate（扁平化 DeepSeek 解析结果到顶层字段）
     const candidateDoc = {
+      // 基本信息（顶层，方便直接查询和展示）
       name: basicInfo.name || '',
+      gender: basicInfo.gender || '',
       phone: basicInfo.phone || '',
       email: basicInfo.email || '',
+      age: basicInfo.age || null,
+      city: basicInfo.city || '',
+      yearsOfExperience: basicInfo.years_of_experience || null,
+      // 结构化数据（从 parsedData 扁平化到顶层）
+      education: candidateData.education || [],
+      workExperience: candidateData.work_experience || [],
+      skills: candidateData.skills || [],
+      certificates: candidateData.certificates || [],
+      expectedPosition: candidateData.expected_position || '',
+      expectedSalary: candidateData.expected_salary || '',
+      selfEvaluation: candidateData.self_evaluation || '',
+      // 简历原文（用于详情页"简历原文"Tab 展示）
+      resumeRawText: resumeText || '',
+      // 完整解析结果（保留用于调试和后续分析）
       parsedData: candidateData,
+      // 来源元数据
       source: entry.source || 'email',
+      sourceEmailFrom: entry.sourceEmailFrom || '',
+      sourceEmailSubject: entry.sourceEmailSubject || '',
       fileHash: entry.fileHash || '',
       fileId: entry.fileId || '',
       fileName: entry.fileName || '',
