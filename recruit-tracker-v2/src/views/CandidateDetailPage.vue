@@ -35,8 +35,9 @@ const editForm = ref({});
 const saving = ref(false);
 
 // 原始简历文件预览
-const fileUrl = ref('');
+const fileUrl = ref('');       // blob: URL，用于 iframe 预览
 const fileLoading = ref(false);
+const fileError = ref('');
 
 // ===== 计算属性 =====
 const candidateId = computed(() => route.params.id);
@@ -267,39 +268,62 @@ function goBack() {
   router.back();
 }
 
-// 获取云存储文件临时下载链接（用于预览和下载）
+// 获取云存储文件并生成 Blob URL（用于预览和下载）
+// 不能用 getTempFileURL 直接给 iframe——CloudBase 返回的链接带 Content-Disposition: attachment，强制下载
 async function loadFileUrl() {
   if (!candidate.value?.fileId) return;
   fileLoading.value = true;
+  fileError.value = '';
+
   try {
     const st = cloudbase.storage();
-    if (!st) {
-      console.warn('[CandidateDetail] CloudBase storage 不可用');
-      return;
-    }
+    if (!st) throw new Error('CloudBase storage 不可用');
+
+    // 1. 获取临时下载链接
     const result = await st.getTempFileURL({
       fileList: [candidate.value.fileId],
     });
     const fileInfo = result.fileList?.[0];
-    if (fileInfo?.tempFileURL) {
-      fileUrl.value = fileInfo.tempFileURL;
-    } else {
-      console.warn('[CandidateDetail] 获取下载链接失败:', fileInfo);
+    if (!fileInfo?.tempFileURL) {
+      throw new Error('获取下载链接失败: ' + (fileInfo?.code || '未知错误'));
     }
+
+    // 2. 通过 fetch 下载文件内容（绕过 CloudBase 的 Content-Disposition: attachment）
+    const response = await fetch(fileInfo.tempFileURL);
+    if (!response.ok) throw new Error(`文件请求失败: HTTP ${response.status}`);
+
+    const blob = await response.blob();
+
+    // 3. 生成 Blob URL（浏览器内联显示，不会强制下载）
+    if (fileUrl.value && fileUrl.value.startsWith('blob:')) {
+      URL.revokeObjectURL(fileUrl.value);
+    }
+    fileUrl.value = URL.createObjectURL(blob);
   } catch (err) {
-    console.error('[CandidateDetail] 获取文件链接失败:', err);
+    console.error('[CandidateDetail] 加载文件失败:', err);
+    fileError.value = err.message;
   } finally {
     fileLoading.value = false;
   }
 }
 
-// 下载原始简历文件
+// 下载原始简历文件（用 Blob URL + download 属性确保文件名正确）
 function downloadResume() {
+  const doDownload = () => {
+    if (!fileUrl.value) return;
+    const a = document.createElement('a');
+    a.href = fileUrl.value;
+    a.download = candidate.value?.fileName || 'resume';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
   if (fileUrl.value) {
-    window.open(fileUrl.value, '_blank');
+    doDownload();
   } else {
     loadFileUrl().then(() => {
-      if (fileUrl.value) window.open(fileUrl.value, '_blank');
+      if (fileUrl.value) doDownload();
     });
   }
 }
@@ -587,18 +611,21 @@ watch(candidateId, (newId) => {
           <div class="card-body">
             <!-- 原始文件预览 -->
             <div v-if="candidate.fileId" class="resume-preview">
+              <!-- 加载中 -->
               <div v-if="fileLoading" class="resume-preview-placeholder">
                 <span class="spinner"></span>
                 <span>加载文件中...</span>
               </div>
+              <!-- 预览 -->
               <iframe
                 v-else-if="fileUrl"
                 :src="fileUrl"
                 class="resume-iframe"
                 frameborder="0"
               ></iframe>
+              <!-- 错误 -->
               <div v-else class="resume-preview-placeholder">
-                <p class="text-muted">文件加载失败</p>
+                <p class="text-danger">{{ fileError || '文件加载失败' }}</p>
                 <button class="btn btn-sm btn-secondary" @click="loadFileUrl">重新加载</button>
               </div>
             </div>
