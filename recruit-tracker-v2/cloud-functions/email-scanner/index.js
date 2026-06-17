@@ -368,6 +368,7 @@ async function processMailbox(config, scanResult, forceRescan = false) {
         // 写入 ParseQueue
         const queueEntry = {
           source: 'email',
+          userId: config.userId,  // 邮箱配置所属用户，用于通知归属和 Application 分配
           sourceEmailId: msg.messageId,
           sourceEmailFrom: msg.from,
           sourceEmailSubject: msg.subject,

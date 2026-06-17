@@ -83,10 +83,14 @@ export async function createEmailConfig(config) {
 export async function updateEmailConfig(id, updates) {
   const updateData = { ...updates };
 
-  // 如果更新密码，先加密
-  if (updateData.imapPassword && updateData.imapPassword.length < 50) {
+  // 如果没输入新密码（空字符串），删除该字段，避免覆盖已存储的加密密码
+  if (!updateData.imapPassword || updateData.imapPassword.trim() === '') {
+    delete updateData.imapPassword;
+  } else if (updateData.imapPassword.length < 50) {
+    // 明文密码（< 50 字符视为明文），需加密后存储
     updateData.imapPassword = await encryptPassword(updateData.imapPassword);
   }
+  // 否则已是加密后的 base64 字符串（≥ 50 字符），直接使用
 
   const result = await cloudbase.callFunction('email-scanner', {
     action: 'updateConfig',

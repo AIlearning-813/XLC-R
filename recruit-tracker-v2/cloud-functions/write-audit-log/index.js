@@ -24,14 +24,24 @@ exports.main = async (event, context) => {
   // 🆕 调用者身份验证：防止审计日志伪造
   // CloudBase 云函数上下文中包含调用者的 auth 信息
   const callerUid = context.auth?.uid || '';
-  if (!callerUid) {
+
+  // 内部可信调用者：定时器触发的云函数（如 parse-queue-processor）
+  // 无前端 auth 上下文，但操作者是系统内部服务
+  const isInternalCaller = !callerUid && operator && (
+    operator === 'parse-queue-processor' ||
+    operator === 'email-scanner' ||
+    operator === 'system'
+  );
+
+  if (!callerUid && !isInternalCaller) {
     console.warn('[write-audit-log] 拒绝未认证的调用');
     return { success: false, error: '未认证的调用，审计日志写入被拒绝' };
   }
 
   // operator 必须与调用者 uid 一致（前端不可伪造 callerUid）
-  const effectiveOperator = operator || callerUid;
-  if (operator && operator !== callerUid) {
+  // 内部调用者豁免此检查
+  const effectiveOperator = isInternalCaller ? operator : (operator || callerUid);
+  if (!isInternalCaller && operator && operator !== callerUid) {
     console.warn(`[write-audit-log] operator 不匹配: 传入=${operator}, 实际=${callerUid}`);
     return { success: false, error: '操作者身份与调用者不一致，审计日志写入被拒绝' };
   }
