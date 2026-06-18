@@ -271,46 +271,93 @@ function goBack() {
   router.back();
 }
 
-// ===== 文件类型检测（根据文件名后缀 + 云函数返回的 MIME） =====
-// CloudBase 对无扩展名的文件返回 application/octet-stream，导致浏览器在 iframe 中触发下载
-// 优先用 fileName 后缀判断真实类型
-function detectFileType(fileName, cloudContentType) {
-  const ext = (fileName || '').split('.').pop()?.toLowerCase();
-  const extMimeMap = {
-    pdf: 'application/pdf',
-    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    doc: 'application/msword',
-    png: 'image/png',
-    jpg: 'image/jpeg',
-    jpeg: 'image/jpeg',
-    gif: 'image/gif',
-    webp: 'image/webp',
-    bmp: 'image/bmp',
-    txt: 'text/plain',
-    html: 'text/html',
-    htm: 'text/html',
-    rtf: 'application/rtf',
-  };
+// ===== 文件类型检测 =====
+// 三层判断：文件名后缀 → 云函数返回的 MIME → 文件内容魔数
+// CloudBase 对无扩展名的邮件附件返回 octet-stream，需要魔数兜底
 
-  // 云函数返回的非通用 MIME 优先，否则按扩展名查表
+// 魔数签名映射（文件头前几个字节的特征）
+const MAGIC_SIGNATURES = [
+  { bytes: [0x25, 0x50, 0x44, 0x46], mime: 'application/pdf', type: 'pdf' },
+  { bytes: [0x50, 0x4B, 0x03, 0x04], mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', type: 'docx', needsExtCheck: true },
+  { bytes: [0x89, 0x50, 0x4E, 0x47], mime: 'image/png', type: 'image' },
+  { bytes: [0xFF, 0xD8, 0xFF], mime: 'image/jpeg', type: 'image' },
+  { bytes: [0x47, 0x49, 0x46, 0x38], mime: 'image/gif', type: 'image' },
+  { bytes: [0x42, 0x4D], mime: 'image/bmp', type: 'image' },
+  { bytes: [0x52, 0x49, 0x46, 0x46], mime: 'image/webp', type: 'image', needsExtCheck: true },
+];
+
+function detectTypeByMagic(firstBytes) {
+  for (const sig of MAGIC_SIGNATURES) {
+    let match = true;
+    for (let i = 0; i < sig.bytes.length; i++) {
+      if (firstBytes[i] !== sig.bytes[i]) {
+        match = false;
+        break;
+      }
+    }
+    if (match) {
+      // ZIP 魔数 (PK\x03\x04) 用于 DOCX 但也匹配 ZIP/RAR 等。
+      // 如果 fileName 有扩展名，已在之前被 extMimeMap 匹配；
+      // 此处仅做兜底：无扩展名时且魔数为 ZIP → 假定为 DOCX（最常见）
+      if (sig.needsExtCheck && sig.type === 'docx') {
+        continue; // DOCX 需要由 fileName 后缀判断，魔数匹配 ZIP 不一定就是 DOCX
+      }
+      return sig;
+    }
+  }
+  return null;
+}
+
+const extMimeMap = {
+  pdf: 'application/pdf',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  doc: 'application/msword',
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  bmp: 'image/bmp',
+  txt: 'text/plain',
+  html: 'text/html',
+  htm: 'text/html',
+  rtf: 'application/rtf',
+};
+
+function detectFileType(fileName, cloudContentType, firstBytes) {
+  const ext = (fileName || '').split('.').pop()?.toLowerCase();
+
+  // Layer 1：文件名扩展名查表
+  if (ext && extMimeMap[ext]) {
+    const mime = extMimeMap[ext];
+    return { mimeType: mime, ext, previewType: previewTypeFromMime(mime, ext) };
+  }
+
+  // Layer 2：云函数返回的非通用 MIME
   const isGenericCloud = !cloudContentType
     || cloudContentType === 'application/octet-stream'
     || cloudContentType === 'binary/octet-stream';
-  const mimeType = (!isGenericCloud ? cloudContentType : null) || extMimeMap[ext] || 'application/octet-stream';
-
-  // 判断预览类型
-  let previewType = 'unknown';
-  if (mimeType === 'application/pdf') {
-    previewType = 'pdf';
-  } else if (ext === 'docx' || mimeType.includes('officedocument.wordprocessingml')) {
-    previewType = 'docx';
-  } else if (mimeType.startsWith('image/')) {
-    previewType = 'image';
-  } else if (mimeType.startsWith('text/')) {
-    previewType = 'text';
+  if (!isGenericCloud) {
+    return { mimeType: cloudContentType, ext, previewType: previewTypeFromMime(cloudContentType, ext) };
   }
 
-  return { mimeType, ext, previewType };
+  // Layer 3：文件内容魔数检测（兜底）
+  if (firstBytes && firstBytes.length >= 4) {
+    const magic = detectTypeByMagic(firstBytes);
+    if (magic) {
+      return { mimeType: magic.mime, ext, previewType: magic.type };
+    }
+  }
+
+  return { mimeType: 'application/octet-stream', ext, previewType: 'unknown' };
+}
+
+function previewTypeFromMime(mimeType, ext) {
+  if (mimeType === 'application/pdf') return 'pdf';
+  if (ext === 'docx' || mimeType.includes('officedocument.wordprocessingml')) return 'docx';
+  if (mimeType.startsWith('image/')) return 'image';
+  if (mimeType.startsWith('text/')) return 'text';
+  return 'unknown';
 }
 
 // 获取云存储文件并生成预览
@@ -332,16 +379,19 @@ async function loadFileUrl() {
       throw new Error(result?.error || '获取文件失败');
     }
 
-    // 2. 检测文件真实类型（优先用 fileName 后缀，避免 CloudBase 返回 octet-stream）
-    const typeInfo = detectFileType(candidate.value.fileName, result.contentType);
-    filePreviewType.value = typeInfo.previewType;
-
-    // 3. base64 → ArrayBuffer
+    // 2. base64 → 二进制字符串（atob 返回每个字符代表一个字节的字符串）
     const binaryStr = atob(result.data);
     const bytes = new Uint8Array(binaryStr.length);
     for (let i = 0; i < binaryStr.length; i++) {
       bytes[i] = binaryStr.charCodeAt(i);
     }
+
+    // 3. 提取前几个字节做魔数检测（兜底无扩展名文件）
+    const firstBytes = bytes.slice(0, 8);
+
+    // 4. 检测文件真实类型（三层：扩展名 → 云 MIME → 魔数）
+    const typeInfo = detectFileType(candidate.value.fileName, result.contentType, firstBytes);
+    filePreviewType.value = typeInfo.previewType;
 
     // 4. 按文件类型生成预览
     if (typeInfo.previewType === 'docx') {
