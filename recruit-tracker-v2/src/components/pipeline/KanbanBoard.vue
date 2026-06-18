@@ -1,5 +1,5 @@
 <script setup>
-/* 新励成招聘管理系统 V2.0 — 看板容器（SortableJS 跨列拖拽 + 左侧投放区） */
+/* 新励成招聘管理系统 V2.0 — 看板容器（紧凑卡片式 + flex-wrap 换行） */
 
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { Sortable } from 'sortablejs';
@@ -34,7 +34,6 @@ const applicationsByStage = computed(() => {
 const boardRef = ref(null);
 const sortables = [];
 
-/** 从元素向上查找 data-stage */
 function getStageFromEl(el) {
   const stageEl = el?.closest?.('[data-stage]');
   return stageEl?.dataset?.stage || null;
@@ -42,12 +41,9 @@ function getStageFromEl(el) {
 
 function initSortable() {
   destroySortable();
-
   if (!boardRef.value) return;
 
-  // ⚠️ 关键：TransitionGroup 不设 tag → 卡片是 .col-body 的直系子元素 → 独立可拖
-  // .end-drop-zone 是左侧紧凑投放区（淘汰/放弃）
-  const containers = boardRef.value.querySelectorAll('.col-body, .end-drop-zone');
+  const containers = boardRef.value.querySelectorAll('.col-body');
   containers.forEach((container) => {
     const instance = Sortable.create(container, {
       group: 'pipeline',
@@ -59,11 +55,7 @@ function initSortable() {
       delay: 100,
       delayOnTouchOnly: true,
       touchStartThreshold: 5,
-
-      // 过滤非卡片元素（空状态、加载骨架等）
-      filter: '.col-empty, .col-loading, .skeleton-card',
-
-      // 拖拽时自动滚动看板
+      filter: '.col-empty, .col-loading, .col-more, .skeleton-line',
       scroll: true,
       scrollSensitivity: 80,
       scrollSpeed: 15,
@@ -75,19 +67,12 @@ function initSortable() {
 
       onEnd: (evt) => {
         evt.item.classList.remove('is-dragging');
-
         const appId = evt.item?.dataset?.id;
         const fromStage = getStageFromEl(evt.from);
         const toStage = getStageFromEl(evt.to);
-
         if (!appId || !fromStage || !toStage) return;
         if (fromStage === toStage) return;
-
-        emit('card-move', {
-          applicationId: appId,
-          fromStage,
-          toStage,
-        });
+        emit('card-move', { applicationId: appId, fromStage, toStage });
       },
     });
     sortables.push(instance);
@@ -95,9 +80,7 @@ function initSortable() {
 }
 
 function destroySortable() {
-  for (const s of sortables) {
-    s.destroy();
-  }
+  for (const s of sortables) s.destroy();
   sortables.length = 0;
 }
 
@@ -105,59 +88,21 @@ watch([() => props.applications, () => props.stages], () => {
   nextTick(() => initSortable());
 }, { deep: true });
 
-onMounted(() => {
-  nextTick(() => initSortable());
-});
+onMounted(() => nextTick(() => initSortable()));
+onUnmounted(() => destroySortable());
 
-onUnmounted(() => {
-  destroySortable();
-});
-
-// ===== 事件 =====
 function onCardClick(payload) {
   emit('card-click', payload);
 }
-
 function onCardQuickMove(payload) {
   emit('card-quick-move', payload);
 }
-
-const stageCount = computed(() => props.stages.length);
 </script>
 
 <template>
   <div class="kanban-board" ref="boardRef">
-    <div class="kanban-scroll" :style="{ '--col-count': stageCount }">
-      <!-- 左侧紧凑投放区：淘汰 / 放弃（始终可见，无需滚动） -->
-      <div class="end-zone-drops">
-        <div class="end-drop-wrap">
-          <div
-            class="end-drop-zone"
-            data-stage="rejected"
-            data-drop-label="淘汰"
-          >
-            <div class="end-drop-icon">🗑️</div>
-            <div class="end-drop-label">淘汰</div>
-            <div class="end-drop-hint">拖拽到此</div>
-          </div>
-        </div>
-        <div class="end-drop-wrap">
-          <div
-            class="end-drop-zone"
-            data-stage="withdrawn"
-            data-drop-label="放弃"
-          >
-            <div class="end-drop-icon">🚫</div>
-            <div class="end-drop-label">放弃</div>
-            <div class="end-drop-hint">拖拽到此</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 分隔线 -->
-      <div class="drop-divider"></div>
-
-      <!-- 漏斗阶段列 -->
+    <!-- 紧凑卡片网格（flex-wrap 自动换行，无需横向滚动） -->
+    <div class="kanban-grid">
       <KanbanColumn
         v-for="stage in stages"
         :key="stage.key"
@@ -166,6 +111,7 @@ const stageCount = computed(() => props.stages.length);
         :candidates-map="candidatesMap"
         :job="job"
         :loading="loading"
+        :compact="true"
         @card-click="onCardClick"
         @card-quick-move="onCardQuickMove"
       />
@@ -183,115 +129,17 @@ const stageCount = computed(() => props.stages.length);
 <style scoped>
 .kanban-board {
   flex: 1;
-  overflow: hidden;
-  position: relative;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
 }
 
-.kanban-scroll {
+.kanban-grid {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--spacing-md);
   padding: var(--spacing-sm) 2px var(--spacing-lg);
-  overflow-x: auto;
-  overflow-y: hidden;
-  height: 100%;
-  scroll-behavior: smooth;
-  scrollbar-width: thin;
-  scrollbar-color: var(--gray-200) transparent;
-}
-
-.kanban-scroll::-webkit-scrollbar {
-  height: 6px;
-}
-
-.kanban-scroll::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.kanban-scroll::-webkit-scrollbar-thumb {
-  background: var(--gray-200);
-  border-radius: 3px;
-}
-
-.kanban-scroll::-webkit-scrollbar-thumb:hover {
-  background: var(--gray-300);
-}
-
-/* === 左侧投放区 === */
-.end-zone-drops {
-  display: flex;
-  gap: var(--spacing-sm);
-  flex-shrink: 0;
-  align-items: flex-start;
-  padding-top: 0;
-}
-
-.end-drop-wrap {
-  flex-shrink: 0;
-}
-
-.end-drop-zone {
-  width: 80px;
-  min-height: 160px;
-  border: 2px dashed var(--gray-300);
-  border-radius: var(--radius);
-  background: var(--gray-25);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  cursor: default;
-  transition: all var(--transition);
-  user-select: none;
-}
-
-.end-drop-zone:hover {
-  border-color: var(--danger);
-  background: var(--danger-bg);
-}
-
-.end-drop-zone[data-stage="rejected"]:hover {
-  border-color: #DC4C4C;
-  background: #FEF2F2;
-}
-
-.end-drop-zone[data-stage="withdrawn"]:hover {
-  border-color: #9B8B7C;
-  background: #FAFAF8;
-}
-
-/* 有卡片拖入时的高亮 */
-.end-drop-zone:has(.sortable-ghost),
-.end-drop-zone.sortable-highlight {
-  border-color: var(--danger) !important;
-  background: var(--danger-bg) !important;
-  border-style: solid !important;
-  transform: scale(1.05);
-}
-
-.end-drop-icon {
-  font-size: 28px;
-  line-height: 1;
-}
-
-.end-drop-label {
-  font-size: var(--font-size-sm);
-  font-weight: 600;
-  color: var(--gray-500);
-}
-
-.end-drop-hint {
-  font-size: 10px;
-  color: var(--gray-300);
-}
-
-/* 分隔线 */
-.drop-divider {
-  width: 1px;
-  background: var(--gray-200);
-  flex-shrink: 0;
-  align-self: stretch;
-  margin: 0 2px;
+  align-content: flex-start;
 }
 
 /* === 空状态 === */
@@ -302,7 +150,7 @@ const stageCount = computed(() => props.stages.length);
   align-items: center;
   justify-content: center;
   padding: var(--spacing-3xl);
-  min-width: 400px;
+  min-width: 300px;
 }
 
 .board-empty-icon {

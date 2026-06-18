@@ -57,10 +57,16 @@ function getInterviewRounds(jobType) {
   return roundsMap[jobType] || 3;
 }
 
-// 漏斗阶段（不含淘汰/放弃——它们由 KanbanBoard 左侧投放区处理）
+// 结束区域（紧凑卡片式，与其他阶段统一风格）
+const END_ZONE_STAGES = [
+  { key: 'rejected', label: '淘汰', isEnd: true },
+  { key: 'withdrawn', label: '放弃', isEnd: true },
+];
+
+// 全部可见阶段（漏斗+结束区，统一紧凑卡片式）
 const visibleStages = computed(() => {
   if (!selectedJob.value) {
-    return [...FUNNEL_STAGES];
+    return [...END_ZONE_STAGES, ...FUNNEL_STAGES];
   }
 
   const jobType = selectedJob.value.type || selectedJob.value.jobType;
@@ -76,7 +82,7 @@ const visibleStages = computed(() => {
     return true;
   });
 
-  return filtered;
+  return [...END_ZONE_STAGES, ...filtered];
 });
 
 // ===== 方法 =====
@@ -463,6 +469,7 @@ onMounted(() => {
   flex-direction: column;
   height: calc(100vh - 130px);
   max-width: 100%;
+  overflow-y: auto;
 }
 
 /* === 工具栏 === */
@@ -601,7 +608,6 @@ onMounted(() => {
 /* === 看板容器 === */
 .pipeline-board-container {
   flex: 1;
-  overflow: hidden;
   min-height: 0;
 }
 </style>

@@ -1,5 +1,5 @@
 <script setup>
-/* 新励成招聘管理系统 V2.0 — 看板管道列 */
+/* 新励成招聘管理系统 V2.0 — 看板阶段列（支持完整/紧凑双模式） */
 
 import { computed } from 'vue';
 import CandidateCard from './CandidateCard.vue';
@@ -10,6 +10,7 @@ const props = defineProps({
   candidatesMap: { type: Object, default: () => ({}) },
   job: { type: Object, default: null },
   loading: { type: Boolean, default: false },
+  compact: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(['card-click', 'card-quick-move']);
@@ -18,8 +19,12 @@ const stageLabel = computed(() => props.stage?.label || '');
 const stageKey = computed(() => props.stage?.key || '');
 const isOptional = computed(() => props.stage?.optional === true);
 const isEndZone = computed(() => props.stage?.isEnd === true);
-
 const count = computed(() => props.applications?.length || 0);
+
+// 紧凑模式下最多显示的卡片数
+const MAX_VISIBLE = 5;
+const visibleApps = computed(() => props.applications.slice(0, MAX_VISIBLE));
+const hiddenCount = computed(() => Math.max(0, props.applications.length - MAX_VISIBLE));
 
 const columnStyle = computed(() => {
   const colorMap = {
@@ -38,9 +43,7 @@ const columnStyle = computed(() => {
     rejected: '#DC4C4C',
     withdrawn: '#9B8B7C',
   };
-  return {
-    '--col-accent': colorMap[stageKey.value] || '#8B8F97',
-  };
+  return { '--col-accent': colorMap[stageKey.value] || '#8B8F97' };
 });
 
 function onCardClick(payload) {
@@ -55,7 +58,7 @@ function onCardQuickMove(payload) {
 <template>
   <div
     class="kanban-column"
-    :class="{ optional: isOptional, 'end-zone': isEndZone }"
+    :class="{ optional: isOptional, 'end-zone': isEndZone, 'compact-mode': compact }"
     :style="columnStyle"
     :data-stage="stageKey"
   >
@@ -68,41 +71,42 @@ function onCardQuickMove(payload) {
       <div class="col-accent-bar"></div>
     </div>
 
-    <!-- 卡片列表：TransitionGroup 不设 tag → Fragment 渲染，卡片是 .col-body 的直系子元素 → SortableJS 可独立拖拽 -->
-    <div
-      class="col-body"
-      :data-stage="stageKey"
-    >
+    <!-- 卡片列表：TransitionGroup Fragment 渲染 → 卡片是 .col-body 直系子元素 → SortableJS 独立拖拽 -->
+    <div class="col-body" :data-stage="stageKey">
       <TransitionGroup name="card-list">
         <CandidateCard
-          v-for="app in applications"
+          v-for="app in visibleApps"
           :key="app._id"
           :candidate="candidatesMap[app.candidateId] || {}"
           :application="app"
           :job="job"
+          :compact="compact"
           @click="onCardClick"
           @quick-move="onCardQuickMove"
         />
       </TransitionGroup>
 
+      <!-- 隐藏的更多卡片 -->
+      <div v-if="hiddenCount > 0" class="col-more">
+        + 还有 {{ hiddenCount }} 位
+      </div>
+
       <!-- 空状态 -->
       <div v-if="!loading && count === 0" class="col-empty">
-        <span class="col-empty-icon">—</span>
-        <span class="col-empty-text">暂无候选人</span>
+        <span class="col-empty-icon">{{ isEndZone ? '📥' : '—' }}</span>
+        <span class="col-empty-text">{{ isEndZone ? '拖拽到此' : '暂无候选人' }}</span>
       </div>
 
       <!-- 加载骨架 -->
       <div v-if="loading" class="col-loading">
-        <div class="skeleton-card" v-for="i in 2" :key="i">
-          <div class="skeleton-line skeleton-name"></div>
-          <div class="skeleton-line skeleton-pos"></div>
-        </div>
+        <div class="skeleton-line" v-for="i in 2" :key="i"></div>
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
+/* === 列容器 === */
 .kanban-column {
   flex: 0 0 260px;
   min-width: 260px;
@@ -111,6 +115,14 @@ function onCardQuickMove(payload) {
   display: flex;
   flex-direction: column;
   max-height: calc(100vh - 180px);
+  transition: all var(--transition);
+}
+
+/* 紧凑模式 */
+.kanban-column.compact-mode {
+  flex: 0 0 175px;
+  min-width: 175px;
+  max-height: 300px;
 }
 
 .kanban-column.optional {
@@ -121,6 +133,10 @@ function onCardQuickMove(payload) {
 .col-header {
   padding: var(--spacing-sm) var(--spacing-md);
   flex-shrink: 0;
+}
+
+.compact-mode .col-header {
+  padding: 8px 10px;
 }
 
 .col-title-row {
@@ -137,6 +153,10 @@ function onCardQuickMove(payload) {
   letter-spacing: -0.01em;
 }
 
+.compact-mode .col-title {
+  font-size: 12px;
+}
+
 .col-count {
   font-size: 11px;
   font-weight: 700;
@@ -148,6 +168,11 @@ function onCardQuickMove(payload) {
   text-align: center;
 }
 
+.compact-mode .col-count {
+  font-size: 10px;
+  padding: 1px 6px;
+}
+
 .col-accent-bar {
   height: 3px;
   background: var(--col-accent);
@@ -156,16 +181,26 @@ function onCardQuickMove(payload) {
   opacity: 0.6;
 }
 
-/* === 卡片容器（现在也是 SortableJS 的挂载点）=== */
+.compact-mode .col-accent-bar {
+  height: 2px;
+  margin-top: 6px;
+}
+
+/* === 卡片容器 === */
 .col-body {
   flex: 1;
   overflow-y: auto;
   padding: 0 var(--spacing-sm) var(--spacing-sm);
   min-height: 120px;
-  /* 替代原来 .card-list 的 flex 布局（TransitionGroup Fragment 没有包裹层） */
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.compact-mode .col-body {
+  padding: 0 6px 6px;
+  min-height: 60px;
+  gap: 3px;
 }
 
 /* === TransitionGroup 动画 === */
@@ -176,16 +211,24 @@ function onCardQuickMove(payload) {
 
 :deep(.card-list-enter-from) {
   opacity: 0;
-  transform: translateY(-8px);
+  transform: translateY(-4px);
 }
 
 :deep(.card-list-leave-to) {
   opacity: 0;
-  transform: translateY(8px);
+  transform: translateY(4px);
 }
 
 :deep(.card-list-move) {
   transition: transform 0.25s ease;
+}
+
+/* === 更多提示 === */
+.col-more {
+  text-align: center;
+  font-size: 11px;
+  color: var(--gray-400);
+  padding: 4px;
 }
 
 /* === 空状态 === */
@@ -194,13 +237,22 @@ function onCardQuickMove(payload) {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: var(--spacing-xl) var(--spacing-md);
+  padding: var(--spacing-md);
   color: var(--gray-300);
+  flex: 1;
+}
+
+.compact-mode .col-empty {
+  padding: var(--spacing-sm);
 }
 
 .col-empty-icon {
-  font-size: 20px;
-  margin-bottom: var(--spacing-xs);
+  font-size: 18px;
+  margin-bottom: 2px;
+}
+
+.compact-mode .col-empty-icon {
+  font-size: 16px;
 }
 
 .col-empty-text {
@@ -208,35 +260,19 @@ function onCardQuickMove(payload) {
   color: var(--gray-300);
 }
 
-/* === 加载骨架 === */
+/* === 加载 === */
 .col-loading {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: var(--spacing-xs);
-}
-
-.skeleton-card {
-  background: #fff;
-  border-radius: var(--radius-sm);
-  padding: 12px 14px;
-  border: 1px solid var(--gray-100);
+  gap: 6px;
+  padding: 8px;
 }
 
 .skeleton-line {
-  height: 10px;
+  height: 8px;
   background: var(--gray-100);
   border-radius: 4px;
   animation: skeleton-pulse 1.5s ease-in-out infinite;
-}
-
-.skeleton-name {
-  width: 60%;
-  margin-bottom: 8px;
-}
-
-.skeleton-pos {
-  width: 80%;
 }
 
 @keyframes skeleton-pulse {
@@ -263,7 +299,7 @@ function onCardQuickMove(payload) {
   cursor: grabbing !important;
 }
 
-/* === 结束区域（仅当作为完整列展示时）=== */
+/* === 结束区域 === */
 .kanban-column.end-zone {
   opacity: 0.85;
   border: 2px dashed var(--gray-300);
@@ -272,10 +308,5 @@ function onCardQuickMove(payload) {
 
 .kanban-column.end-zone .col-title {
   color: var(--gray-500);
-}
-
-.kanban-column.end-zone .col-empty {
-  color: var(--gray-300);
-  font-style: italic;
 }
 </style>

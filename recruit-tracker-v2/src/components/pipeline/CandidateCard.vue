@@ -8,6 +8,7 @@ const props = defineProps({
   candidate: { type: Object, required: true },
   application: { type: Object, required: true },
   job: { type: Object, default: null },
+  compact: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(['click', 'quick-move']);
@@ -97,42 +98,41 @@ function handleClick() {
 </script>
 
 <template>
+  <!-- 紧凑模式：迷你单行卡片 -->
   <div
+    v-if="compact"
+    class="candidate-card-compact"
+    :data-id="application._id"
+    @click="handleClick"
+    title="点击查看详情"
+  >
+    <span class="compact-name">{{ name }}</span>
+    <span class="compact-badge badge" :class="sourceBadgeClass">{{ sourceLabel }}</span>
+  </div>
+
+  <!-- 完整模式 -->
+  <div
+    v-else
     class="candidate-card"
     :class="{ stale: isStale }"
     :data-id="application._id"
     @click="handleClick"
     @mouseleave="closeMenu"
   >
-    <!-- 顶部：名字 + 来源标签 + 快速操作 -->
     <div class="card-top">
       <span class="card-name">{{ name }}</span>
       <div class="card-top-right">
         <span class="card-source badge" :class="sourceBadgeClass">{{ sourceLabel }}</span>
-
-        <!-- 快速流转按钮 -->
         <div class="quick-move-wrap" @click.stop>
-          <button
-            class="quick-move-btn"
-            :class="{ active: menuOpen }"
-            @click="toggleMenu"
-            title="快速流转"
-          >
+          <button class="quick-move-btn" :class="{ active: menuOpen }" @click="toggleMenu" title="快速流转">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
               <polyline points="9 18 15 12 9 6"/>
             </svg>
           </button>
-
-          <!-- 下拉菜单 -->
           <Transition name="menu-drop">
             <div v-if="menuOpen" class="quick-move-menu">
               <div class="menu-label">阶段推进</div>
-              <button
-                v-for="s in availableStages"
-                :key="s.key"
-                class="menu-item"
-                @click="quickMove(s.key, $event)"
-              >
+              <button v-for="s in availableStages" :key="s.key" class="menu-item" @click="quickMove(s.key, $event)">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>
                 </svg>
@@ -153,11 +153,7 @@ function handleClick() {
         </div>
       </div>
     </div>
-
-    <!-- 岗位 -->
     <div class="card-position">{{ position }}</div>
-
-    <!-- 底部：停留天数 + 手机号 -->
     <div class="card-meta">
       <span class="card-stay" :class="{ 'stay-warn': isStale }">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -171,6 +167,45 @@ function handleClick() {
 </template>
 
 <style scoped>
+/* === 紧凑模式迷你卡片 === */
+.candidate-card-compact {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  background: #fff;
+  border: 1px solid var(--gray-100);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all var(--transition);
+  user-select: none;
+  font-size: 12px;
+}
+
+.candidate-card-compact:hover {
+  border-color: var(--gray-200);
+  background: var(--gray-25);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow);
+}
+
+.compact-name {
+  font-weight: 500;
+  color: var(--gray-700);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compact-badge {
+  font-size: 9px;
+  padding: 1px 5px;
+  flex-shrink: 0;
+}
+
+/* === 完整模式 === */
 .candidate-card {
   background: #fff;
   border: 1px solid var(--gray-100);
