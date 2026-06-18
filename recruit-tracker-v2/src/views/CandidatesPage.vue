@@ -106,6 +106,9 @@ async function loadData(filters = {}) {
       conditions.status = 'active';
     }
 
+    // 排除已归档数据
+    conditions.isArchived = dbInstance.command.neq(true);
+
     if (Object.keys(conditions).length > 0) {
       for (const [key, value] of Object.entries(conditions)) {
         query = query.where({ [key]: value });

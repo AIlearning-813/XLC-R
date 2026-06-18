@@ -11,9 +11,11 @@ const props = defineProps({
   job: { type: Object, default: null },
   loading: { type: Boolean, default: false },
   compact: { type: Boolean, default: false },
+  selectionMode: { type: Boolean, default: false },
+  selectedIds: { type: Set, default: () => new Set() },
 });
 
-const emit = defineEmits(['card-click', 'card-quick-move']);
+const emit = defineEmits(['card-click', 'card-quick-move', 'toggle-select']);
 
 const stageLabel = computed(() => props.stage?.label || '');
 const stageKey = computed(() => props.stage?.key || '');
@@ -90,8 +92,11 @@ function onCardQuickMove(payload) {
           :application="app"
           :job="job"
           :compact="compact"
+          :selection-mode="selectionMode"
+          :selected="selectedIds.has(app._id)"
           @click="onCardClick"
           @quick-move="onCardQuickMove"
+          @toggle-select="(id) => emit('toggle-select', id)"
         />
       </TransitionGroup>
 

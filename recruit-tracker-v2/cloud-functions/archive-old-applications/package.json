@@ -1,0 +1,9 @@
+{
+  "name": "archive-old-applications",
+  "version": "1.0.0",
+  "description": "年度归档已结束/已入职的旧Application",
+  "main": "index.js",
+  "dependencies": {
+    "@cloudbase/node-sdk": "^2.0.0"
+  }
+}

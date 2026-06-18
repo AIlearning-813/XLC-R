@@ -11,8 +11,10 @@ import { FUNNEL_STAGES } from '../config/constants';
 import { safeErrorMsg } from '../services/error-messages';
 import { isVersionConflict } from '../services/optimistic-lock';
 import { getInterviewRounds, getStagesForJob } from '../services/pipeline-engine';
+import { useBatchSelection } from '../composables/useBatchSelection';
 import KanbanBoard from '../components/pipeline/KanbanBoard.vue';
 import StageTransitionDialog from '../components/pipeline/StageTransitionDialog.vue';
+import BatchActionBar from '../components/pipeline/BatchActionBar.vue';
 
 const router = useRouter();
 const jobStore = useJobStore();
@@ -40,6 +42,22 @@ const selectedApplication = ref(null);
 
 // 结束流程：显示淘汰/放弃投放区（由 KanbanBoard 左侧紧凑投放区实现）
 const showEndZones = ref(true);
+
+// 批量选择
+const batchSelection = useBatchSelection();
+
+function onToggleSelect(id) {
+  batchSelection.toggle(id);
+}
+
+function onBatchDone() {
+  batchSelection.clear();
+  refreshBoard();
+}
+
+function onBatchCancel() {
+  batchSelection.clear();
+}
 
 // ===== 计算属性 =====
 const jobs = computed(() => jobStore.activeJobs);
@@ -90,6 +108,7 @@ async function loadUnassigned() {
       .where({
         jobId: '',
         status: 'active',
+        isArchived: dbInstance.command.neq(true),
       })
       .orderBy('createdAt', 'desc')
       .limit(50)
@@ -156,6 +175,7 @@ async function loadApplications() {
       .where({
         jobId: selectedJobId.value,
         status: 'active',
+        isArchived: dbInstance.command.neq(true),
       })
       .orderBy('createdAt', 'desc')
       .get();
@@ -166,6 +186,7 @@ async function loadApplications() {
       .where({
         jobId: selectedJobId.value,
         status: dbInstance.command.in(['rejected', 'withdrawn']),
+        isArchived: dbInstance.command.neq(true),
       })
       .orderBy('endedAt', 'desc')
       .limit(50)
@@ -374,6 +395,22 @@ onMounted(() => {
 
       <div class="toolbar-right">
         <button
+          v-if="!batchSelection.selectionMode.value"
+          class="btn btn-sm btn-secondary"
+          @click="batchSelection.selectAll(applications.map(a => a._id))"
+          :disabled="applications.length === 0"
+          title="进入批量选择模式"
+        >
+          ☐ 批量选择
+        </button>
+        <button
+          v-if="batchSelection.selectionMode.value"
+          class="btn btn-sm btn-primary"
+          @click="batchSelection.clear()"
+        >
+          取消选择 ({{ batchSelection.count.value }})
+        </button>
+        <button
           class="btn btn-sm btn-secondary"
           @click="refreshBoard"
           :disabled="loading"
@@ -442,9 +479,22 @@ onMounted(() => {
         :candidates-map="candidatesMap"
         :job="selectedJob"
         :loading="loading"
+        :selection-mode="batchSelection.selectionMode.value"
+        :selected-ids="batchSelection.selectedIds.value"
         @card-move="handleCardMove"
         @card-click="handleCardClick"
         @card-quick-move="handleCardQuickMove"
+        @toggle-select="onToggleSelect"
+      />
+
+      <!-- 批量操作栏 -->
+      <BatchActionBar
+        :selected-apps="batchSelection.getSelectedList(applications)"
+        :candidates-map="candidatesMap"
+        :job="selectedJob"
+        :operator-id="auth.userName"
+        @done="onBatchDone"
+        @cancel="onBatchCancel"
       />
     </div>
 

@@ -3,6 +3,7 @@
 
 import { ref, computed, watch } from 'vue';
 import { FUNNEL_STAGES, END_REASONS } from '../../config/constants';
+import { getIntermediateStages, stageToFunnelKey, STAGE_LABEL_MAP } from '../../services/pipeline-engine';
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -54,6 +55,20 @@ const canConfirm = computed(() => {
   }
   return true;
 });
+
+// 跳阶段回填预览
+const backfillStages = computed(() => {
+  if (isEnding.value) return [];
+  const jobType = props.job?.type || props.job?.jobType || null;
+  const intermediates = getIntermediateStages(props.fromStage, props.toStage, jobType);
+  return intermediates.map((key) => ({
+    key,
+    label: STAGE_LABEL_MAP[key] || key,
+    funnelKey: stageToFunnelKey(key),
+  }));
+});
+
+const hasBackfill = computed(() => backfillStages.value.length > 0);
 
 function handleConfirm() {
   let reasonLabel;
@@ -129,6 +144,36 @@ watch(() => props.visible, (v) => {
                   :class="{ end: isEnding }"
                 >{{ isEnding ? (endType === 'rejected' ? '淘汰' : '放弃') : toLabel }}</span>
               </div>
+            </div>
+
+            <!-- 跳阶段回填预览 -->
+            <div v-if="hasBackfill && !isEnding" class="backfill-preview">
+              <div class="backfill-header">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+                </svg>
+                <span>将自动回填 {{ backfillStages.length }} 个中间阶段</span>
+              </div>
+              <div class="backfill-list">
+                <div
+                  v-for="(s, i) in backfillStages"
+                  :key="s.key"
+                  class="backfill-item"
+                >
+                  <span class="backfill-dot auto"></span>
+                  <span class="backfill-label">{{ s.label }}</span>
+                  <span class="backfill-badge">自动</span>
+                  <span
+                    v-if="i < backfillStages.length - 1"
+                    class="backfill-arrow"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>
+                    </svg>
+                  </span>
+                </div>
+              </div>
+              <p class="backfill-hint">回填时间戳均设为当前时间，不会覆盖已有漏斗数据</p>
             </div>
 
             <!-- 结束原因选择 -->
@@ -381,6 +426,80 @@ watch(() => props.visible, (v) => {
   justify-content: flex-end;
   gap: var(--spacing-sm);
   padding: 0 var(--spacing-lg) var(--spacing-lg);
+}
+
+/* === 回填预览 === */
+.backfill-preview {
+  background: #f0f7ff;
+  border: 1px solid #b8d8f0;
+  border-radius: var(--radius-sm);
+  padding: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+}
+
+.backfill-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: #3B4F8C;
+  margin-bottom: 10px;
+}
+
+.backfill-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.backfill-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.backfill-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.backfill-dot.auto {
+  background: #4A9C7C;
+}
+
+.backfill-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--gray-600);
+  white-space: nowrap;
+}
+
+.backfill-badge {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: var(--radius-full);
+  background: #e0f0e8;
+  color: #4A9C7C;
+  font-weight: 600;
+}
+
+.backfill-arrow {
+  color: var(--gray-300);
+  display: flex;
+  align-items: center;
+  margin: 0 2px;
+}
+
+.backfill-hint {
+  margin: 0;
+  font-size: 10px;
+  color: var(--gray-400);
+  line-height: 1.4;
 }
 
 /* === 过渡动画 === */

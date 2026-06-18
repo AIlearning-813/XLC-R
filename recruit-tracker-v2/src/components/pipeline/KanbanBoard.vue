@@ -12,9 +12,11 @@ const props = defineProps({
   candidatesMap: { type: Object, default: () => ({}) },
   job: { type: Object, default: null },
   loading: { type: Boolean, default: false },
+  selectionMode: { type: Boolean, default: false },
+  selectedIds: { type: Set, default: () => new Set() },
 });
 
-const emit = defineEmits(['card-move', 'card-click', 'card-quick-move']);
+const emit = defineEmits(['card-move', 'card-click', 'card-quick-move', 'toggle-select']);
 
 // ===== 按阶段分组（使用流转引擎） =====
 const applicationsByStage = computed(() => {
@@ -104,8 +106,11 @@ function onCardQuickMove(payload) {
         :job="job"
         :loading="loading"
         :compact="true"
+        :selection-mode="selectionMode"
+        :selected-ids="selectedIds"
         @card-click="onCardClick"
         @card-quick-move="onCardQuickMove"
+        @toggle-select="(id) => emit('toggle-select', id)"
       />
 
       <!-- 空状态 -->

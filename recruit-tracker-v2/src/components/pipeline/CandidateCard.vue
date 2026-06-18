@@ -9,9 +9,11 @@ const props = defineProps({
   application: { type: Object, required: true },
   job: { type: Object, default: null },
   compact: { type: Boolean, default: false },
+  selectionMode: { type: Boolean, default: false },
+  selected: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(['click', 'quick-move']);
+const emit = defineEmits(['click', 'quick-move', 'toggle-select']);
 
 const name = computed(() => props.candidate?.name || '未命名');
 const position = computed(() => {
@@ -108,7 +110,16 @@ function quickMove(toStage, event) {
 }
 
 function handleClick() {
+  if (props.selectionMode) {
+    emit('toggle-select', props.application._id);
+    return;
+  }
   emit('click', { candidate: props.candidate, application: props.application });
+}
+
+function handleToggleSelect(event) {
+  event.stopPropagation();
+  emit('toggle-select', props.application._id);
 }
 </script>
 
@@ -117,11 +128,21 @@ function handleClick() {
   <div
     v-if="compact"
     class="candidate-card-compact"
-    :class="{ 'is-ended': endInfo }"
+    :class="{ 'is-ended': endInfo, 'is-selected': selected, 'selection-mode': selectionMode }"
     :data-id="application._id"
     @click="handleClick"
     :title="endInfo ? `${endInfo.typeLabel}于 ${endInfo.stageLabel}` : '点击查看详情'"
   >
+    <button
+      v-if="selectionMode"
+      class="compact-check"
+      :class="{ checked: selected }"
+      @click="handleToggleSelect"
+    >
+      <svg v-if="selected" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+        <polyline points="20 6 9 17 4 12"/>
+      </svg>
+    </button>
     <span class="compact-name">{{ name }}</span>
     <span v-if="endInfo" class="compact-end-badge" :class="application.status === 'rejected' ? 'end-reject' : 'end-withdraw'">
       {{ endInfo.typeLabel }}于 {{ endInfo.stageLabel }}
@@ -247,6 +268,42 @@ function handleClick() {
 .candidate-card-compact.is-ended {
   opacity: 0.75;
   border-left: 2px solid var(--gray-300);
+}
+
+.candidate-card-compact.selection-mode {
+  padding-left: 4px;
+}
+
+.candidate-card-compact.is-selected {
+  border-color: var(--primary);
+  background: var(--primary-bg);
+  box-shadow: 0 0 0 2px var(--primary-bg);
+}
+
+.compact-check {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--gray-300);
+  border-radius: 3px;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+  transition: all var(--transition);
+  color: transparent;
+}
+
+.compact-check:hover {
+  border-color: var(--primary);
+}
+
+.compact-check.checked {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
 }
 
 /* === 完整模式 === */
