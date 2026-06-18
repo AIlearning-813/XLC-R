@@ -282,6 +282,14 @@ function handleCardMove({ applicationId, fromStage, toStage }) {
   dialogVisible.value = true;
 }
 
+// 处理卡片快速流转按钮（不拖拽，直接弹窗确认）
+function handleCardQuickMove({ applicationId, candidate, application, fromStage, toStage }) {
+  pendingTransition.value = { applicationId, fromStage, toStage, isUnassigned: false };
+  selectedCandidate.value = candidate;
+  selectedApplication.value = application;
+  dialogVisible.value = true;
+}
+
 // 确认流转
 async function handleTransitionConfirm({ note, reason }) {
   if (!pendingTransition.value) return;
@@ -446,6 +454,7 @@ onMounted(() => {
         :loading="loading"
         @card-move="handleCardMove"
         @card-click="handleCardClick"
+        @card-quick-move="handleCardQuickMove"
       />
     </div>
 

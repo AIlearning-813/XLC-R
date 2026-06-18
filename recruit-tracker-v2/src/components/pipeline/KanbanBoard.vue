@@ -13,7 +13,7 @@ const props = defineProps({
   loading: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(['card-move', 'card-click']);
+const emit = defineEmits(['card-move', 'card-click', 'card-quick-move']);
 
 // ===== 按阶段分组 =====
 const applicationsByStage = computed(() => {
@@ -34,34 +34,56 @@ const applicationsByStage = computed(() => {
 const boardRef = ref(null);
 const sortables = [];
 
+/** 从元素向上查找 data-stage 属性 */
+function getStageFromEl(el) {
+  const stageEl = el?.closest?.('[data-stage]');
+  return stageEl?.dataset?.stage || null;
+}
+
 function initSortable() {
   destroySortable();
 
   if (!boardRef.value) return;
 
-  const columns = boardRef.value.querySelectorAll('.col-body');
-  columns.forEach((colEl) => {
-    const instance = Sortable.create(colEl, {
+  // ⚠️ 关键修复：SortableJS 必须挂在 .card-list 上，不是 .col-body
+  // 因为 TransitionGroup 把所有卡片包在 .card-list 里，.col-body 的直接子元素只有 .card-list 一个
+  const cardLists = boardRef.value.querySelectorAll('.card-list');
+  cardLists.forEach((listEl) => {
+    const instance = Sortable.create(listEl, {
       group: 'pipeline',
       animation: 200,
       easing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)',
       ghostClass: 'sortable-ghost',
       dragClass: 'sortable-drag',
-      delay: 100, // 防止误触
+      chosenClass: 'sortable-chosen',
+      delay: 100,
       delayOnTouchOnly: true,
       touchStartThreshold: 5,
+
+      // 拖拽时自动滚动看板（解决页面太长的问题）
+      scroll: true,
+      scrollSensitivity: 80,
+      scrollSpeed: 15,
+      bubbleScroll: true,
+
+      // 空列表也能放入
+      emptyInsertThreshold: 5,
+
+      onStart: (evt) => {
+        // 拖拽开始时给卡片加样式
+        evt.item.classList.add('is-dragging');
+      },
+
       onEnd: (evt) => {
-        // 提取 application ID 和新旧阶段
-        const itemEl = evt.item;
-        const appId = itemEl?.dataset?.id;
-        const fromStage = evt.from?.dataset?.stage;
-        const toStage = evt.to?.dataset?.stage;
+        evt.item.classList.remove('is-dragging');
+
+        const appId = evt.item?.dataset?.id;
+        const fromStage = getStageFromEl(evt.from);
+        const toStage = getStageFromEl(evt.to);
 
         if (!appId || !fromStage || !toStage) return;
         if (fromStage === toStage) return;
 
-        // 如果用户拖到列容器但不是卡片列表（空列拖放），SortableJS 已经处理了 DOM
-        // 我们触发事件让 PipelinePage 处理确认和数据库更新
         emit('card-move', {
           applicationId: appId,
           fromStage,
@@ -80,18 +102,12 @@ function destroySortable() {
   sortables.length = 0;
 }
 
-// 当 applications 变化时重新初始化（因为列内卡片数量变化）
-watch(() => props.applications, () => {
+// 当 applications 或 stages 变化时重新初始化
+watch([() => props.applications, () => props.stages], () => {
   nextTick(() => {
     initSortable();
   });
 }, { deep: true });
-
-watch(() => props.stages, () => {
-  nextTick(() => {
-    initSortable();
-  });
-});
 
 onMounted(() => {
   nextTick(() => {
@@ -108,7 +124,11 @@ function onCardClick(payload) {
   emit('card-click', payload);
 }
 
-// ===== 计算看板横向滚动 =====
+function onCardQuickMove(payload) {
+  emit('card-quick-move', payload);
+}
+
+// ===== 计算看板列数 =====
 const stageCount = computed(() => props.stages.length);
 </script>
 
@@ -127,17 +147,14 @@ const stageCount = computed(() => props.stages.length);
         :job="job"
         :loading="loading"
         @card-click="onCardClick"
+        @card-quick-move="onCardQuickMove"
       />
 
       <!-- 空状态 -->
       <div v-if="!loading && applications.length === 0" class="board-empty">
         <div class="board-empty-icon">📋</div>
-        <p class="board-empty-text">
-          该岗位暂无候选人
-        </p>
-        <p class="board-empty-hint">
-          候选人将通过邮箱自动归集或手动录入进入看板
-        </p>
+        <p class="board-empty-text">该岗位暂无候选人</p>
+        <p class="board-empty-hint">候选人将通过邮箱自动归集或手动录入进入看板</p>
       </div>
     </div>
   </div>
@@ -158,7 +175,6 @@ const stageCount = computed(() => props.stages.length);
   overflow-y: hidden;
   height: 100%;
   scroll-behavior: smooth;
-  /* 横向滚动条美化 */
   scrollbar-width: thin;
   scrollbar-color: var(--gray-200) transparent;
 }
@@ -208,5 +224,28 @@ const stageCount = computed(() => props.stages.length);
   font-size: var(--font-size-sm);
   color: var(--gray-300);
   margin: 0;
+}
+
+/* === 拖拽全身样式（:deep 穿透到子组件） === */
+:deep(.sortable-ghost) {
+  opacity: 0.35;
+  background: var(--primary-bg) !important;
+  border: 2px dashed var(--primary) !important;
+  border-radius: var(--radius-sm);
+}
+
+:deep(.sortable-drag) {
+  opacity: 0.95;
+  transform: rotate(2deg) scale(1.03);
+  box-shadow: var(--shadow-lg) !important;
+  z-index: 9999;
+}
+
+:deep(.sortable-chosen) {
+  opacity: 0.5;
+}
+
+:deep(.is-dragging) {
+  cursor: grabbing !important;
 }
 </style>

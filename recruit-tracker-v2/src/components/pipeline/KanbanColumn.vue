@@ -12,7 +12,7 @@ const props = defineProps({
   loading: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(['card-click']);
+const emit = defineEmits(['card-click', 'card-quick-move']);
 
 const stageLabel = computed(() => props.stage?.label || '');
 const stageKey = computed(() => props.stage?.key || '');
@@ -47,6 +47,10 @@ const columnStyle = computed(() => {
 function onCardClick(payload) {
   emit('card-click', payload);
 }
+
+function onCardQuickMove(payload) {
+  emit('card-quick-move', payload);
+}
 </script>
 
 <template>
@@ -78,6 +82,7 @@ function onCardClick(payload) {
           :application="app"
           :job="job"
           @click="onCardClick"
+          @quick-move="onCardQuickMove"
         />
       </TransitionGroup>
 
