@@ -12,29 +12,54 @@ const app = cloudbase.init({ env: cloudbase.SYMBOL_CURRENT_ENV });
 
 exports.main = async (event) => {
   const { fileId } = event;
-  if (!fileId) return { success: false, error: '缺少 fileId' };
+  console.log('[get-file-url] 收到请求, fileId:', fileId);
+
+  if (!fileId) {
+    console.log('[get-file-url] 缺少 fileId');
+    return { success: false, error: '缺少 fileId' };
+  }
 
   try {
-    // 直接下载文件内容（管理员权限）
+    console.log('[get-file-url] 开始下载文件...');
     const result = await app.downloadFile({ fileID: fileId });
-    if (!result || !result.fileContent) {
+    console.log('[get-file-url] downloadFile 返回类型:', typeof result);
+    console.log('[get-file-url] downloadFile 返回 keys:', result ? Object.keys(result) : 'null/undefined');
+
+    // 兼容不同版本的 SDK：result 可能是 { fileContent: Buffer } 或直接是 Buffer
+    let fileContent = null;
+    if (Buffer.isBuffer(result)) {
+      fileContent = result;
+    } else if (result && result.fileContent) {
+      fileContent = result.fileContent;
+    }
+
+    if (!fileContent) {
+      console.log('[get-file-url] 文件内容为空, result:', JSON.stringify(Object.keys(result || {})));
       return { success: false, error: '文件内容为空' };
     }
 
-    const buffer = Buffer.from(result.fileContent);
-    const MAX_SIZE = 5 * 1024 * 1024; // 5MB 限制（base64 后约 6.7MB，云函数返回限制 ~6MB）
+    const buffer = Buffer.from(fileContent);
+    const MAX_SIZE = 5 * 1024 * 1024; // 5MB 限制
 
     if (buffer.length > MAX_SIZE) {
-      return { success: false, error: `文件过大（${(buffer.length / 1024 / 1024).toFixed(1)}MB），超过 5MB 限制` };
+      const sizeMB = (buffer.length / 1024 / 1024).toFixed(1);
+      console.log('[get-file-url] 文件过大:', sizeMB + 'MB');
+      return { success: false, error: `文件过大（${sizeMB}MB），超过 5MB 限制` };
     }
+
+    const mimeType = (result && result.mimeType) || 'application/octet-stream';
+    console.log('[get-file-url] 成功, 大小:', buffer.length, '类型:', mimeType);
 
     return {
       success: true,
       data: buffer.toString('base64'),
-      contentType: result.mimeType || 'application/octet-stream',
+      contentType: mimeType,
       size: buffer.length,
     };
   } catch (err) {
-    return { success: false, error: err.message };
+    const errMsg = err ? (err.message || err.code || String(err)) : '未知错误';
+    console.error('[get-file-url] 下载失败:', errMsg);
+    console.error('[get-file-url] 错误详情:', JSON.stringify(err, Object.getOwnPropertyNames(err)));
+    return { success: false, error: errMsg };
   }
 };
