@@ -156,7 +156,7 @@ export const useApplicationStore = defineStore('application', () => {
 
     const oldStage = current.stage;
     const currentStatus = current.status || 'active';
-    const expectedVersion = current._version;
+    const expectedVersion = typeof current._version === 'number' ? current._version : 0;
 
     // === 流转引擎校验 ===
     const validation = canTransition(oldStage, newStage, {
@@ -253,7 +253,7 @@ export const useApplicationStore = defineStore('application', () => {
       || await fetchById(id);
     if (!current) throw new Error('申请记录不存在');
 
-    const expectedVersion = current._version;
+    const expectedVersion = typeof current._version === 'number' ? current._version : 0;
 
     const updateData = {
       status, // 'rejected' | 'withdrawn'

@@ -88,7 +88,7 @@ export const useCandidateStore = defineStore('candidate', () => {
     }
 
     const doc = candidates.value.find(c => c._id === id) || currentCandidate.value;
-    const expectedVersion = doc?._version;
+    const expectedVersion = typeof doc?._version === 'number' ? doc._version : 0;
 
     // 带版本锁更新
     const newVersion = await versionedUpdate('Candidate', id, expectedVersion, data);

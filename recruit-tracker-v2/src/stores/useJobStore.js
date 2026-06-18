@@ -102,7 +102,7 @@ export const useJobStore = defineStore('job', () => {
     // 获取当前版本号
     const current = jobs.value.find(j => j._id === id);
     if (!current) throw new Error('岗位不存在');
-    const expectedVersion = current._version;
+    const expectedVersion = typeof current._version === 'number' ? current._version : 0;
 
     // 带版本锁更新
     const newVersion = await versionedUpdate('Job', id, expectedVersion, data);
@@ -124,7 +124,7 @@ export const useJobStore = defineStore('job', () => {
     // 获取当前版本号
     const current = jobs.value.find(j => j._id === id);
     if (!current) throw new Error('岗位不存在');
-    const expectedVersion = current._version;
+    const expectedVersion = typeof current._version === 'number' ? current._version : 0;
 
     const updateData = { status: 'inactive' };
 
