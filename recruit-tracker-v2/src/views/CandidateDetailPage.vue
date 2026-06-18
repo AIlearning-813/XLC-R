@@ -11,6 +11,7 @@ import cloudbase from '../services/cloudbase';
 import { getCommunications } from '../services/communication';
 import { FUNNEL_STAGES, JOB_TYPES } from '../config/constants';
 import CommunicationLog from '../components/candidates/CommunicationLog.vue';
+import mammoth from 'mammoth';
 
 const route = useRoute();
 const router = useRouter();
@@ -35,9 +36,11 @@ const editForm = ref({});
 const saving = ref(false);
 
 // 原始简历文件预览
-const fileUrl = ref('');       // blob: URL，用于 iframe 预览
+const fileUrl = ref('');       // blob: URL，用于 iframe 预览（PDF）或 img（图片）
 const fileLoading = ref(false);
 const fileError = ref('');
+const filePreviewType = ref('');  // 'pdf' | 'docx' | 'image' | 'text' | 'unknown'
+const docxHtml = ref('');         // DOCX→HTML 渲染结果
 
 // ===== 计算属性 =====
 const candidateId = computed(() => route.params.id);
@@ -268,13 +271,57 @@ function goBack() {
   router.back();
 }
 
-// 获取云存储文件并生成 Blob URL（用于预览和下载）
-// 云函数 get-file-url 用管理员身份下载文件 → 返回 base64 → 前端转 Blob URL
-// 彻底绕过：前端存储权限 + CORS + Content-Disposition 三个问题
+// ===== 文件类型检测（根据文件名后缀 + 云函数返回的 MIME） =====
+// CloudBase 对无扩展名的文件返回 application/octet-stream，导致浏览器在 iframe 中触发下载
+// 优先用 fileName 后缀判断真实类型
+function detectFileType(fileName, cloudContentType) {
+  const ext = (fileName || '').split('.').pop()?.toLowerCase();
+  const extMimeMap = {
+    pdf: 'application/pdf',
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    doc: 'application/msword',
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    gif: 'image/gif',
+    webp: 'image/webp',
+    bmp: 'image/bmp',
+    txt: 'text/plain',
+    html: 'text/html',
+    htm: 'text/html',
+    rtf: 'application/rtf',
+  };
+
+  // 云函数返回的非通用 MIME 优先，否则按扩展名查表
+  const isGenericCloud = !cloudContentType
+    || cloudContentType === 'application/octet-stream'
+    || cloudContentType === 'binary/octet-stream';
+  const mimeType = (!isGenericCloud ? cloudContentType : null) || extMimeMap[ext] || 'application/octet-stream';
+
+  // 判断预览类型
+  let previewType = 'unknown';
+  if (mimeType === 'application/pdf') {
+    previewType = 'pdf';
+  } else if (ext === 'docx' || mimeType.includes('officedocument.wordprocessingml')) {
+    previewType = 'docx';
+  } else if (mimeType.startsWith('image/')) {
+    previewType = 'image';
+  } else if (mimeType.startsWith('text/')) {
+    previewType = 'text';
+  }
+
+  return { mimeType, ext, previewType };
+}
+
+// 获取云存储文件并生成预览
+// 云函数 get-file-url 用管理员身份下载文件 → 返回 base64
+// PDF → iframe Blob URL  /  DOCX → mammoth 转 HTML  /  图片 → img  /  其他 → 下载按钮
 async function loadFileUrl() {
   if (!candidate.value?.fileId) return;
   fileLoading.value = true;
   fileError.value = '';
+  filePreviewType.value = '';
+  docxHtml.value = '';
 
   try {
     // 1. 通过云函数下载文件内容（管理员权限，返回 base64）
@@ -285,19 +332,44 @@ async function loadFileUrl() {
       throw new Error(result?.error || '获取文件失败');
     }
 
-    // 2. base64 → Blob
+    // 2. 检测文件真实类型（优先用 fileName 后缀，避免 CloudBase 返回 octet-stream）
+    const typeInfo = detectFileType(candidate.value.fileName, result.contentType);
+    filePreviewType.value = typeInfo.previewType;
+
+    // 3. base64 → ArrayBuffer
     const binaryStr = atob(result.data);
     const bytes = new Uint8Array(binaryStr.length);
     for (let i = 0; i < binaryStr.length; i++) {
       bytes[i] = binaryStr.charCodeAt(i);
     }
-    const blob = new Blob([bytes], { type: result.contentType || 'application/pdf' });
 
-    // 3. 生成 Blob URL（浏览器内联显示，不会强制下载）
-    if (fileUrl.value && fileUrl.value.startsWith('blob:')) {
-      URL.revokeObjectURL(fileUrl.value);
+    // 4. 按文件类型生成预览
+    if (typeInfo.previewType === 'docx') {
+      // DOCX → mammoth 转 HTML（不经过 Blob URL，避免浏览器误判）
+      const docxResult = await mammoth.convertToHtml({ arrayBuffer: bytes.buffer });
+      docxHtml.value = docxResult.value;
+      // 同时生成 Blob URL 用于下载（下载按钮需要）
+      if (fileUrl.value && fileUrl.value.startsWith('blob:')) {
+        URL.revokeObjectURL(fileUrl.value);
+      }
+      const blob = new Blob([bytes], { type: typeInfo.mimeType });
+      fileUrl.value = URL.createObjectURL(blob);
+    } else if (typeInfo.previewType === 'pdf' || typeInfo.previewType === 'image' || typeInfo.previewType === 'text') {
+      // PDF / 图片 / 文本 → Blob URL + iframe 或 img
+      if (fileUrl.value && fileUrl.value.startsWith('blob:')) {
+        URL.revokeObjectURL(fileUrl.value);
+      }
+      const blob = new Blob([bytes], { type: typeInfo.mimeType });
+      fileUrl.value = URL.createObjectURL(blob);
+    } else {
+      // 未知格式 → 只生成下载用 Blob URL，不尝试预览
+      if (fileUrl.value && fileUrl.value.startsWith('blob:')) {
+        URL.revokeObjectURL(fileUrl.value);
+      }
+      const blob = new Blob([bytes], { type: typeInfo.mimeType });
+      fileUrl.value = URL.createObjectURL(blob);
+      filePreviewType.value = 'unknown';
     }
-    fileUrl.value = URL.createObjectURL(blob);
   } catch (err) {
     console.error('[CandidateDetail] 加载文件失败:', err);
     fileError.value = err.message;
@@ -615,17 +687,58 @@ watch(candidateId, (newId) => {
                 <span class="spinner"></span>
                 <span>加载文件中...</span>
               </div>
-              <!-- 预览 -->
+
+              <!-- PDF 预览 → iframe（浏览器内置 PDF 查看器） -->
               <iframe
-                v-else-if="fileUrl"
+                v-else-if="filePreviewType === 'pdf' && fileUrl"
                 :src="fileUrl"
                 class="resume-iframe"
                 frameborder="0"
               ></iframe>
+
+              <!-- DOCX 预览 → mammoth 转 HTML -->
+              <div
+                v-else-if="filePreviewType === 'docx' && docxHtml"
+                class="resume-docx-preview"
+                v-html="docxHtml"
+              ></div>
+
+              <!-- 图片预览 -->
+              <div v-else-if="filePreviewType === 'image' && fileUrl" class="resume-image-preview">
+                <img :src="fileUrl" :alt="candidate.fileName || '简历图片'" class="resume-image" />
+              </div>
+
+              <!-- 文本预览 -->
+              <iframe
+                v-else-if="filePreviewType === 'text' && fileUrl"
+                :src="fileUrl"
+                class="resume-iframe resume-text-iframe"
+                frameborder="0"
+              ></iframe>
+
+              <!-- 未知格式 → 显示提示，引导下载 -->
+              <div v-else-if="filePreviewType === 'unknown' && fileUrl" class="resume-preview-placeholder">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color: var(--gray-300);">
+                  <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+                  <polyline points="14 2 14 8 20 8"/>
+                </svg>
+                <p style="font-weight: 600; color: var(--gray-500); margin: 0;">
+                  {{ candidate.fileName || '未知文件类型' }}
+                </p>
+                <p style="color: var(--gray-400); font-size: var(--font-size-sm); margin: 0;">
+                  此文件格式不支持在线预览，请下载后查看
+                </p>
+              </div>
+
               <!-- 错误 -->
-              <div v-else class="resume-preview-placeholder">
-                <p class="text-danger">{{ fileError || '文件加载失败' }}</p>
+              <div v-else-if="fileError" class="resume-preview-placeholder">
+                <p class="text-danger">{{ fileError }}</p>
                 <button class="btn btn-sm btn-secondary" @click="loadFileUrl">重新加载</button>
+              </div>
+
+              <!-- 初始状态：未加载 -->
+              <div v-else class="resume-preview-placeholder">
+                <span style="color: var(--gray-400);">点击下方「下载原始简历」按钮或刷新页面加载预览</span>
               </div>
             </div>
 
@@ -1019,6 +1132,64 @@ function getFunnelKey(stage) {
   height: 700px;
   border: none;
   background: #fff;
+}
+
+.resume-text-iframe {
+  height: 400px;
+}
+
+/* DOCX → HTML 预览 */
+.resume-docx-preview {
+  padding: var(--spacing-lg) var(--spacing-xl);
+  max-height: 700px;
+  overflow-y: auto;
+  background: #fff;
+  font-size: var(--font-size-sm);
+  line-height: 1.8;
+  color: var(--gray-700);
+}
+
+.resume-docx-preview :deep(h1),
+.resume-docx-preview :deep(h2),
+.resume-docx-preview :deep(h3) {
+  color: var(--gray-800);
+  margin-top: var(--spacing-md);
+  margin-bottom: var(--spacing-sm);
+}
+
+.resume-docx-preview :deep(p) {
+  margin: var(--spacing-sm) 0;
+}
+
+.resume-docx-preview :deep(table) {
+  border-collapse: collapse;
+  width: 100%;
+  margin: var(--spacing-sm) 0;
+}
+
+.resume-docx-preview :deep(td),
+.resume-docx-preview :deep(th) {
+  border: 1px solid var(--gray-200);
+  padding: 6px 12px;
+  font-size: var(--font-size-xs);
+}
+
+/* 图片预览 */
+.resume-image-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 300px;
+  background: var(--gray-50);
+  padding: var(--spacing-md);
+}
+
+.resume-image {
+  max-width: 100%;
+  max-height: 700px;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 }
 
 /* 提取文本折叠区 */
