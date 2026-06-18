@@ -22,7 +22,10 @@ const applicationsByStage = computed(() => {
     map[stage.key] = [];
   }
   for (const app of props.applications) {
-    const stage = app.stage || 'resume';
+    let stage = app.stage || 'resume';
+    // 已结束的候选人归入结束区域（淘汰/放弃列）
+    if (app.status === 'rejected') stage = 'rejected';
+    else if (app.status === 'withdrawn') stage = 'withdrawn';
     if (map[stage]) {
       map[stage].push(app);
     }

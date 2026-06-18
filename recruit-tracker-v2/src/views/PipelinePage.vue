@@ -168,7 +168,9 @@ async function loadApplications() {
 
   try {
     const dbInstance = db();
-    const { data: apps } = await dbInstance
+
+    // 查活跃申请
+    const { data: activeApps } = await dbInstance
       .collection('Application')
       .where({
         jobId: selectedJobId.value,
@@ -177,7 +179,18 @@ async function loadApplications() {
       .orderBy('createdAt', 'desc')
       .get();
 
-    const appList = apps || [];
+    // 查已结束申请（淘汰+放弃），展示在结束列
+    const { data: endedApps } = await dbInstance
+      .collection('Application')
+      .where({
+        jobId: selectedJobId.value,
+        status: dbInstance.command.in(['rejected', 'withdrawn']),
+      })
+      .orderBy('endedAt', 'desc')
+      .limit(50)
+      .get();
+
+    const appList = [...(activeApps || []), ...(endedApps || [])];
 
     if (appList.length > 0) {
       const candidateIds = [...new Set(appList.map((a) => a.candidateId).filter(Boolean))];

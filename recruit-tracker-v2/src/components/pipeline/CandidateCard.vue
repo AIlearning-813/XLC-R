@@ -27,6 +27,21 @@ const sourceLabel = computed(() => {
   return map[src] || src || '未知';
 });
 
+// 结束状态信息（淘汰/放弃时显示具体轮次）
+const stageLabelMap = computed(() => {
+  const map = {};
+  for (const s of FUNNEL_STAGES) map[s.key] = s.label;
+  return map;
+});
+
+const endInfo = computed(() => {
+  const app = props.application;
+  if (!app || (app.status !== 'rejected' && app.status !== 'withdrawn')) return null;
+  const stageLabel = stageLabelMap.value[app.endStage] || app.endStage || '未知阶段';
+  const typeLabel = app.status === 'rejected' ? '淘汰' : '放弃';
+  return { typeLabel, stageLabel };
+});
+
 const sourceBadgeClass = computed(() => {
   const src = props.application?.funnelMeta?.entrySource || props.candidate?.source;
   if (src === 'email') return 'badge-info';
@@ -98,16 +113,20 @@ function handleClick() {
 </script>
 
 <template>
-  <!-- 紧凑模式：迷你单行卡片 -->
+  <!-- 紧凑模式 -->
   <div
     v-if="compact"
     class="candidate-card-compact"
+    :class="{ 'is-ended': endInfo }"
     :data-id="application._id"
     @click="handleClick"
-    title="点击查看详情"
+    :title="endInfo ? `${endInfo.typeLabel}于 ${endInfo.stageLabel}` : '点击查看详情'"
   >
     <span class="compact-name">{{ name }}</span>
-    <span class="compact-badge badge" :class="sourceBadgeClass">{{ sourceLabel }}</span>
+    <span v-if="endInfo" class="compact-end-badge" :class="application.status === 'rejected' ? 'end-reject' : 'end-withdraw'">
+      {{ endInfo.typeLabel }}于 {{ endInfo.stageLabel }}
+    </span>
+    <span v-else class="compact-badge badge" :class="sourceBadgeClass">{{ sourceLabel }}</span>
   </div>
 
   <!-- 完整模式 -->
@@ -203,6 +222,31 @@ function handleClick() {
   font-size: 9px;
   padding: 1px 5px;
   flex-shrink: 0;
+}
+
+.compact-end-badge {
+  font-size: 9px;
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.compact-end-badge.end-reject {
+  background: #FEF2F2;
+  color: #DC4C4C;
+  border: 1px solid #FECACA;
+}
+
+.compact-end-badge.end-withdraw {
+  background: #FAFAF8;
+  color: #9B8B7C;
+  border: 1px solid #E8E4E0;
+}
+
+.candidate-card-compact.is-ended {
+  opacity: 0.75;
+  border-left: 2px solid var(--gray-300);
 }
 
 /* === 完整模式 === */
