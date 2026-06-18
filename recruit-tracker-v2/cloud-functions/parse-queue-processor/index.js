@@ -263,10 +263,15 @@ async function processOneEntry(db, entry, summary) {
     const candidateResult = await db.collection('Candidate').add(candidateDoc);
     const candidateId = candidateResult.id;
 
-    // 创建 Application（自动分配岗位或留待专员分配）
+    // 创建 Application（自动匹配岗位或留待专员分配）
+    const matchedJobId = await autoMatchJob(db, {
+      expectedPosition: candidateData.expected_position || basicInfo.expected_position || '',
+      expectedSalary: candidateData.expected_salary || basicInfo.expected_salary || '',
+    });
+
     const applicationDoc = {
       candidateId,
-      jobId: '', // 邮件解析的简历由专员后续分配岗位
+      jobId: matchedJobId || '', // 自动匹配到岗位或留空待分配
       stage: 'resume',
       stageEnteredAt: new Date(),
       status: 'active',
@@ -327,6 +332,78 @@ async function processOneEntry(db, entry, summary) {
     console.error('[parse-queue-processor] 创建 Candidate 失败:', createErr.message);
     await scheduleRetry(db, entry, `创建记录失败：${createErr.message}`);
     summary.retried++;
+  }
+}
+
+/**
+ * 自动匹配岗位：根据候选人的期望岗位名称模糊匹配已有岗位
+ * 匹配成功返回 jobId，失败返回 null
+ */
+async function autoMatchJob(db, candidateInfo) {
+  const { expectedPosition, expectedSalary } = candidateInfo;
+
+  if (!expectedPosition || expectedPosition.trim().length < 2) {
+    console.log('[parse-queue-processor] 期望岗位为空或过短，跳过自动匹配');
+    return null;
+  }
+
+  try {
+    // 查询所有活跃岗位
+    const { data: jobs } = await db
+      .collection('Job')
+      .where({ status: 'active' })
+      .get();
+
+    if (!jobs || jobs.length === 0) {
+      console.log('[parse-queue-processor] 无活跃岗位，跳过自动匹配');
+      return null;
+    }
+
+    const position = expectedPosition.trim().toLowerCase();
+
+    // 策略1：精确匹配（岗位名包含期望岗位 或 期望岗位包含岗位名）
+    for (const job of jobs) {
+      const jobTitle = (job.title || job.name || '').toLowerCase().trim();
+      if (!jobTitle) continue;
+
+      if (jobTitle === position || jobTitle.includes(position) || position.includes(jobTitle)) {
+        console.log(`[parse-queue-processor] ✅ 精确匹配: "${expectedPosition}" → "${job.title || job.name}"`);
+        return job._id;
+      }
+    }
+
+    // 策略2：关键词匹配
+    const keywords = position.split(/[\s,，、/]+/).filter((k) => k.length >= 2);
+    for (const job of jobs) {
+      const jobTitle = (job.title || job.name || '').toLowerCase().trim();
+      if (!jobTitle) continue;
+
+      // 计算匹配的关键词数
+      const matchCount = keywords.filter((kw) => jobTitle.includes(kw)).length;
+      if (matchCount >= Math.ceil(keywords.length * 0.5) || matchCount >= 2) {
+        console.log(`[parse-queue-processor] ✅ 关键词匹配: "${expectedPosition}" → "${job.title || job.name}" (${matchCount}/${keywords.length})`);
+        return job._id;
+      }
+    }
+
+    // 策略3：单关键词部分匹配（如 "CC" 匹配 "CC部"）
+    for (const job of jobs) {
+      const jobTitle = (job.title || job.name || '').toLowerCase().trim();
+      if (!jobTitle) continue;
+
+      for (const kw of keywords) {
+        if (kw.length >= 2 && jobTitle.includes(kw)) {
+          console.log(`[parse-queue-processor] ✅ 单关键词匹配: "${expectedPosition}" → "${job.title || job.name}" (关键词: "${kw}")`);
+          return job._id;
+        }
+      }
+    }
+
+    console.log(`[parse-queue-processor] ❌ 未匹配到岗位: "${expectedPosition}", 可选岗位: ${jobs.map(j => j.title || j.name).join(', ')}`);
+    return null;
+  } catch (err) {
+    console.error('[parse-queue-processor] 自动匹配岗位失败:', err.message);
+    return null;
   }
 }
 

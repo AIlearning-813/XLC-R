@@ -19,6 +19,7 @@ const stageKey = computed(() => props.stage?.key || '');
 const isOptional = computed(() => props.stage?.optional === true);
 
 const count = computed(() => props.applications?.length || 0);
+const isEndZone = computed(() => props.stage?.isEnd === true);
 
 const columnStyle = computed(() => {
   // 不同阶段用不同顶部色条
@@ -35,6 +36,8 @@ const columnStyle = computed(() => {
     final_pass: '#4A9C7C',
     offer: '#D4875E',
     onboard: '#3B4F8C',
+    rejected: '#DC4C4C',
+    withdrawn: '#9B8B7C',
   };
   return {
     '--col-accent': colorMap[stageKey.value] || '#8B8F97',
@@ -49,7 +52,7 @@ function onCardClick(payload) {
 <template>
   <div
     class="kanban-column"
-    :class="{ optional: isOptional }"
+    :class="{ optional: isOptional, 'end-zone': isEndZone }"
     :style="columnStyle"
     :data-stage="stageKey"
   >
@@ -251,5 +254,21 @@ function onCardClick(payload) {
   opacity: 0.9;
   transform: rotate(3deg);
   box-shadow: var(--shadow-lg);
+}
+
+/* === 结束区域 === */
+.kanban-column.end-zone {
+  opacity: 0.85;
+  border: 2px dashed var(--gray-300);
+  background: var(--gray-25);
+}
+
+.kanban-column.end-zone .col-title {
+  color: var(--gray-500);
+}
+
+.kanban-column.end-zone .col-empty {
+  color: var(--gray-300);
+  font-style: italic;
 }
 </style>

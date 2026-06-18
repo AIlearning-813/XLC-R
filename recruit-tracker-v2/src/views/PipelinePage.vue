@@ -1,5 +1,5 @@
 <script setup>
-/* 新励成招聘管理系统 V2.0 — 招聘看板 */
+/* 新励成招聘管理系统 V2.0 — 招聘看板（含结束流程+未分配候选人） */
 
 import { ref, computed, watch, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
@@ -24,6 +24,11 @@ const candidatesMap = ref({});
 const loading = ref(false);
 const error = ref('');
 
+// 未分配岗位的候选人
+const unassignedApps = ref([]);
+const unassignedCandidatesMap = ref({});
+const loadingUnassigned = ref(false);
+
 // 流转确认弹窗
 const dialogVisible = ref(false);
 const pendingTransition = ref(null);
@@ -31,38 +36,16 @@ const selectedCandidate = ref(null);
 const selectedApplication = ref(null);
 
 // 结束流程：显示"淘汰"和"放弃"拖放区
-const showEndZones = ref(false);
+const showEndZones = ref(true);
 
 // ===== 计算属性 =====
 const jobs = computed(() => jobStore.activeJobs);
-
-const visibleStages = computed(() => {
-  // 根据岗位类型过滤不需要的面试阶段
-  if (!selectedJob.value) return FUNNEL_STAGES;
-
-  const jobType = selectedJob.value.type || selectedJob.value.jobType;
-  const rounds = getInterviewRounds(jobType);
-
-  return FUNNEL_STAGES.filter((stage) => {
-    // 隐藏不需要的面试轮次
-    if (rounds < 3) {
-      if (stage.key === 'final_interview' || stage.key === 'final_pass') return false;
-    }
-    if (rounds < 2) {
-      if (stage.key === 'second_interview' || stage.key === 'second_pass') return false;
-    }
-    return true;
-  });
-});
 
 const selectedJob = computed(() => {
   return jobs.value.find((j) => j._id === selectedJobId.value) || null;
 });
 
-// ===== 方法 =====
-
 function getInterviewRounds(jobType) {
-  // 默认 3 轮面试，根据岗位类型调整
   const roundsMap = {
     CC: 3,
     'LTC负责人': 3,
@@ -74,16 +57,111 @@ function getInterviewRounds(jobType) {
   return roundsMap[jobType] || 3;
 }
 
+// 结束区域虚拟阶段定义
+const END_ZONE_STAGES = [
+  { key: 'rejected', label: '已淘汰', isEnd: true, order: 99 },
+  { key: 'withdrawn', label: '已放弃', isEnd: true, order: 100 },
+];
+
+const visibleStages = computed(() => {
+  if (!selectedJob.value) {
+    // 未选岗位时也显示漏斗阶段
+    const stages = [...FUNNEL_STAGES];
+    if (showEndZones.value) {
+      stages.push(...END_ZONE_STAGES);
+    }
+    return stages;
+  }
+
+  const jobType = selectedJob.value.type || selectedJob.value.jobType;
+  const rounds = getInterviewRounds(jobType);
+
+  const filtered = FUNNEL_STAGES.filter((stage) => {
+    if (rounds < 3) {
+      if (stage.key === 'final_interview' || stage.key === 'final_pass') return false;
+    }
+    if (rounds < 2) {
+      if (stage.key === 'second_interview' || stage.key === 'second_pass') return false;
+    }
+    return true;
+  });
+
+  // 添加结束区域列
+  if (showEndZones.value) {
+    filtered.push(...END_ZONE_STAGES);
+  }
+
+  return filtered;
+});
+
+// ===== 方法 =====
+
 // 加载岗位列表
 async function loadJobs() {
   try {
     await jobStore.fetchActive();
-    // 默认选第一个岗位
     if (!selectedJobId.value && jobs.value.length > 0) {
       selectedJobId.value = jobs.value[0]._id;
     }
   } catch (err) {
     error.value = '加载岗位失败：' + err.message;
+  }
+}
+
+// 加载未分配岗位的候选人
+async function loadUnassigned() {
+  loadingUnassigned.value = true;
+  try {
+    const dbInstance = db();
+    const { data: apps } = await dbInstance
+      .collection('Application')
+      .where({
+        jobId: '',
+        status: 'active',
+      })
+      .orderBy('createdAt', 'desc')
+      .limit(50)
+      .get();
+
+    const appList = apps || [];
+
+    // 批量获取候选人信息
+    if (appList.length > 0) {
+      const candidateIds = [...new Set(appList.map((a) => a.candidateId).filter(Boolean))];
+      const newMap = {};
+
+      const batchSize = 50;
+      for (let i = 0; i < candidateIds.length; i += batchSize) {
+        const batch = candidateIds.slice(i, i + batchSize);
+        try {
+          const { data: candidates } = await dbInstance
+            .collection('Candidate')
+            .where({ _id: dbInstance.command.in(batch) })
+            .get();
+
+          for (const c of (candidates || [])) {
+            newMap[c._id] = c;
+          }
+        } catch (err) {
+          console.warn('[PipelinePage] 批量获取未分配候选人失败:', err.message);
+          for (const id of batch) {
+            if (newMap[id]) continue;
+            try {
+              const { data } = await dbInstance.collection('Candidate').doc(id).get();
+              if (data?.[0]) newMap[id] = data[0];
+            } catch { /* skip */ }
+          }
+        }
+      }
+
+      unassignedCandidatesMap.value = newMap;
+    }
+
+    unassignedApps.value = appList;
+  } catch (err) {
+    console.error('[PipelinePage] 加载未分配候选人失败:', err.message);
+  } finally {
+    loadingUnassigned.value = false;
   }
 }
 
@@ -98,7 +176,6 @@ async function loadApplications() {
   error.value = '';
 
   try {
-    // 获取该岗位所有活跃申请
     const dbInstance = db();
     const { data: apps } = await dbInstance
       .collection('Application')
@@ -111,12 +188,10 @@ async function loadApplications() {
 
     const appList = apps || [];
 
-    // 批量获取候选人信息
     if (appList.length > 0) {
       const candidateIds = [...new Set(appList.map((a) => a.candidateId).filter(Boolean))];
       const newCandidatesMap = { ...candidatesMap.value };
 
-      // 分批获取候选人（CloudBase in 查询限制 100 条）
       const batchSize = 50;
       for (let i = 0; i < candidateIds.length; i += batchSize) {
         const batch = candidateIds.slice(i, i + batchSize);
@@ -133,7 +208,6 @@ async function loadApplications() {
           }
         } catch (err) {
           console.warn('[PipelinePage] 批量获取候选人失败:', err.message);
-          // 降级：逐个获取
           for (const id of batch) {
             if (newCandidatesMap[id]) continue;
             try {
@@ -156,29 +230,53 @@ async function loadApplications() {
   }
 }
 
+// 快捷分配：将未分配候选人分配给当前岗位
+async function quickAssignToJob(appId, candidateId) {
+  try {
+    await db().collection('Application').doc(appId).update({
+      jobId: selectedJobId.value,
+      updatedAt: new Date(),
+    });
+
+    // 从未分配列表移除
+    unassignedApps.value = unassignedApps.value.filter((a) => a._id !== appId);
+
+    // 刷新看板
+    await refreshBoard();
+  } catch (err) {
+    alert('分配失败：' + err.message);
+  }
+}
+
 // 处理拖拽移动
 function handleCardMove({ applicationId, fromStage, toStage }) {
-  const app = applications.value.find((a) => a._id === applicationId);
+  // 检查是否从未分配区域拖出（需要特殊处理）
+  const isUnassigned = unassignedApps.value.some((a) => a._id === applicationId);
+  const app = isUnassigned
+    ? unassignedApps.value.find((a) => a._id === applicationId)
+    : applications.value.find((a) => a._id === applicationId);
+
   if (!app) {
     console.warn('[PipelinePage] 未找到申请记录:', applicationId);
     refreshBoard();
     return;
   }
 
-  const candidate = candidatesMap.value[app.candidateId] || {};
+  const candidate = isUnassigned
+    ? (unassignedCandidatesMap.value[app.candidateId] || {})
+    : (candidatesMap.value[app.candidateId] || {});
 
   // 检查是否是结束操作（拖到 rejected/withdrawn 列）
   if (toStage === 'rejected' || toStage === 'withdrawn') {
-    // 直接弹出确认
-    pendingTransition.value = { applicationId, fromStage, toStage };
+    pendingTransition.value = { applicationId, fromStage, toStage, isUnassigned };
     selectedCandidate.value = candidate;
     selectedApplication.value = app;
     dialogVisible.value = true;
     return;
   }
 
-  // 普通流转 —— 弹出确认
-  pendingTransition.value = { applicationId, fromStage, toStage };
+  // 普通流转
+  pendingTransition.value = { applicationId, fromStage, toStage, isUnassigned };
   selectedCandidate.value = candidate;
   selectedApplication.value = app;
   dialogVisible.value = true;
@@ -188,11 +286,18 @@ function handleCardMove({ applicationId, fromStage, toStage }) {
 async function handleTransitionConfirm({ note, reason }) {
   if (!pendingTransition.value) return;
 
-  const { applicationId, fromStage, toStage } = pendingTransition.value;
+  const { applicationId, fromStage, toStage, isUnassigned } = pendingTransition.value;
 
   try {
+    // 如果从未分配区域拖出，先分配岗位
+    if (isUnassigned && selectedJobId.value) {
+      await db().collection('Application').doc(applicationId).update({
+        jobId: selectedJobId.value,
+        updatedAt: new Date(),
+      });
+    }
+
     if (toStage === 'rejected' || toStage === 'withdrawn') {
-      // 结束流程
       await appStore.endApplication(
         applicationId,
         toStage,
@@ -200,7 +305,6 @@ async function handleTransitionConfirm({ note, reason }) {
         { operatorId: auth.userName }
       );
     } else {
-      // 普通流转
       await appStore.moveStage(applicationId, toStage, {
         note,
         operatorId: auth.userName,
@@ -210,7 +314,6 @@ async function handleTransitionConfirm({ note, reason }) {
     dialogVisible.value = false;
     pendingTransition.value = null;
 
-    // 刷新看板
     await refreshBoard();
   } catch (err) {
     console.error('[PipelinePage] 流转失败:', err.message);
@@ -219,20 +322,19 @@ async function handleTransitionConfirm({ note, reason }) {
   }
 }
 
-// 取消流转
 function handleTransitionCancel() {
   dialogVisible.value = false;
   pendingTransition.value = null;
-  // 回退 DOM 变更 —— 重新加载
   refreshBoard();
 }
 
-// 刷新看板数据
 async function refreshBoard() {
-  await loadApplications();
+  await Promise.all([
+    loadApplications(),
+    loadUnassigned(),
+  ]);
 }
 
-// 点击卡片 → 跳转详情
 function handleCardClick({ candidate, application }) {
   router.push(`/candidates/${candidate._id}`);
 }
@@ -240,11 +342,12 @@ function handleCardClick({ candidate, application }) {
 // 岗位切换
 watch(selectedJobId, () => {
   applications.value = [];
-  loadApplications();
+  refreshBoard();
 });
 
 onMounted(() => {
   loadJobs();
+  loadUnassigned();
 });
 </script>
 
@@ -254,7 +357,6 @@ onMounted(() => {
     <div class="pipeline-toolbar">
       <div class="toolbar-left">
         <h2 class="page-title">招聘看板</h2>
-        <!-- 岗位选择器 -->
         <div class="job-selector">
           <select
             v-model="selectedJobId"
@@ -273,7 +375,6 @@ onMounted(() => {
       </div>
 
       <div class="toolbar-right">
-        <!-- 快捷操作 -->
         <button
           class="btn btn-sm btn-secondary"
           @click="refreshBoard"
@@ -291,6 +392,39 @@ onMounted(() => {
     <div v-if="error" class="pipeline-error">
       {{ error }}
       <button class="btn btn-sm btn-secondary" @click="refreshBoard">重试</button>
+    </div>
+
+    <!-- 未分配岗位候选人提示 -->
+    <div v-if="unassignedApps.length > 0" class="unassigned-banner">
+      <div class="unassigned-header">
+        <div class="unassigned-title">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          <strong>{{ unassignedApps.length }}</strong> 位候选人待分配岗位
+          <span class="unassigned-hint">（来自邮箱导入，需分配岗位后进入看板）</span>
+        </div>
+      </div>
+      <div class="unassigned-list">
+        <div
+          v-for="app in unassignedApps.slice(0, 5)"
+          :key="app._id"
+          class="unassigned-chip"
+        >
+          <span class="unassigned-name">{{ unassignedCandidatesMap[app.candidateId]?.name || '未命名' }}</span>
+          <span class="unassigned-pos">{{ unassignedCandidatesMap[app.candidateId]?.expectedPosition || '未知岗位' }}</span>
+          <button
+            v-if="selectedJobId"
+            class="btn btn-xs btn-primary"
+            @click="quickAssignToJob(app._id, app.candidateId)"
+          >
+            分配到此岗位
+          </button>
+        </div>
+        <div v-if="unassignedApps.length > 5" class="unassigned-more">
+          还有 {{ unassignedApps.length - 5 }} 位，请前往
+          <router-link to="/candidates">候选人库</router-link>
+          查看
+        </div>
+      </div>
     </div>
 
     <!-- 看板区域 -->
@@ -381,6 +515,79 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: var(--spacing-sm);
+}
+
+/* === 未分配候选人提示 === */
+.unassigned-banner {
+  background: var(--warning-bg);
+  border: 1px solid var(--warning);
+  border-radius: var(--radius);
+  padding: var(--spacing-sm) var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+  flex-shrink: 0;
+}
+
+.unassigned-header {
+  margin-bottom: var(--spacing-xs);
+}
+
+.unassigned-title {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  font-size: var(--font-size-sm);
+  color: var(--gray-700);
+}
+
+.unassigned-hint {
+  font-weight: 400;
+  color: var(--gray-400);
+  font-size: var(--font-size-xs);
+}
+
+.unassigned-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-xs);
+  align-items: center;
+}
+
+.unassigned-chip {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  background: #fff;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-full);
+  padding: 4px 8px 4px 14px;
+  font-size: var(--font-size-xs);
+}
+
+.unassigned-name {
+  font-weight: 600;
+  color: var(--gray-700);
+}
+
+.unassigned-pos {
+  color: var(--gray-400);
+}
+
+.unassigned-more {
+  font-size: var(--font-size-xs);
+  color: var(--gray-400);
+  padding: 4px 8px;
+}
+
+.unassigned-more a {
+  color: var(--primary);
+  text-decoration: underline;
+}
+
+.btn-xs {
+  padding: 3px 10px;
+  font-size: 11px;
+  border-radius: var(--radius-full);
+  white-space: nowrap;
 }
 
 /* === 错误 === */
