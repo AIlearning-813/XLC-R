@@ -177,21 +177,17 @@ export const useApplicationStore = defineStore('application', () => {
     });
 
     // 合并 funnel：保留已有漏斗时间戳 + 叠加回填 + 新阶段
-    // CloudBase JS SDK v3.x 对嵌套对象的 db.command.set() 支持不可靠，
-    // 改为每个子字段各自生成独立的 db.command.set() 点分隔命令，
-    // 与已验证可用的 history: db.command.push() 模式一致。
+    // 【关键】必须用单个 db.command.set() 设整个 funnel 对象，生成一条 $set
+    // 而非多条 funnel.* 点分隔 $set——CloudBase 服务端对多条同父路径的点分隔
+    // $set 有 bug，只保留最后一个，导致跳阶段回填字段丢失。
     let mergedFunnel = null;
     if (payload.funnel) {
       mergedFunnel = {
         ...(current.funnel || {}),
         ...payload.funnel,
       };
-      // 移除原始 funnel 键，改用逐个字段的独立 set 命令
-      delete payload.funnel;
-      const _ = db.command;
-      for (const [key, value] of Object.entries(mergedFunnel)) {
-        payload[`funnel.${key}`] = _.set(value);
-      }
+      // 单个 set 命令：整个 funnel 对象作为一个 $set 操作
+      payload.funnel = db.command.set(mergedFunnel);
     }
 
     // 将 history 数组项转为 db.command.push
