@@ -1,7 +1,7 @@
 <script setup>
 /* 新励成招聘管理系统 V2.0 — 看板阶段列（支持完整/紧凑双模式） */
 
-import { computed } from 'vue';
+import { ref, computed } from 'vue';
 import CandidateCard from './CandidateCard.vue';
 
 const props = defineProps({
@@ -21,10 +21,19 @@ const isOptional = computed(() => props.stage?.optional === true);
 const isEndZone = computed(() => props.stage?.isEnd === true);
 const count = computed(() => props.applications?.length || 0);
 
-// 紧凑模式下最多显示的卡片数
+// 紧凑模式下默认折叠，可展开
 const MAX_VISIBLE = 5;
-const visibleApps = computed(() => props.applications.slice(0, MAX_VISIBLE));
+const expanded = ref(false);
+
+const visibleApps = computed(() => {
+  if (expanded.value || !props.compact) return props.applications;
+  return props.applications.slice(0, MAX_VISIBLE);
+});
 const hiddenCount = computed(() => Math.max(0, props.applications.length - MAX_VISIBLE));
+
+function toggleExpand() {
+  expanded.value = !expanded.value;
+}
 
 const columnStyle = computed(() => {
   const colorMap = {
@@ -58,7 +67,7 @@ function onCardQuickMove(payload) {
 <template>
   <div
     class="kanban-column"
-    :class="{ optional: isOptional, 'end-zone': isEndZone, 'compact-mode': compact }"
+    :class="{ optional: isOptional, 'end-zone': isEndZone, 'compact-mode': compact, expanded: expanded }"
     :style="columnStyle"
     :data-stage="stageKey"
   >
@@ -86,10 +95,31 @@ function onCardQuickMove(payload) {
         />
       </TransitionGroup>
 
-      <!-- 隐藏的更多卡片 -->
-      <div v-if="hiddenCount > 0" class="col-more">
+      <!-- 展开更多按钮 -->
+      <button
+        v-if="hiddenCount > 0 && !expanded"
+        class="col-more"
+        @click="toggleExpand"
+        title="点击展开查看全部候选人"
+      >
         + 还有 {{ hiddenCount }} 位
-      </div>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>
+      </button>
+
+      <!-- 收起按钮 -->
+      <button
+        v-if="expanded"
+        class="col-more col-more-expanded"
+        @click="toggleExpand"
+        title="点击收起"
+      >
+        收起列表
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="18 15 12 9 6 15"/>
+        </svg>
+      </button>
 
       <!-- 空状态 -->
       <div v-if="!loading && count === 0" class="col-empty">
@@ -123,6 +153,13 @@ function onCardQuickMove(payload) {
   flex: 0 0 175px;
   min-width: 175px;
   max-height: 300px;
+}
+
+/* 展开后解除高度限制，允许列自然撑高 */
+.kanban-column.compact-mode.expanded {
+  max-height: none;
+  flex: 0 0 240px;
+  min-width: 240px;
 }
 
 .kanban-column.optional {
@@ -223,12 +260,41 @@ function onCardQuickMove(payload) {
   transition: transform 0.25s ease;
 }
 
-/* === 更多提示 === */
+/* === 更多提示（可点击展开/收起）=== */
 .col-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
   text-align: center;
   font-size: 11px;
-  color: var(--gray-400);
-  padding: 4px;
+  color: var(--primary);
+  background: var(--primary-bg);
+  border: 1px dashed var(--primary);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all var(--transition);
+}
+
+.col-more:hover {
+  background: var(--primary);
+  color: #fff;
+  border-style: solid;
+}
+
+.col-more-expanded {
+  color: var(--gray-500);
+  background: var(--gray-50);
+  border-color: var(--gray-200);
+}
+
+.col-more-expanded:hover {
+  background: var(--gray-100);
+  color: var(--gray-600);
+  border-color: var(--gray-300);
 }
 
 /* === 空状态 === */

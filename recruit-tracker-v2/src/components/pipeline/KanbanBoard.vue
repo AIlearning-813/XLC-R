@@ -47,6 +47,7 @@ function initSortable() {
       delayOnTouchOnly: true,
       touchStartThreshold: 5,
       filter: '.col-empty, .col-loading, .col-more, .skeleton-line',
+      preventOnFilter: false,
       scroll: true,
       scrollSensitivity: 80,
       scrollSpeed: 15,
