@@ -180,14 +180,29 @@ export const useApplicationStore = defineStore('application', () => {
     // 【关键】必须用单个 db.command.set() 设整个 funnel 对象，生成一条 $set
     // 而非多条 funnel.* 点分隔 $set——CloudBase 服务端对多条同父路径的点分隔
     // $set 有 bug，只保留最后一个，导致跳阶段回填字段丢失。
+    //
+    // 【Date 编码】CloudBase 客户端 SDK 的 UpdateSerializer 只对顶层值调
+    // encodeInternalDataType（Date → { $date: timestamp }），嵌套在
+    // db.command.set() 内部的 Date 对象绕过编码，经 JSON.stringify 后变成
+    // ISO 字符串，服务端无法识别为日期 → 整个 funnel 更新被丢弃。
+    // 修复：手动将 Date 转为数字时间戳，确保服务端正确存储。
+    const toTimestamp = (val) => {
+      if (val instanceof Date) return val.getTime();
+      if (val && typeof val === 'object' && !Array.isArray(val)) {
+        const out = {};
+        for (const [k, v] of Object.entries(val)) out[k] = toTimestamp(v);
+        return out;
+      }
+      return val;
+    };
+
     let mergedFunnel = null;
     if (payload.funnel) {
       mergedFunnel = {
         ...(current.funnel || {}),
         ...payload.funnel,
       };
-      // 单个 set 命令：整个 funnel 对象作为一个 $set 操作
-      payload.funnel = db.command.set(mergedFunnel);
+      payload.funnel = db.command.set(toTimestamp(mergedFunnel));
     }
 
     // 将 history 数组项转为 db.command.push
@@ -225,7 +240,8 @@ export const useApplicationStore = defineStore('application', () => {
         stage: newStage,
         stageEnteredAt: new Date(),
         // 使用合并后的纯 funnel 数据而非 command 对象
-        ...(mergedFunnel ? { funnel: mergedFunnel } : {}),
+        // 转换为时间戳格式与 DB 存储一致，避免下次读取后数据跳变
+        ...(mergedFunnel ? { funnel: toTimestamp(mergedFunnel) } : {}),
         _version: newVersion,
         updatedAt: new Date(),
         history: [...oldHistory, {
