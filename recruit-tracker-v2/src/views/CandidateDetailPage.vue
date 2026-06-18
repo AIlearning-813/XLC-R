@@ -10,7 +10,7 @@ import { useAuthStore } from '../stores/useAuthStore';
 import cloudbase from '../services/cloudbase';
 import { getCommunications } from '../services/communication';
 import { safeErrorMsg } from '../services/error-messages';
-import { FUNNEL_STAGES, JOB_TYPES } from '../config/constants';
+import { FUNNEL_STAGES, JOB_TYPES, END_REASONS } from '../config/constants';
 import CommunicationLog from '../components/candidates/CommunicationLog.vue';
 import mammoth from 'mammoth';
 
@@ -61,6 +61,20 @@ const stageLabelMap = computed(() => {
   }
   return map;
 });
+
+// 将结束原因 key 转为中文标签（兼容旧数据的英文 key）
+function translateEndReason(reason) {
+  if (!reason) return '';
+  // 如果已经是中文（含汉字），直接返回
+  if (/[一-鿿]/.test(reason)) return reason;
+  // 在 END_REASONS 中查找对应的中文标签
+  for (const type of ['rejected', 'withdrawn']) {
+    const reasons = END_REASONS[type] || [];
+    const found = reasons.find((r) => r.key === reason);
+    if (found) return found.label;
+  }
+  return reason;
+}
 
 const jobTypeOptions = Object.keys(JOB_TYPES);
 
@@ -874,7 +888,7 @@ watch(candidateId, (newId) => {
             <!-- 结束原因 -->
             <div v-if="app.endReason" class="end-reason">
               <span class="end-label">{{ app.status === 'rejected' ? '淘汰原因：' : '放弃原因：' }}</span>
-              {{ app.endReason }}
+              {{ translateEndReason(app.endReason) }}
             </div>
           </div>
         </div>

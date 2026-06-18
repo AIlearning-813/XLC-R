@@ -56,12 +56,24 @@ const canConfirm = computed(() => {
 });
 
 function handleConfirm() {
+  let reasonLabel;
+  if (isEnding.value) {
+    if (selectedReason.value === 'other_reject' || selectedReason.value === 'other_withdraw') {
+      // 自定义原因直接用输入文本
+      reasonLabel = customReason.value;
+    } else {
+      // 将英文 key 转成中文标签再存储
+      const found = endReasons.value.find((r) => r.key === selectedReason.value);
+      reasonLabel = found ? found.label : selectedReason.value;
+    }
+  }
+
   emit('confirm', {
     applicationId: props.application?._id,
     fromStage: props.fromStage,
     toStage: props.toStage,
     note: note.value.trim(),
-    reason: isEnding.value ? (selectedReason.value === 'other_reject' || selectedReason.value === 'other_withdraw' ? customReason.value : selectedReason.value) : undefined,
+    reason: isEnding.value ? reasonLabel : undefined,
   });
 }
 
