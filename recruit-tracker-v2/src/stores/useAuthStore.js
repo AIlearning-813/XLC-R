@@ -22,7 +22,7 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       const auth = cloudbase.auth({ persistence: 'local' });
       if (!auth) {
-        throw new Error('CloudBase 未初始化，请检查 ENV_ID 配置');
+        throw new Error('服务未初始化，请检查环境ID配置');
       }
 
       const loginResp = await auth.getLoginState();
@@ -32,7 +32,7 @@ export const useAuthStore = defineStore('auth', () => {
         await auth.anonymousAuthProvider().signIn();
         const newState = await auth.getLoginState();
         if (!newState) {
-          throw new Error('匿名登录后获取用户状态失败');
+          throw new Error('登录后获取用户状态失败');
         }
         currentUser.value = newState.user;
       } else {

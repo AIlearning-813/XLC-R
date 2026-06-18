@@ -52,7 +52,7 @@ export function setupErrorCapture(app) {
   app.config.errorHandler = (err, instance, info) => {
     captureError('vue', err.message, {
       stack: err.stack,
-      component: instance?.$options?.name || instance?.type?.name || 'unknown',
+      component: instance?.$options?.name || instance?.type?.name || '未知',
       info,
     });
   };
@@ -61,7 +61,7 @@ export function setupErrorCapture(app) {
   app.config.warnHandler = (msg, instance, trace) => {
     if (msg.includes('TODO') || msg.includes('FIXME')) return;
     captureError('vue_warning', msg, {
-      component: instance?.$options?.name || 'unknown',
+      component: instance?.$options?.name || '未知',
       trace,
     });
   };

@@ -37,7 +37,7 @@ export async function getCommunications(candidateId) {
  */
 export async function addCommunication(data) {
   if (!data.candidateId || !data.content || !data.method) {
-    throw new Error('candidateId, method, content 为必填项');
+    throw new Error('候选人、沟通方式、沟通内容为必填项');
   }
 
   const doc = {

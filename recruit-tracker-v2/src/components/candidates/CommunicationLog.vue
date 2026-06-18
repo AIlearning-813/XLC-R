@@ -4,6 +4,7 @@
 import { ref, computed } from 'vue';
 import { COMMUNICATION_METHODS } from '../../config/constants';
 import { addCommunication, deleteCommunication } from '../../services/communication';
+import { safeErrorMsg } from '../../services/error-messages';
 
 const props = defineProps({
   communications: { type: Array, default: () => [] },
@@ -63,7 +64,7 @@ async function handleSubmit() {
     showForm.value = false;
     emit('updated');
   } catch (err) {
-    error.value = '添加失败：' + err.message;
+    error.value = '添加失败：' + safeErrorMsg(err);
   } finally {
     submitting.value = false;
   }
@@ -76,7 +77,7 @@ async function handleDelete(id) {
     await deleteCommunication(id);
     emit('updated');
   } catch (err) {
-    error.value = '删除失败：' + err.message;
+    error.value = '删除失败：' + safeErrorMsg(err);
   }
 }
 </script>

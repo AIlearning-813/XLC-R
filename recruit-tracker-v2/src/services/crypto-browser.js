@@ -99,7 +99,7 @@ export async function encryptPassword(plaintext) {
   const pepper = import.meta.env.VITE_SALT_PEPPER;
 
   if (!masterSecret || !pepper) {
-    throw new Error('加密密钥未配置：请设置 VITE_MASTER_SECRET 和 VITE_SALT_PEPPER 环境变量');
+    throw new Error('加密密钥未配置：请设置加密主密钥和加密盐值环境变量');
   }
 
   // 生成随机盐和 IV

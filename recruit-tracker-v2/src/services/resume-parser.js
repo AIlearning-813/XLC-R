@@ -34,7 +34,7 @@ export async function extractText(file) {
 
   // 图片格式 → 需要 OCR（阶段 3 云函数处理，浏览器端暂不支持）
   if (mime.startsWith('image/') || /\.(png|jpg|jpeg|bmp|tiff?|webp)$/i.test(name)) {
-    throw new Error('图片格式简历需要通过 OCR 识别，浏览器端暂不支持。请使用 PDF/DOCX/TXT 格式，或等待阶段 3 邮箱归集功能。');
+    throw new Error('图片格式简历需要通过文字识别处理，浏览器端暂不支持。请使用 PDF/Word/文本 格式，或通过邮箱归集方式处理。');
   }
 
   // 压缩包 → 阶段 3 云函数递归处理
@@ -71,7 +71,7 @@ async function extractPdfText(file) {
 
   // 如果提取的文本很短（< 20 字符），可能是扫描件
   if (fullText.length < 20) {
-    throw new Error('该 PDF 可能为扫描件（无可提取的文本层），请使用 OCR 识别。浏览器端暂不支持 OCR，请通过邮箱归集方式处理扫描件。');
+    throw new Error('该文件可能为扫描件（无可提取的文本层），浏览器端暂不支持文字识别，请通过邮箱归集方式处理。');
   }
 
   return fullText;
@@ -87,7 +87,7 @@ async function extractDocxText(file) {
   const text = result.value.trim();
 
   if (!text) {
-    throw new Error('DOCX 文件中未提取到文本内容，文件可能为空或损坏');
+    throw new Error('Word 文件中未提取到文本内容，文件可能为空或损坏');
   }
 
   // 记录警告信息（如有）

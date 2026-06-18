@@ -10,7 +10,7 @@ function getApp() {
   if (!app) {
     if (!env.ENV_ID) {
       console.warn(
-        '⚠️ CloudBase ENV_ID 未配置。请创建 .env.local 并设置 VITE_CLOUDBASE_ENV_ID。\n' +
+        '⚠️ 环境ID未配置，请检查 VITE_CLOUDBASE_ENV_ID 设置。\n' +
         '  当前处于离线模式，数据库/存储操作将不可用。'
       );
       return null;
@@ -57,7 +57,7 @@ function storage() {
 // 调用云函数
 async function callFunction(name, data) {
   const app = getApp();
-  if (!app) throw new Error('CloudBase 未初始化，无法调用云函数');
+  if (!app) throw new Error('服务未初始化，无法调用云函数');
   const res = await app.callFunction({ name, data });
   return res.result;
 }
