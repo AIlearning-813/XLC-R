@@ -177,12 +177,13 @@ export const useApplicationStore = defineStore('application', () => {
     });
 
     // 合并 funnel：保留已有漏斗时间戳 + 叠加回填 + 新阶段
-    // （注意：用嵌套对象而非点分隔键，确保 CloudBase 正确写入所有字段）
+    // 使用 db.command.set() 显式告知 CloudBase 替换整个 funnel 字段
+    // （直接传嵌套对象可能被 CloudBase 做浅合并导致回填字段丢失）
     if (payload.funnel) {
-      payload.funnel = {
+      payload.funnel = db.command.set({
         ...(current.funnel || {}),
         ...payload.funnel,
-      };
+      });
     }
 
     // 将 history 数组项转为 db.command.push
