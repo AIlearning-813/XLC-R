@@ -256,6 +256,7 @@ async function processOneEntry(db, entry, summary) {
       fileId: entry.fileId || '',
       fileName: entry.fileName || '',
       createdBy: entry.userId || 'system',
+      _version: 0,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
@@ -279,6 +280,7 @@ async function processOneEntry(db, entry, summary) {
       funnelMeta: { entrySource: 'email', anchorDate: entry.sourceEmailDate || new Date() },
       source: 'email',
       ownerId: entry.userId || '',
+      _version: 0,
       createdAt: new Date(),
       updatedAt: new Date(),
     };

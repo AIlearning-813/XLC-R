@@ -3,6 +3,7 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import cloudbase from '../services/cloudbase';
+import { versionedUpdate, initialVersion, isVersionConflict, conflictMessage } from '../services/optimistic-lock';
 
 export const useJobStore = defineStore('job', () => {
   // ===== 状态 =====
@@ -79,6 +80,7 @@ export const useJobStore = defineStore('job', () => {
     const doc = {
       ...jobData,
       status: jobData.status || 'active',
+      _version: initialVersion(),
       createdAt: new Date(),
       updatedAt: new Date(),
     };
@@ -97,15 +99,18 @@ export const useJobStore = defineStore('job', () => {
     const db = cloudbase.db();
     if (!db) throw new Error('数据库未初始化');
 
-    await db.collection('Job').doc(id).update({
-      ...data,
-      updatedAt: new Date(),
-    });
+    // 获取当前版本号
+    const current = jobs.value.find(j => j._id === id);
+    if (!current) throw new Error('岗位不存在');
+    const expectedVersion = current._version;
+
+    // 带版本锁更新
+    const newVersion = await versionedUpdate('Job', id, expectedVersion, data);
 
     // 更新本地缓存
     const idx = jobs.value.findIndex(j => j._id === id);
     if (idx !== -1) {
-      jobs.value[idx] = { ...jobs.value[idx], ...data, updatedAt: new Date() };
+      jobs.value[idx] = { ...jobs.value[idx], ...data, _version: newVersion, updatedAt: new Date() };
     }
   }
 
@@ -116,14 +121,20 @@ export const useJobStore = defineStore('job', () => {
     const db = cloudbase.db();
     if (!db) throw new Error('数据库未初始化');
 
-    await db.collection('Job').doc(id).update({
-      status: 'inactive',
-      updatedAt: new Date(),
-    });
+    // 获取当前版本号
+    const current = jobs.value.find(j => j._id === id);
+    if (!current) throw new Error('岗位不存在');
+    const expectedVersion = current._version;
 
+    const updateData = { status: 'inactive' };
+
+    // 带版本锁更新
+    const newVersion = await versionedUpdate('Job', id, expectedVersion, updateData);
+
+    // 更新本地缓存
     const idx = jobs.value.findIndex(j => j._id === id);
     if (idx !== -1) {
-      jobs.value[idx] = { ...jobs.value[idx], status: 'inactive', updatedAt: new Date() };
+      jobs.value[idx] = { ...jobs.value[idx], status: 'inactive', _version: newVersion, updatedAt: new Date() };
     }
   }
 
@@ -149,5 +160,8 @@ export const useJobStore = defineStore('job', () => {
     update,
     remove,
     hasActiveJobs,
+    // 乐观锁工具
+    isVersionConflict,
+    conflictMessage,
   };
 });

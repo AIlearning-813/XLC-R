@@ -4,11 +4,14 @@
 import { useAuthStore } from './stores/useAuthStore';
 import AppLayout from './components/layout/AppLayout.vue';
 import LoginPage from './views/LoginPage.vue';
+import OfflineBanner from './components/common/OfflineBanner.vue';
 
 const auth = useAuthStore();
 </script>
 
 <template>
+  <!-- 离线提示（全局，与登录状态无关） -->
+  <OfflineBanner />
   <LoginPage v-if="!auth.isLoggedIn" />
   <AppLayout v-else />
 </template>

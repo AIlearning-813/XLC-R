@@ -3,6 +3,8 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import cloudbase from '../services/cloudbase';
+import { versionedUpdate, initialVersion, isVersionConflict, conflictMessage } from '../services/optimistic-lock';
+import { canTransition, buildTransitionPayload, stageToFunnelKey } from '../services/pipeline-engine';
 
 export const useApplicationStore = defineStore('application', () => {
   // ===== 状态 =====
@@ -122,6 +124,7 @@ export const useApplicationStore = defineStore('application', () => {
         entrySource: 'manual',
         ...(applicationData.funnelMeta || {}),
       },
+      _version: initialVersion(),
       createdAt: new Date(),
       updatedAt: new Date(),
     };
@@ -145,50 +148,53 @@ export const useApplicationStore = defineStore('application', () => {
     const db = cloudbase.db();
     if (!db) throw new Error('数据库未初始化');
 
-    const { note = '', operatorId = '' } = options;
+    const { note = '', operatorId = '', jobType = null } = options;
 
-    // 获取当前状态
+    // 获取当前状态（确保有最新版本号）
     const current = await fetchById(id);
     if (!current) throw new Error('申请记录不存在');
 
     const oldStage = current.stage;
+    const currentStatus = current.status || 'active';
+    const expectedVersion = current._version;
 
-    // 构建更新数据
-    const updateData = {
-      stage: newStage,
-      stageEnteredAt: new Date(),
-      updatedAt: new Date(),
-    };
-
-    // 追加流转历史
-    updateData.history = db.command.push({
-      fromStage: oldStage,
-      toStage: newStage,
-      at: new Date(),
-      note,
-      operatorId,
-      operator: operatorId,
+    // === 流转引擎校验 ===
+    const validation = canTransition(oldStage, newStage, {
+      jobType: jobType || current.jobType,
+      currentStatus,
     });
 
-    // 自动填写漏斗时间戳
-    const funnelKey = stageToFunnelKey(newStage);
-    if (funnelKey) {
-      updateData[`funnel.${funnelKey}`] = new Date();
+    if (!validation.valid) {
+      throw new Error(validation.reason || '流转校验未通过');
     }
 
-    await db.collection('Application').doc(id).update(updateData);
+    // === 构建流转载荷 ===
+    const payload = buildTransitionPayload(oldStage, newStage, {
+      note,
+      operatorId,
+      jobType: jobType || current.jobType,
+      isReactivation: validation.isReactivation || false,
+    });
+
+    // 将 history 数组项转为 db.command.push
+    if (payload.history) {
+      payload.history = db.command.push(payload.history);
+    }
+
+    // 带版本锁更新
+    const newVersion = await versionedUpdate('Application', id, expectedVersion, payload);
 
     // 写入审计日志（异步，不阻塞主流程）
     try {
       await cloudbase.callFunction('write-audit-log', {
-        action: 'move_stage',
+        action: validation.isReactivation ? 'reactivate_candidate' : 'move_stage',
         entityType: 'Application',
         entityIds: [id],
         detail: {
           fromStage: oldStage,
           toStage: newStage,
           note,
-          funnelKey,
+          isReactivation: validation.isReactivation || false,
         },
         operator: operatorId || 'system',
       });
@@ -202,7 +208,9 @@ export const useApplicationStore = defineStore('application', () => {
       const oldHistory = applications.value[idx].history || [];
       applications.value[idx] = {
         ...applications.value[idx],
-        ...updateData,
+        ...payload,
+        _version: newVersion,
+        updatedAt: new Date(),
         history: [...oldHistory, {
           fromStage: oldStage,
           toStage: newStage,
@@ -228,15 +236,17 @@ export const useApplicationStore = defineStore('application', () => {
       || await fetchById(id);
     if (!current) throw new Error('申请记录不存在');
 
+    const expectedVersion = current._version;
+
     const updateData = {
       status, // 'rejected' | 'withdrawn'
       endStage: current.stage,
       endReason: reason,
       endedAt: new Date(),
-      updatedAt: new Date(),
     };
 
-    await db.collection('Application').doc(id).update(updateData);
+    // 带版本锁更新
+    const newVersion = await versionedUpdate('Application', id, expectedVersion, updateData);
 
     // 写入审计日志（异步，不阻塞主流程）
     try {
@@ -257,7 +267,7 @@ export const useApplicationStore = defineStore('application', () => {
     // 更新本地缓存
     const idx = applications.value.findIndex(a => a._id === id);
     if (idx !== -1) {
-      applications.value[idx] = { ...applications.value[idx], ...updateData };
+      applications.value[idx] = { ...applications.value[idx], ...updateData, _version: newVersion, updatedAt: new Date() };
     }
   }
 
@@ -277,26 +287,8 @@ export const useApplicationStore = defineStore('application', () => {
     add,
     moveStage,
     endApplication,
+    // 乐观锁工具
+    isVersionConflict,
+    conflictMessage,
   };
 });
-
-/**
- * 阶段 key → funnel 时间戳字段映射
- */
-function stageToFunnelKey(stage) {
-  const map = {
-    resume: 'resumeAt',
-    valid_resume: 'validAt',
-    invite: 'inviteAt',
-    invite_confirmed: 'inviteConfirmedAt',
-    first_interview: 'interview1At',
-    first_pass: 'interview1PassAt',
-    second_interview: 'interview2At',
-    second_pass: 'interview2PassAt',
-    final_interview: 'interview3At',
-    final_pass: 'interview3PassAt',
-    offer: 'offerAt',
-    onboard: 'onboardAt',
-  };
-  return map[stage] || null;
-}

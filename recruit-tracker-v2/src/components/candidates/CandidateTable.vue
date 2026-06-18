@@ -8,6 +8,7 @@ const props = defineProps({
   candidates: { type: Array, default: () => [] },
   loading: { type: Boolean, default: false },
   selectedIds: { type: Set, default: () => new Set() },
+  activeTab: { type: String, default: 'active' },
 });
 
 const emit = defineEmits(['row-click', 'toggle-select', 'select-all', 'action']);
@@ -275,23 +276,35 @@ function getAvailableStages(row) {
 
                   <div class="dropdown-divider"></div>
 
-                  <!-- 淘汰 -->
-                  <button
-                    class="dropdown-item item-danger"
-                    @click="handleAction('reject', row, $event)"
-                  >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-                    <span>淘汰</span>
-                  </button>
+                  <!-- 已结束 Tab：重新激活 -->
+                  <template v-if="activeTab === 'ended'">
+                    <button
+                      class="dropdown-item item-activate"
+                      @click="handleAction('reactivate', row, $event)"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+                      <span>重新激活</span>
+                    </button>
+                  </template>
 
-                  <!-- 放弃 -->
-                  <button
-                    class="dropdown-item item-danger"
-                    @click="handleAction('withdraw', row, $event)"
-                  >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-                    <span>放弃</span>
-                  </button>
+                  <!-- 活跃 Tab：淘汰/放弃 -->
+                  <template v-else>
+                    <button
+                      class="dropdown-item item-danger"
+                      @click="handleAction('reject', row, $event)"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                      <span>淘汰</span>
+                    </button>
+
+                    <button
+                      class="dropdown-item item-danger"
+                      @click="handleAction('withdraw', row, $event)"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                      <span>放弃</span>
+                    </button>
+                  </template>
                 </div>
               </Transition>
             </div>
@@ -317,14 +330,22 @@ function getAvailableStages(row) {
             <span>分配岗位</span>
           </button>
           <div class="dropdown-divider"></div>
-          <button class="dropdown-item item-danger" @click="handleContextAction('reject')">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-            <span>淘汰</span>
+          <!-- 已结束：重新激活 -->
+          <button v-if="activeTab === 'ended'" class="dropdown-item item-activate" @click="handleContextAction('reactivate')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+            <span>重新激活</span>
           </button>
-          <button class="dropdown-item item-danger" @click="handleContextAction('withdraw')">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-            <span>放弃</span>
-          </button>
+          <!-- 活跃：淘汰/放弃 -->
+          <template v-else>
+            <button class="dropdown-item item-danger" @click="handleContextAction('reject')">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+              <span>淘汰</span>
+            </button>
+            <button class="dropdown-item item-danger" @click="handleContextAction('withdraw')">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+              <span>放弃</span>
+            </button>
+          </template>
         </div>
       </Transition>
     </Teleport>
@@ -490,6 +511,15 @@ tbody td {
 .dropdown-item.item-danger:hover {
   background: var(--danger-bg);
   color: var(--danger);
+}
+
+.dropdown-item.item-activate {
+  color: var(--success);
+}
+
+.dropdown-item.item-activate:hover {
+  background: var(--success-bg);
+  color: var(--success);
 }
 
 .has-submenu {

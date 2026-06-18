@@ -9,6 +9,8 @@ import { useAuthStore } from '../stores/useAuthStore';
 import cloudbase from '../services/cloudbase';
 import { FUNNEL_STAGES } from '../config/constants';
 import { safeErrorMsg } from '../services/error-messages';
+import { isVersionConflict } from '../services/optimistic-lock';
+import { getInterviewRounds, getStagesForJob } from '../services/pipeline-engine';
 import KanbanBoard from '../components/pipeline/KanbanBoard.vue';
 import StageTransitionDialog from '../components/pipeline/StageTransitionDialog.vue';
 
@@ -46,42 +48,20 @@ const selectedJob = computed(() => {
   return jobs.value.find((j) => j._id === selectedJobId.value) || null;
 });
 
-function getInterviewRounds(jobType) {
-  const roundsMap = {
-    CC: 3,
-    'LTC负责人': 3,
-    '讲师': 3,
-    CR: 2,
-    '人事出纳': 2,
-    TMK: 2,
-  };
-  return roundsMap[jobType] || 3;
-}
-
 // 结束区域（紧凑卡片式，与其他阶段统一风格）
 const END_ZONE_STAGES = [
   { key: 'rejected', label: '淘汰', isEnd: true },
   { key: 'withdrawn', label: '放弃', isEnd: true },
 ];
 
-// 全部可见阶段（漏斗+结束区，统一紧凑卡片式）
+// 全部可见阶段（漏斗+结束区，统一紧凑卡片式，使用流转引擎过滤）
 const visibleStages = computed(() => {
   if (!selectedJob.value) {
     return [...END_ZONE_STAGES, ...FUNNEL_STAGES];
   }
 
   const jobType = selectedJob.value.type || selectedJob.value.jobType;
-  const rounds = getInterviewRounds(jobType);
-
-  const filtered = FUNNEL_STAGES.filter((stage) => {
-    if (rounds < 3) {
-      if (stage.key === 'final_interview' || stage.key === 'final_pass') return false;
-    }
-    if (rounds < 2) {
-      if (stage.key === 'second_interview' || stage.key === 'second_pass') return false;
-    }
-    return true;
-  });
+  const filtered = getStagesForJob(jobType);
 
   return [...END_ZONE_STAGES, ...filtered];
 });
@@ -321,6 +301,7 @@ async function handleTransitionConfirm({ note, reason }) {
       await appStore.moveStage(applicationId, toStage, {
         note,
         operatorId: auth.userName,
+        jobType: selectedJob.value?.type || selectedJob.value?.jobType,
       });
     }
 
@@ -330,7 +311,11 @@ async function handleTransitionConfirm({ note, reason }) {
     await refreshBoard();
   } catch (err) {
     console.error('[PipelinePage] 流转失败:', err.message);
-    alert('流转失败：' + safeErrorMsg(err));
+    if (isVersionConflict(err)) {
+      alert('操作冲突：数据已被其他用户修改，页面将自动刷新获取最新数据。');
+    } else {
+      alert('流转失败：' + safeErrorMsg(err));
+    }
     refreshBoard();
   }
 }

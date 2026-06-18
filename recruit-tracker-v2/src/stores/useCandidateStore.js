@@ -3,6 +3,7 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import cloudbase from '../services/cloudbase';
+import { versionedUpdate, initialVersion, isVersionConflict, conflictMessage } from '../services/optimistic-lock';
 
 export const useCandidateStore = defineStore('candidate', () => {
   // ===== 状态 =====
@@ -63,7 +64,7 @@ export const useCandidateStore = defineStore('candidate', () => {
     const db = cloudbase.db();
     if (!db) throw new Error('数据库未初始化');
 
-    const result = await db.collection('Candidate').add(candidateData);
+    const result = await db.collection('Candidate').add({ ...candidateData, _version: initialVersion() });
     const doc = { ...candidateData, _id: result.id };
     candidates.value.unshift(doc);
     currentCandidate.value = doc;
@@ -78,18 +79,27 @@ export const useCandidateStore = defineStore('candidate', () => {
     const db = cloudbase.db();
     if (!db) throw new Error('数据库未初始化');
 
-    await db.collection('Candidate').doc(id).update({
-      ...data,
-      updatedAt: new Date(),
-    });
+    // 获取当前版本号
+    const current = candidates.value.find(c => c._id === id) || currentCandidate.value;
+    if (!current && id) {
+      // 本地缓存没有，从数据库读取
+      const fetched = await fetchById(id);
+      if (!fetched) throw new Error('候选人不存在');
+    }
+
+    const doc = candidates.value.find(c => c._id === id) || currentCandidate.value;
+    const expectedVersion = doc?._version;
+
+    // 带版本锁更新
+    const newVersion = await versionedUpdate('Candidate', id, expectedVersion, data);
 
     // 更新本地缓存
     const idx = candidates.value.findIndex(c => c._id === id);
     if (idx !== -1) {
-      candidates.value[idx] = { ...candidates.value[idx], ...data, updatedAt: new Date() };
+      candidates.value[idx] = { ...candidates.value[idx], ...data, _version: newVersion, updatedAt: new Date() };
     }
     if (currentCandidate.value?._id === id) {
-      currentCandidate.value = { ...currentCandidate.value, ...data, updatedAt: new Date() };
+      currentCandidate.value = { ...currentCandidate.value, ...data, _version: newVersion, updatedAt: new Date() };
     }
   }
 
@@ -114,7 +124,7 @@ export const useCandidateStore = defineStore('candidate', () => {
     if (!db) throw new Error('数据库未初始化');
 
     // 1. 创建 Candidate
-    const candidateResult = await db.collection('Candidate').add(candidate);
+    const candidateResult = await db.collection('Candidate').add({ ...candidate, _version: initialVersion() });
     const candidateId = candidateResult.id;
 
     // 2. 创建 Application
@@ -132,6 +142,7 @@ export const useCandidateStore = defineStore('candidate', () => {
         entrySource: 'manual',
         ...(application.funnelMeta || {}),
       },
+      _version: initialVersion(),
       createdAt: new Date(),
       updatedAt: new Date(),
     };
@@ -178,6 +189,9 @@ export const useCandidateStore = defineStore('candidate', () => {
     add,
     update,
     createWithApplication,
+    // 乐观锁工具
+    isVersionConflict,
+    conflictMessage,
   };
 });
 

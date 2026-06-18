@@ -4,6 +4,7 @@
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { Sortable } from 'sortablejs';
 import KanbanColumn from './KanbanColumn.vue';
+import { groupApplicationsByStage } from '../../services/pipeline-engine';
 
 const props = defineProps({
   stages: { type: Array, required: true },
@@ -15,22 +16,9 @@ const props = defineProps({
 
 const emit = defineEmits(['card-move', 'card-click', 'card-quick-move']);
 
-// ===== 按阶段分组 =====
+// ===== 按阶段分组（使用流转引擎） =====
 const applicationsByStage = computed(() => {
-  const map = {};
-  for (const stage of props.stages) {
-    map[stage.key] = [];
-  }
-  for (const app of props.applications) {
-    let stage = app.stage || 'resume';
-    // 已结束的候选人归入结束区域（淘汰/放弃列）
-    if (app.status === 'rejected') stage = 'rejected';
-    else if (app.status === 'withdrawn') stage = 'withdrawn';
-    if (map[stage]) {
-      map[stage].push(app);
-    }
-  }
-  return map;
+  return groupApplicationsByStage(props.applications, props.stages);
 });
 
 // ===== SortableJS =====

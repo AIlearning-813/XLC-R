@@ -8,8 +8,10 @@ import { useApplicationStore } from '../stores/useApplicationStore';
 import { useCandidateStore } from '../stores/useCandidateStore';
 import { useAuthStore } from '../stores/useAuthStore';
 import cloudbase from '../services/cloudbase';
-import { END_REASONS } from '../config/constants';
+import { END_REASONS, FUNNEL_STAGES } from '../config/constants';
 import { safeErrorMsg } from '../services/error-messages';
+import { isVersionConflict } from '../services/optimistic-lock';
+import { getAvailableTargets } from '../services/pipeline-engine';
 import CandidateFilter from '../components/candidates/CandidateFilter.vue';
 import CandidateTable from '../components/candidates/CandidateTable.vue';
 import StageTransitionDialog from '../components/pipeline/StageTransitionDialog.vue';
@@ -27,6 +29,9 @@ const error = ref('');
 const rows = ref([]);
 const selectedIds = ref(new Set());
 const currentFilters = ref({});
+
+// Tab 切换：活跃 vs 已结束
+const activeTab = ref('active'); // 'active' | 'ended'
 
 // 分页
 const page = ref(1);
@@ -94,7 +99,10 @@ async function loadData(filters = {}) {
       conditions['funnelMeta.entrySource'] = filters.source;
     }
 
-    if (!filters.stage || !['rejected', 'withdrawn'].includes(filters.stage)) {
+    // 根据当前 Tab 决定查询状态
+    if (activeTab.value === 'ended') {
+      conditions.status = dbInstance.command.in(['rejected', 'withdrawn']);
+    } else if (!filters.stage || !['rejected', 'withdrawn'].includes(filters.stage)) {
       conditions.status = 'active';
     }
 
@@ -225,7 +233,83 @@ function handleAction({ action, row }) {
     case 'withdraw':
       openTransitionDialog(row, 'withdrawn');
       break;
+    case 'reactivate':
+      openReactivateDialog(row);
+      break;
   }
+}
+
+// ===== 重新激活 =====
+
+const reactivateDialogVisible = ref(false);
+const reactivateTarget = ref(null);
+const reactivateStage = ref('');
+
+function openReactivateDialog(row) {
+  reactivateTarget.value = row;
+  // 获取可用的重新激活目标阶段
+  const targets = getAvailableTargets(row.status, row.status, null);
+  reactivateStage.value = targets.length > 0 ? targets[0].key : 'resume';
+  reactivateDialogVisible.value = true;
+}
+
+async function confirmReactivate() {
+  if (!reactivateTarget.value) return;
+  const row = reactivateTarget.value;
+  try {
+    // 使用 moveStage 的 isReactivation 路径
+    // 先更新 status 为 active，再设置 stage
+    const dbInstance = db();
+    await dbInstance.collection('Application').doc(row.appId).update({
+      status: 'active',
+      stage: reactivateStage.value,
+      stageEnteredAt: new Date(),
+      endedAt: null,
+      endReason: '',
+      endStage: '',
+      reactivatedAt: new Date(),
+      reactivatedFrom: row.status,
+      updatedAt: new Date(),
+      history: dbInstance.command.push({
+        fromStage: row.status,
+        toStage: reactivateStage.value,
+        at: new Date(),
+        note: '重新激活',
+        operatorId: auth.userName,
+        operator: auth.userName,
+      }),
+    });
+
+    // 审计日志
+    try {
+      await cloudbase.callFunction('write-audit-log', {
+        action: 'reactivate_candidate',
+        entityType: 'Application',
+        entityIds: [row.appId],
+        detail: {
+          fromStatus: row.status,
+          toStage: reactivateStage.value,
+        },
+        operator: auth.userName || 'system',
+      });
+    } catch { /* ignore */ }
+
+    reactivateDialogVisible.value = false;
+    reactivateTarget.value = null;
+    await loadData(currentFilters.value);
+  } catch (err) {
+    if (isVersionConflict(err)) {
+      alert('操作冲突：数据已被其他用户修改，请刷新后重试。');
+    } else {
+      alert('重新激活失败：' + safeErrorMsg(err));
+    }
+    loadData(currentFilters.value);
+  }
+}
+
+function cancelReactivate() {
+  reactivateDialogVisible.value = false;
+  reactivateTarget.value = null;
 }
 
 // ===== 编辑弹窗 =====
@@ -449,6 +533,14 @@ function handleReset() {
   loadData({});
 }
 
+function switchTab(tab) {
+  if (activeTab.value === tab) return;
+  activeTab.value = tab;
+  page.value = 1;
+  selectedIds.value = new Set();
+  loadData(currentFilters.value);
+}
+
 function handleRowClick(row) {
   router.push(`/candidates/${row.candidateId}`);
 }
@@ -507,6 +599,24 @@ onMounted(async () => {
       </div>
     </div>
 
+    <!-- Tab 切换：活跃 / 已结束 -->
+    <div class="tab-switcher">
+      <button
+        class="tab-btn"
+        :class="{ active: activeTab === 'active' }"
+        @click="switchTab('active')"
+      >
+        活跃候选人
+      </button>
+      <button
+        class="tab-btn"
+        :class="{ active: activeTab === 'ended' }"
+        @click="switchTab('ended')"
+      >
+        已结束
+      </button>
+    </div>
+
     <!-- 批量操作工具栏 -->
     <Transition name="toolbar-slide">
       <div v-if="selectedCount > 0" class="batch-toolbar">
@@ -551,6 +661,7 @@ onMounted(async () => {
         :candidates="rows"
         :loading="loading"
         :selected-ids="selectedIds"
+        :active-tab="activeTab"
         @row-click="handleRowClick"
         @toggle-select="handleToggleSelect"
         @select-all="handleSelectAll"
@@ -668,6 +779,43 @@ onMounted(async () => {
       </Transition>
     </Teleport>
 
+    <!-- 重新激活弹窗 -->
+    <Teleport to="body">
+      <Transition name="dialog">
+        <div v-if="reactivateDialogVisible" class="dialog-overlay" @click.self="cancelReactivate">
+          <div class="dialog-card dialog-sm">
+            <div class="dialog-header">
+              <h3 class="dialog-title">重新激活候选人</h3>
+              <button class="dialog-close" @click="cancelReactivate">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+              </button>
+            </div>
+            <div class="dialog-body">
+              <p class="reactivate-info">
+                将 <strong>{{ reactivateTarget?.name || '未命名' }}</strong> 重新激活，恢复到以下阶段：
+              </p>
+              <div class="form-group">
+                <label class="form-label">目标阶段</label>
+                <select v-model="reactivateStage" class="form-select">
+                  <option
+                    v-for="s in FUNNEL_STAGES"
+                    :key="s.key"
+                    :value="s.key"
+                  >{{ s.label }}</option>
+                </select>
+              </div>
+            </div>
+            <div class="dialog-footer">
+              <button class="btn btn-secondary" @click="cancelReactivate">取消</button>
+              <button class="btn btn-primary" @click="confirmReactivate">确认激活</button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
     <!-- 阶段流转确认弹窗 -->
     <StageTransitionDialog
       :visible="transitionDialogVisible"
@@ -716,6 +864,37 @@ onMounted(async () => {
 .header-actions {
   display: flex;
   gap: var(--spacing-sm);
+}
+
+/* === Tab 切换 === */
+.tab-switcher {
+  display: flex;
+  gap: 0;
+  margin-bottom: var(--spacing-md);
+  border-bottom: 2px solid var(--gray-100);
+}
+
+.tab-btn {
+  padding: 8px 20px;
+  border: none;
+  background: transparent;
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--gray-400);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  transition: all var(--transition);
+  font-family: inherit;
+}
+
+.tab-btn:hover {
+  color: var(--gray-600);
+}
+
+.tab-btn.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
 }
 
 /* === 批量操作工具栏 === */
@@ -911,6 +1090,16 @@ onMounted(async () => {
   font-size: var(--font-size-xs);
   color: var(--gray-400);
   margin: var(--spacing-sm) 0 0;
+}
+
+.reactivate-info {
+  font-size: var(--font-size-sm);
+  color: var(--gray-500);
+  margin: 0 0 var(--spacing-md);
+}
+
+.reactivate-info strong {
+  color: var(--gray-700);
 }
 
 /* === 工具栏动画 === */
