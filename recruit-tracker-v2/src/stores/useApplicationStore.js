@@ -176,6 +176,15 @@ export const useApplicationStore = defineStore('application', () => {
       isReactivation: validation.isReactivation || false,
     });
 
+    // 合并 funnel：保留已有漏斗时间戳 + 叠加回填 + 新阶段
+    // （注意：用嵌套对象而非点分隔键，确保 CloudBase 正确写入所有字段）
+    if (payload.funnel) {
+      payload.funnel = {
+        ...(current.funnel || {}),
+        ...payload.funnel,
+      };
+    }
+
     // 将 history 数组项转为 db.command.push
     if (payload.history) {
       payload.history = db.command.push(payload.history);

@@ -305,18 +305,19 @@ export function getFunnelBackfill(stage, jobType = null) {
 
   const stages = getStagesForJob(jobType);
   const timestamp = new Date();
-  const backfill = {};
+  const funnel = {};
 
   for (const s of stages) {
     if (s.order < targetOrder) {
       const funnelKey = stageToFunnelKey(s.key);
       if (funnelKey) {
-        backfill[`funnel.${funnelKey}`] = timestamp;
+        funnel[funnelKey] = timestamp;
       }
     }
   }
 
-  return backfill;
+  // 返回嵌套 funnel 对象而非点分隔键
+  return Object.keys(funnel).length > 0 ? { funnel } : {};
 }
 
 // ===== 流转数据载荷 =====
@@ -386,21 +387,28 @@ export function buildTransitionPayload(fromStage, toStage, options = {}) {
     stageEnteredAt: now,
   };
 
+  // 构建 funnel 对象：先复制现有漏斗数据，再叠加回填+目标阶段
+  // 使用嵌套对象而非点分隔键，确保 CloudBase 正确写入所有字段
+  const funnel = {};
+
   // 跳阶段回填：自动填写跳过的漏斗时间戳
   const skipped = getIntermediateStages(fromStage, toStage, jobType);
-  if (skipped.length > 0) {
-    for (const skippedStage of skipped) {
-      const funnelKey = stageToFunnelKey(skippedStage);
-      if (funnelKey) {
-        payload[`funnel.${funnelKey}`] = now;
-      }
+  for (const skippedStage of skipped) {
+    const funnelKey = stageToFunnelKey(skippedStage);
+    if (funnelKey) {
+      funnel[funnelKey] = now;
     }
   }
 
   // 目标阶段的漏斗时间戳
   const targetFunnelKey = stageToFunnelKey(toStage);
   if (targetFunnelKey) {
-    payload[`funnel.${targetFunnelKey}`] = now;
+    funnel[targetFunnelKey] = now;
+  }
+
+  // 仅当有 funnel 更新时才附加
+  if (Object.keys(funnel).length > 0) {
+    payload.funnel = funnel;
   }
 
   // 流转历史
