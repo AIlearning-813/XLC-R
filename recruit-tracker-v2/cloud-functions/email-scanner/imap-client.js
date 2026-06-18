@@ -359,7 +359,7 @@ async function testConnection(config) {
 function connectWithTimeout(client, timeoutMs) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
-      reject(new Error('IMAP 连接超时'));
+      reject(new Error('邮件服务器连接超时'));
     }, timeoutMs);
 
     client.connect()

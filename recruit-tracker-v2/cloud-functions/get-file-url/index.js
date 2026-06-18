@@ -44,7 +44,7 @@ exports.main = async (event) => {
     if (buffer.length > MAX_SIZE) {
       const sizeMB = (buffer.length / 1024 / 1024).toFixed(1);
       console.log('[get-file-url] 文件过大:', sizeMB + 'MB');
-      return { success: false, error: `文件过大（${sizeMB}MB），超过 5MB 限制` };
+      return { success: false, error: `文件过大（${sizeMB}兆），超过 5兆 限制` };
     }
 
     const mimeType = (result && result.mimeType) || 'application/octet-stream';

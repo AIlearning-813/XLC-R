@@ -114,7 +114,7 @@ exports.main = async (event, context) => {
 
   if (!DEEPSEEK_API_KEY) {
     console.error('[resume-parser-proxy] DEEPSEEK_API_KEY 环境变量未配置');
-    return { success: false, error: 'DeepSeek API Key 未配置，请联系管理员在云函数环境变量中设置 DEEPSEEK_API_KEY' };
+    return { success: false, error: 'AI解析服务密钥未配置，请在云函数环境变量中设置' };
   }
 
   try {
@@ -152,7 +152,7 @@ exports.main = async (event, context) => {
         await db.collection('ErrorLog').add({
           type: 'cloudFunction',
           source: 'resume-parser-proxy',
-          message: `DeepSeek API 返回 HTTP ${response.status}`,
+          message: `AI解析服务请求失败（状态码 ${response.status}）`,
           context: { status: response.status, body: errorBody.slice(0, 500) },
           severity: response.status === 402 ? 'critical' : 'warning',
           createdAt: new Date(),
@@ -160,9 +160,9 @@ exports.main = async (event, context) => {
       } catch (_) { /* 静默 */ }
 
       if (response.status === 402) {
-        return { success: false, error: 'DeepSeek API 余额不足，请联系管理员充值' };
+        return { success: false, error: 'AI解析服务余额不足，请联系管理员充值' };
       }
-      return { success: false, error: `DeepSeek API 返回异常状态码: HTTP ${response.status}` };
+      return { success: false, error: `AI解析服务返回异常（状态码 ${response.status}）` };
     }
 
     const data = await response.json();
@@ -171,7 +171,7 @@ exports.main = async (event, context) => {
     const message = data.choices?.[0]?.message;
     if (!message || !message.tool_calls || message.tool_calls.length === 0) {
       console.error('[resume-parser-proxy] DeepSeek 未返回 tool_calls:', JSON.stringify(data).slice(0, 500));
-      return { success: false, error: 'DeepSeek 未返回结构化提取结果，请重试' };
+      return { success: false, error: 'AI解析未返回有效结果，请重试' };
     }
 
     const toolCall = message.tool_calls[0];
@@ -180,10 +180,10 @@ exports.main = async (event, context) => {
       parsed = JSON.parse(toolCall.function.arguments);
     } catch (parseErr) {
       console.error('[resume-parser-proxy] tool_calls 参数 JSON 解析失败:', toolCall.function.arguments.slice(0, 500));
-      return { success: false, error: 'DeepSeek 返回的数据格式异常，请重试' };
+      return { success: false, error: 'AI解析结果解析失败，请重试' };
     }
 
-    console.log(`[resume-parser-proxy] 解析成功, tokens: ${data.usage?.total_tokens || 'unknown'}`);
+    console.log(`[resume-parser-proxy] 解析成功, tokens: ${data.usage?.total_tokens || '未知'}`);
 
     return {
       success: true,
@@ -201,7 +201,7 @@ exports.main = async (event, context) => {
     return {
       success: false,
       error: isTimeout
-        ? 'DeepSeek API 响应超时（25秒），请重试'
+        ? 'AI解析服务调用超时或网络异常，请重试'
         : `解析失败: ${err.message}`,
     };
   }
