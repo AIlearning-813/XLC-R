@@ -179,11 +179,14 @@ export const useApplicationStore = defineStore('application', () => {
     // 合并 funnel：保留已有漏斗时间戳 + 叠加回填 + 新阶段
     // 使用 db.command.set() 显式告知 CloudBase 替换整个 funnel 字段
     // （直接传嵌套对象可能被 CloudBase 做浅合并导致回填字段丢失）
+    // mergedFunnel 保存纯数据，供本地缓存更新使用（避免缓存里存入 command 对象）
+    let mergedFunnel = null;
     if (payload.funnel) {
-      payload.funnel = db.command.set({
+      mergedFunnel = {
         ...(current.funnel || {}),
         ...payload.funnel,
-      });
+      };
+      payload.funnel = db.command.set(mergedFunnel);
     }
 
     // 将 history 数组项转为 db.command.push
@@ -212,13 +215,16 @@ export const useApplicationStore = defineStore('application', () => {
       console.warn('[useApplicationStore] 审计日志写入失败:', err.message);
     }
 
-    // 更新本地缓存
+    // 更新本地缓存（注意：payload 中的 funnel/history 已是 command 对象，需用纯数据覆盖）
     const idx = applications.value.findIndex(a => a._id === id);
     if (idx !== -1) {
       const oldHistory = applications.value[idx].history || [];
       applications.value[idx] = {
         ...applications.value[idx],
-        ...payload,
+        stage: newStage,
+        stageEnteredAt: new Date(),
+        // 使用合并后的纯 funnel 数据而非 command 对象
+        ...(mergedFunnel ? { funnel: mergedFunnel } : {}),
         _version: newVersion,
         updatedAt: new Date(),
         history: [...oldHistory, {
