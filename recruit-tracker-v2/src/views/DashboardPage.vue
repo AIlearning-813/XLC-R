@@ -92,7 +92,7 @@ onMounted(async () => {
         </div>
         <div class="stat-label">待解析简历</div>
         <div class="stat-value-lg">{{ parseStats.pending }}</div>
-        <div class="stat-hint">ParseQueue 队列</div>
+        <div class="stat-hint">解析队列</div>
       </div>
     </div>
 

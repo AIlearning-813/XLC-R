@@ -52,7 +52,7 @@ const formTitle = computed(() => (editingId.value ? '编辑邮箱配置' : '添�
 // 打开新增表单
 function openAddForm() {
   if (!store.cryptoReady) {
-    alert('加密密钥未配置，无法添加邮箱。请联系管理员设置 VITE_MASTER_SECRET 和 VITE_SALT_PEPPER 环境变量。');
+    alert('加密密钥未配置，无法添加邮箱。请联系管理员设置加密主密钥和加密盐值环境变量。');
     return;
   }
   editingId.value = null;
@@ -197,7 +197,7 @@ onMounted(() => {
       <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
         <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
       </svg>
-      <span>加密密钥未配置，无法添加新邮箱。请在 .env.local 中设置 VITE_MASTER_SECRET 和 VITE_SALT_PEPPER。</span>
+      <span>加密密钥未配置，无法添加新邮箱。请在 .env.local 中设置加密主密钥和加密盐值。</span>
     </div>
 
     <!-- 配置列表 -->
@@ -292,7 +292,7 @@ onMounted(() => {
           <!-- IMAP 服务器 -->
           <div class="form-row">
             <div class="form-group flex-3">
-              <label class="form-label">IMAP 服务器</label>
+              <label class="form-label">邮件服务器</label>
               <input
                 v-model="form.imapHost"
                 type="text"
@@ -325,7 +325,7 @@ onMounted(() => {
           <div class="form-group">
             <label class="form-label">
               IMAP 授权码
-              <span class="label-hint">（非邮箱登录密码，需在邮箱设置中开启 IMAP/SMTP 服务后获取）</span>
+              <span class="label-hint">（非邮箱登录密码，需在邮箱设置中开启邮件服务后获取）</span>
             </label>
             <input
               v-model="form.imapPassword"

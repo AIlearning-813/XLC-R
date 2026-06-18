@@ -17,7 +17,7 @@ async function handleLogin() {
 
   const ok = await auth.initAuth();
   if (!ok) {
-    error.value = auth.loginError || 'CloudBase 连接失败，请检查网络或配置';
+    error.value = auth.loginError || '连接失败，请检查网络或配置';
     loading.value = false;
     return;
   }
@@ -54,7 +54,7 @@ async function handleLogin() {
         </div>
       </div>
       <div class="hero-footer">
-        <span>CloudBase · DeepSeek · 腾讯云OCR</span>
+        <span>新励成招聘管理系统</span>
       </div>
     </div>
 

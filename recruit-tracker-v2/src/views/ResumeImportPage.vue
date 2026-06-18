@@ -7,6 +7,7 @@ import { useAuthStore } from '../stores/useAuthStore';
 import { useToast } from '../composables/useToast';
 import cloudbase from '../services/cloudbase';
 import { extractText, parseWithDeepSeek, computeFileHash } from '../services/resume-parser';
+import { safeErrorMsg } from '../services/error-messages';
 import { detectDuplicates } from '../services/duplicate-detector';
 import ResumeUploader from '../components/resume/ResumeUploader.vue';
 import ParseResultView from '../components/resume/ParseResultView.vue';
@@ -92,7 +93,7 @@ async function onFilesReady(newFiles) {
     await onTextExtracted();
   } catch (err) {
     console.error('[ResumeImport] 文本提取失败:', err);
-    parseError.value = err.message || '文本提取失败';
+    parseError.value = safeErrorMsg(err, '文本提取失败');
     currentStep.value = STEPS.REVIEW; // 进入审核步骤显示错误
   }
 }
@@ -117,7 +118,7 @@ async function onTextExtracted() {
     }
   } catch (err) {
     console.error('[ResumeImport] 解析调用失败:', err);
-    parseError.value = err.message || '解析服务调用失败';
+    parseError.value = safeErrorMsg(err, '解析服务调用失败');
     currentStep.value = STEPS.REVIEW;
   } finally {
     parseLoading.value = false;
@@ -191,7 +192,7 @@ async function onCreateCandidate(data) {
       } catch (uploadErr) {
         console.error('[ResumeImport] 文件上传失败:', uploadErr);
         fileStatus = 'failed';
-        uploadErrorMsg = uploadErr.message || '未知上传错误';
+        uploadErrorMsg = safeErrorMsg(uploadErr, '上传失败');
         // 文件上传失败不阻塞候选创建，但记录状态供后续补救
       }
     }
@@ -294,7 +295,7 @@ async function onCreateCandidate(data) {
   } catch (err) {
     console.error('[ResumeImport] 创建候选人失败:', err);
     // 错误已由 error-capture.js 全局捕获，这里额外提示
-    toast.error(`创建失败: ${err.message || '未知错误'}`, 0);
+    toast.error('创建失败：' + safeErrorMsg(err), 0);
   } finally {
     submitting.value = false;
   }

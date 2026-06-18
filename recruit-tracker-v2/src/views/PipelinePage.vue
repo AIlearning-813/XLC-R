@@ -8,6 +8,7 @@ import { useApplicationStore } from '../stores/useApplicationStore';
 import { useAuthStore } from '../stores/useAuthStore';
 import cloudbase from '../services/cloudbase';
 import { FUNNEL_STAGES } from '../config/constants';
+import { safeErrorMsg } from '../services/error-messages';
 import KanbanBoard from '../components/pipeline/KanbanBoard.vue';
 import StageTransitionDialog from '../components/pipeline/StageTransitionDialog.vue';
 
@@ -248,7 +249,7 @@ async function quickAssignToJob(appId, candidateId) {
     // 刷新看板
     await refreshBoard();
   } catch (err) {
-    alert('分配失败：' + err.message);
+    alert('分配失败：' + safeErrorMsg(err));
   }
 }
 
@@ -329,7 +330,7 @@ async function handleTransitionConfirm({ note, reason }) {
     await refreshBoard();
   } catch (err) {
     console.error('[PipelinePage] 流转失败:', err.message);
-    alert('流转失败：' + err.message);
+    alert('流转失败：' + safeErrorMsg(err));
     refreshBoard();
   }
 }

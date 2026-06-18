@@ -9,6 +9,7 @@ import { useCandidateStore } from '../stores/useCandidateStore';
 import { useAuthStore } from '../stores/useAuthStore';
 import cloudbase from '../services/cloudbase';
 import { END_REASONS } from '../config/constants';
+import { safeErrorMsg } from '../services/error-messages';
 import CandidateFilter from '../components/candidates/CandidateFilter.vue';
 import CandidateTable from '../components/candidates/CandidateTable.vue';
 import StageTransitionDialog from '../components/pipeline/StageTransitionDialog.vue';
@@ -266,7 +267,7 @@ async function saveEdit() {
     editTarget.value = null;
     loadData(currentFilters.value);
   } catch (err) {
-    alert('保存失败：' + err.message);
+    alert('保存失败：' + safeErrorMsg(err));
   }
 }
 
@@ -300,7 +301,7 @@ async function confirmAssignJob() {
     assignTarget.value = null;
     loadData(currentFilters.value);
   } catch (err) {
-    alert('分配岗位失败：' + err.message);
+    alert('分配岗位失败：' + safeErrorMsg(err));
   }
 }
 
@@ -344,7 +345,7 @@ async function handleTransitionConfirm({ note, reason }) {
 
     await loadData(currentFilters.value);
   } catch (err) {
-    alert('流转失败：' + err.message);
+    alert('流转失败：' + safeErrorMsg(err));
     loadData(currentFilters.value);
   }
 }

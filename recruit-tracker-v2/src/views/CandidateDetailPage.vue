@@ -9,6 +9,7 @@ import { useJobStore } from '../stores/useJobStore';
 import { useAuthStore } from '../stores/useAuthStore';
 import cloudbase from '../services/cloudbase';
 import { getCommunications } from '../services/communication';
+import { safeErrorMsg } from '../services/error-messages';
 import { FUNNEL_STAGES, JOB_TYPES } from '../config/constants';
 import CommunicationLog from '../components/candidates/CommunicationLog.vue';
 import mammoth from 'mammoth';
@@ -209,7 +210,7 @@ async function saveEdit() {
     candidate.value = await candidateStore.fetchById(candidateId.value);
     editing.value = false;
   } catch (err) {
-    alert('保存失败：' + err.message);
+    alert('保存失败：' + safeErrorMsg(err));
   } finally {
     saving.value = false;
   }

@@ -5,7 +5,7 @@
 <template>
   <div class="admin-review-page">
     <h2 class="page-title">变更审核</h2>
-    <p class="text-muted">阶段 6 实现 — PendingChanges 审批流</p>
+    <p class="text-muted">阶段 6 实现 — 变更审批流</p>
   </div>
 </template>
 
