@@ -35,7 +35,7 @@ const pendingTransition = ref(null);
 const selectedCandidate = ref(null);
 const selectedApplication = ref(null);
 
-// 结束流程：显示"淘汰"和"放弃"拖放区
+// 结束流程：显示淘汰/放弃投放区（由 KanbanBoard 左侧紧凑投放区实现）
 const showEndZones = ref(true);
 
 // ===== 计算属性 =====
@@ -57,20 +57,10 @@ function getInterviewRounds(jobType) {
   return roundsMap[jobType] || 3;
 }
 
-// 结束区域虚拟阶段定义
-const END_ZONE_STAGES = [
-  { key: 'rejected', label: '已淘汰', isEnd: true, order: 99 },
-  { key: 'withdrawn', label: '已放弃', isEnd: true, order: 100 },
-];
-
+// 漏斗阶段（不含淘汰/放弃——它们由 KanbanBoard 左侧投放区处理）
 const visibleStages = computed(() => {
   if (!selectedJob.value) {
-    // 未选岗位时也显示漏斗阶段
-    const stages = [...FUNNEL_STAGES];
-    if (showEndZones.value) {
-      stages.push(...END_ZONE_STAGES);
-    }
-    return stages;
+    return [...FUNNEL_STAGES];
   }
 
   const jobType = selectedJob.value.type || selectedJob.value.jobType;
@@ -85,11 +75,6 @@ const visibleStages = computed(() => {
     }
     return true;
   });
-
-  // 添加结束区域列
-  if (showEndZones.value) {
-    filtered.push(...END_ZONE_STAGES);
-  }
 
   return filtered;
 });

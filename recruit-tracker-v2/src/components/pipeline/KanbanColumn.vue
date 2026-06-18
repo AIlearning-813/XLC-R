@@ -17,12 +17,11 @@ const emit = defineEmits(['card-click', 'card-quick-move']);
 const stageLabel = computed(() => props.stage?.label || '');
 const stageKey = computed(() => props.stage?.key || '');
 const isOptional = computed(() => props.stage?.optional === true);
-
-const count = computed(() => props.applications?.length || 0);
 const isEndZone = computed(() => props.stage?.isEnd === true);
 
+const count = computed(() => props.applications?.length || 0);
+
 const columnStyle = computed(() => {
-  // 不同阶段用不同顶部色条
   const colorMap = {
     resume: '#8B8F97',
     valid_resume: '#5B8CB8',
@@ -69,12 +68,12 @@ function onCardQuickMove(payload) {
       <div class="col-accent-bar"></div>
     </div>
 
-    <!-- 卡片列表 -->
+    <!-- 卡片列表：TransitionGroup 不设 tag → Fragment 渲染，卡片是 .col-body 的直系子元素 → SortableJS 可独立拖拽 -->
     <div
       class="col-body"
       :data-stage="stageKey"
     >
-      <TransitionGroup name="card-list" tag="div" class="card-list">
+      <TransitionGroup name="card-list">
         <CandidateCard
           v-for="app in applications"
           :key="app._id"
@@ -157,37 +156,35 @@ function onCardQuickMove(payload) {
   opacity: 0.6;
 }
 
-/* === 卡片列表 === */
+/* === 卡片容器（现在也是 SortableJS 的挂载点）=== */
 .col-body {
   flex: 1;
   overflow-y: auto;
   padding: 0 var(--spacing-sm) var(--spacing-sm);
   min-height: 120px;
-}
-
-.card-list {
+  /* 替代原来 .card-list 的 flex 布局（TransitionGroup Fragment 没有包裹层） */
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
 /* === TransitionGroup 动画 === */
-.card-list-enter-active,
-.card-list-leave-active {
+:deep(.card-list-enter-active),
+:deep(.card-list-leave-active) {
   transition: all 0.25s ease;
 }
 
-.card-list-enter-from {
+:deep(.card-list-enter-from) {
   opacity: 0;
   transform: translateY(-8px);
 }
 
-.card-list-leave-to {
+:deep(.card-list-leave-to) {
   opacity: 0;
   transform: translateY(8px);
 }
 
-.card-list-move {
+:deep(.card-list-move) {
   transition: transform 0.25s ease;
 }
 
@@ -249,19 +246,24 @@ function onCardQuickMove(payload) {
 
 /* === 拖拽样式 === */
 :deep(.sortable-ghost) {
-  opacity: 0.3;
-  background: var(--primary-bg);
-  border: 2px dashed var(--primary);
+  opacity: 0.35;
+  background: var(--primary-bg) !important;
+  border: 2px dashed var(--primary) !important;
   border-radius: var(--radius-sm);
 }
 
 :deep(.sortable-drag) {
-  opacity: 0.9;
-  transform: rotate(3deg);
-  box-shadow: var(--shadow-lg);
+  opacity: 0.95;
+  transform: rotate(2deg) scale(1.03);
+  box-shadow: var(--shadow-lg) !important;
+  z-index: 9999;
 }
 
-/* === 结束区域 === */
+:deep(.is-dragging) {
+  cursor: grabbing !important;
+}
+
+/* === 结束区域（仅当作为完整列展示时）=== */
 .kanban-column.end-zone {
   opacity: 0.85;
   border: 2px dashed var(--gray-300);

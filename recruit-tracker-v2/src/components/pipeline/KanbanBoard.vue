@@ -1,5 +1,5 @@
 <script setup>
-/* 新励成招聘管理系统 V2.0 — 看板容器（SortableJS 跨列拖拽） */
+/* 新励成招聘管理系统 V2.0 — 看板容器（SortableJS 跨列拖拽 + 左侧投放区） */
 
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { Sortable } from 'sortablejs';
@@ -30,11 +30,11 @@ const applicationsByStage = computed(() => {
   return map;
 });
 
-// ===== SortableJS 实例管理 =====
+// ===== SortableJS =====
 const boardRef = ref(null);
 const sortables = [];
 
-/** 从元素向上查找 data-stage 属性 */
+/** 从元素向上查找 data-stage */
 function getStageFromEl(el) {
   const stageEl = el?.closest?.('[data-stage]');
   return stageEl?.dataset?.stage || null;
@@ -45,11 +45,11 @@ function initSortable() {
 
   if (!boardRef.value) return;
 
-  // ⚠️ 关键修复：SortableJS 必须挂在 .card-list 上，不是 .col-body
-  // 因为 TransitionGroup 把所有卡片包在 .card-list 里，.col-body 的直接子元素只有 .card-list 一个
-  const cardLists = boardRef.value.querySelectorAll('.card-list');
-  cardLists.forEach((listEl) => {
-    const instance = Sortable.create(listEl, {
+  // ⚠️ 关键：TransitionGroup 不设 tag → 卡片是 .col-body 的直系子元素 → 独立可拖
+  // .end-drop-zone 是左侧紧凑投放区（淘汰/放弃）
+  const containers = boardRef.value.querySelectorAll('.col-body, .end-drop-zone');
+  containers.forEach((container) => {
+    const instance = Sortable.create(container, {
       group: 'pipeline',
       animation: 200,
       easing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)',
@@ -60,17 +60,16 @@ function initSortable() {
       delayOnTouchOnly: true,
       touchStartThreshold: 5,
 
-      // 拖拽时自动滚动看板（解决页面太长的问题）
+      // 过滤非卡片元素（空状态、加载骨架等）
+      filter: '.col-empty, .col-loading, .skeleton-card',
+
+      // 拖拽时自动滚动看板
       scroll: true,
       scrollSensitivity: 80,
       scrollSpeed: 15,
       bubbleScroll: true,
 
-      // 空列表也能放入
-      emptyInsertThreshold: 5,
-
       onStart: (evt) => {
-        // 拖拽开始时给卡片加样式
         evt.item.classList.add('is-dragging');
       },
 
@@ -102,24 +101,19 @@ function destroySortable() {
   sortables.length = 0;
 }
 
-// 当 applications 或 stages 变化时重新初始化
 watch([() => props.applications, () => props.stages], () => {
-  nextTick(() => {
-    initSortable();
-  });
+  nextTick(() => initSortable());
 }, { deep: true });
 
 onMounted(() => {
-  nextTick(() => {
-    initSortable();
-  });
+  nextTick(() => initSortable());
 });
 
 onUnmounted(() => {
   destroySortable();
 });
 
-// ===== 事件处理 =====
+// ===== 事件 =====
 function onCardClick(payload) {
   emit('card-click', payload);
 }
@@ -128,16 +122,42 @@ function onCardQuickMove(payload) {
   emit('card-quick-move', payload);
 }
 
-// ===== 计算看板列数 =====
 const stageCount = computed(() => props.stages.length);
 </script>
 
 <template>
   <div class="kanban-board" ref="boardRef">
-    <div
-      class="kanban-scroll"
-      :style="{ '--col-count': stageCount }"
-    >
+    <div class="kanban-scroll" :style="{ '--col-count': stageCount }">
+      <!-- 左侧紧凑投放区：淘汰 / 放弃（始终可见，无需滚动） -->
+      <div class="end-zone-drops">
+        <div class="end-drop-wrap">
+          <div
+            class="end-drop-zone"
+            data-stage="rejected"
+            data-drop-label="淘汰"
+          >
+            <div class="end-drop-icon">🗑️</div>
+            <div class="end-drop-label">淘汰</div>
+            <div class="end-drop-hint">拖拽到此</div>
+          </div>
+        </div>
+        <div class="end-drop-wrap">
+          <div
+            class="end-drop-zone"
+            data-stage="withdrawn"
+            data-drop-label="放弃"
+          >
+            <div class="end-drop-icon">🚫</div>
+            <div class="end-drop-label">放弃</div>
+            <div class="end-drop-hint">拖拽到此</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 分隔线 -->
+      <div class="drop-divider"></div>
+
+      <!-- 漏斗阶段列 -->
       <KanbanColumn
         v-for="stage in stages"
         :key="stage.key"
@@ -196,6 +216,84 @@ const stageCount = computed(() => props.stages.length);
   background: var(--gray-300);
 }
 
+/* === 左侧投放区 === */
+.end-zone-drops {
+  display: flex;
+  gap: var(--spacing-sm);
+  flex-shrink: 0;
+  align-items: flex-start;
+  padding-top: 0;
+}
+
+.end-drop-wrap {
+  flex-shrink: 0;
+}
+
+.end-drop-zone {
+  width: 80px;
+  min-height: 160px;
+  border: 2px dashed var(--gray-300);
+  border-radius: var(--radius);
+  background: var(--gray-25);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: default;
+  transition: all var(--transition);
+  user-select: none;
+}
+
+.end-drop-zone:hover {
+  border-color: var(--danger);
+  background: var(--danger-bg);
+}
+
+.end-drop-zone[data-stage="rejected"]:hover {
+  border-color: #DC4C4C;
+  background: #FEF2F2;
+}
+
+.end-drop-zone[data-stage="withdrawn"]:hover {
+  border-color: #9B8B7C;
+  background: #FAFAF8;
+}
+
+/* 有卡片拖入时的高亮 */
+.end-drop-zone:has(.sortable-ghost),
+.end-drop-zone.sortable-highlight {
+  border-color: var(--danger) !important;
+  background: var(--danger-bg) !important;
+  border-style: solid !important;
+  transform: scale(1.05);
+}
+
+.end-drop-icon {
+  font-size: 28px;
+  line-height: 1;
+}
+
+.end-drop-label {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--gray-500);
+}
+
+.end-drop-hint {
+  font-size: 10px;
+  color: var(--gray-300);
+}
+
+/* 分隔线 */
+.drop-divider {
+  width: 1px;
+  background: var(--gray-200);
+  flex-shrink: 0;
+  align-self: stretch;
+  margin: 0 2px;
+}
+
 /* === 空状态 === */
 .board-empty {
   flex: 1;
@@ -226,7 +324,7 @@ const stageCount = computed(() => props.stages.length);
   margin: 0;
 }
 
-/* === 拖拽全身样式（:deep 穿透到子组件） === */
+/* === 全局拖拽样式 === */
 :deep(.sortable-ghost) {
   opacity: 0.35;
   background: var(--primary-bg) !important;
