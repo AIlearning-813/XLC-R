@@ -1,0 +1,8 @@
+{
+  "timeout": 30,
+  "runtime": "Nodejs20.19",
+  "memorySize": 512,
+  "envVariables": {
+    "ENV_ID": "xlc-recruit-d1gmbx8gybc8a3565"
+  }
+}

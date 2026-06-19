@@ -1,0 +1,9 @@
+{
+  "name": "report-cache-warmer",
+  "version": "1.0.0",
+  "description": "报表缓存预热云函数 — 每天凌晨2:00自动预计算漏斗数据并清理过期缓存",
+  "main": "index.js",
+  "dependencies": {
+    "@cloudbase/node-sdk": "^2.0.0"
+  }
+}

@@ -6,11 +6,11 @@
     {
       "name": "annual-archive",
       "type": "timer",
-      "config": "0 0 3 1 1 *"
+      "config": "0 3 1 1 *"
     }
   ],
   "timeout": 300,
-  "runtime": "Nodejs18.15",
+  "runtime": "Nodejs20.19",
   "memorySize": 512,
   "envVariables": {
     "ENV_ID": "xlc-recruit-d1gmbx8gybc8a3565"

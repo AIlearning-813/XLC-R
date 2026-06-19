@@ -1,0 +1,9 @@
+{
+  "name": "report-aggregator",
+  "version": "1.0.0",
+  "description": "报表聚合云函数 — 支持 overview/job_funnel/trend/dept_monthly 四种聚合维度",
+  "main": "index.js",
+  "dependencies": {
+    "@cloudbase/node-sdk": "^2.0.0"
+  }
+}

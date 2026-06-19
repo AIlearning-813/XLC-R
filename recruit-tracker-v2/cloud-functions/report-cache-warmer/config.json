@@ -1,0 +1,15 @@
+{
+  "timeout": 120,
+  "runtime": "Nodejs20.19",
+  "memorySize": 512,
+  "triggers": [
+    {
+      "name": "daily-cache-warm",
+      "type": "timer",
+      "config": "0 2 * * *"
+    }
+  ],
+  "envVariables": {
+    "ENV_ID": "xlc-recruit-d1gmbx8gybc8a3565"
+  }
+}
