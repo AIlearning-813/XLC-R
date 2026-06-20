@@ -32,9 +32,76 @@ const BATCH_SIZE = 20;
 const MAX_RETRY_COUNT = 3;
 const TIMEOUT_BUFFER_MS = 30000;     // 剩余 30 秒时停止
 const FUNCTION_TIMEOUT_MS = 180000;   // 云函数总超时 180 秒
+const LOCK_TTL_MS = 300000;           // 分布式锁 TTL（5 分钟，超过此时间自动释放）
 
 // 指数退避时间表（分钟）
 const RETRY_BACKOFF_MINUTES = [5, 10, 20];
+
+/**
+ * 获取分布式锁（P0-6 并发安全修复）
+ * 使用 CloudBase 文档作为锁：成功创建文档 = 获取锁，文档已存在 = 锁被占用
+ * @returns {Promise<{ acquired: boolean, lockId?: string }>}
+ */
+async function acquireLock(db) {
+  const LOCK_ID = 'parse_queue_processor_lock';
+  const now = new Date();
+
+  try {
+    // 尝试读取现有锁
+    const { data: existingLocks } = await db
+      .collection('ProcessingLock')
+      .where({ lockId: LOCK_ID })
+      .limit(1)
+      .get();
+
+    if (existingLocks && existingLocks.length > 0) {
+      const lock = existingLocks[0];
+      const lockAge = now.getTime() - new Date(lock.createdAt).getTime();
+
+      // 锁未过期 → 其他实例仍在运行，放弃本次执行
+      if (lockAge < LOCK_TTL_MS) {
+        console.log(`[parse-queue-processor] 检测到活跃锁（${Math.round(lockAge / 1000)}s 前创建），跳过本次执行`);
+        return { acquired: false };
+      }
+
+      // 锁已过期 → 删除旧锁，重新获取
+      console.log(`[parse-queue-processor] 旧锁已过期（${Math.round(lockAge / 1000)}s），重新获取`);
+      await db.collection('ProcessingLock').doc(lock._id).remove();
+    }
+
+    // 创建新锁
+    const lockResult = await db.collection('ProcessingLock').add({
+      lockId: LOCK_ID,
+      createdAt: now,
+      expiresAt: new Date(now.getTime() + LOCK_TTL_MS),
+    });
+
+    console.log('[parse-queue-processor] ✅ 分布式锁获取成功');
+    return { acquired: true, lockId: lockResult.id };
+  } catch (err) {
+    // 并发创建可能触发唯一索引冲突 → 获取锁失败
+    if (err.code === 'DUPLICATE_KEY' || err.message?.includes('duplicate')) {
+      console.log('[parse-queue-processor] 锁已被其他实例获取，跳过本次执行');
+      return { acquired: false };
+    }
+    // 其他错误：保守起见，允许继续执行（避免因锁服务故障阻塞整个管道）
+    console.warn('[parse-queue-processor] 锁检查失败，放行执行:', err.message);
+    return { acquired: true, lockId: null, degraded: true };
+  }
+}
+
+/**
+ * 释放分布式锁
+ */
+async function releaseLock(db, lockId) {
+  if (!lockId) return;
+  try {
+    await db.collection('ProcessingLock').doc(lockId).remove();
+    console.log('[parse-queue-processor] 🔓 分布式锁已释放');
+  } catch (err) {
+    console.warn('[parse-queue-processor] 释放锁失败:', err.message);
+  }
+}
 
 exports.main = async (event, context) => {
   const startTime = Date.now();
@@ -47,6 +114,12 @@ exports.main = async (event, context) => {
     skipped: 0,
     errors: [],
   };
+
+  // P0-6：获取分布式锁，防止多实例并发消费同一队列
+  const lock = await acquireLock(db);
+  if (!lock.acquired) {
+    return { success: true, summary: { ...summary, message: '锁被占用，跳过本次执行（并发保护）' } };
+  }
 
   console.log('[parse-queue-processor] 开始消费循环');
 
@@ -100,6 +173,9 @@ exports.main = async (event, context) => {
   } catch (err) {
     console.error('[parse-queue-processor] 全局异常:', err.message);
     return { success: false, error: err.message, summary };
+  } finally {
+    // P0-6：无论成功或失败，都释放分布式锁
+    await releaseLock(db, lock.lockId);
   }
 };
 

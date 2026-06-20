@@ -80,7 +80,12 @@ exports.main = async (event, context) => {
     }
   }
 
-  // ---- 更新邮箱配置 ----
+  // ---- 创建邮箱配置（云函数端加密密码）----
+  if (action === 'createConfig') {
+    return handleCreateConfig(event);
+  }
+
+  // ---- 更新邮箱配置（云函数端加密密码）----
   if (action === 'updateConfig') {
     return handleUpdateConfig(event);
   }
@@ -190,17 +195,64 @@ exports.main = async (event, context) => {
 
 // ===== EmailConfig CRUD（云函数端，绕过前端直接操作数据库的权限问题）=====
 
-// 更新邮箱配置
+// 创建邮箱配置（云函数端加密密码后存储）
+async function handleCreateConfig(event) {
+  const { config } = event;
+  if (!config) return { success: false, message: '缺少配置数据' };
+
+  try {
+    // 加密密码（如果已加密则跳过）
+    let encryptedPassword = config.imapPassword || '';
+    if (encryptedPassword && !encryptedPassword.startsWith('PLAINTEXT:')) {
+      // 已经是加密格式（base64），直接使用
+    } else if (encryptedPassword.startsWith('PLAINTEXT:')) {
+      // 明文标记，需要加密
+      const plaintext = encryptedPassword.slice('PLAINTEXT:'.length);
+      encryptedPassword = modules.crypto.encrypt(plaintext);
+    }
+
+    const doc = {
+      userId: config.userId,
+      email: config.email,
+      imapHost: config.imapHost || 'imap.qq.com',
+      imapPort: config.imapPort || 993,
+      imapUser: config.imapUser || config.email,
+      imapPassword: encryptedPassword,
+      filterRules: config.filterRules || {},
+      enabled: config.enabled !== false,
+      failureCount: 0,
+      nextRetryAt: null,
+      lastError: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const result = await db.collection('EmailConfig').add(doc);
+    return { success: true, id: result.id, config: { ...doc, _id: result.id } };
+  } catch (err) {
+    return { success: false, message: `创建失败：${err.message}` };
+  }
+}
+
+// 更新邮箱配置（云函数端加密密码）
 async function handleUpdateConfig(event) {
   const { id, updates } = event;
   if (!id) return { success: false, message: '缺少配置 ID' };
 
-  // 如果更新密码，需要解密验证（前端传来的已经是加密的）
   try {
-    await db.collection('EmailConfig').doc(id).update({
-      ...updates,
-      updatedAt: new Date(),
-    });
+    const updateData = { ...updates };
+
+    // 如果包含密码更新，在云函数端加密
+    if (updateData.imapPassword) {
+      if (updateData.imapPassword.startsWith('PLAINTEXT:')) {
+        const plaintext = updateData.imapPassword.slice('PLAINTEXT:'.length);
+        updateData.imapPassword = modules.crypto.encrypt(plaintext);
+      }
+      // 否则已是加密格式，直接使用
+    }
+
+    updateData.updatedAt = new Date();
+    await db.collection('EmailConfig').doc(id).update(updateData);
     return { success: true, message: '邮箱配置已更新' };
   } catch (err) {
     return { success: false, message: `更新失败：${err.message}` };

@@ -3,6 +3,7 @@
 
 import Sidebar from './Sidebar.vue';
 import ToastContainer from '../common/ToastContainer.vue';
+import OfflineBanner from '../common/OfflineBanner.vue';
 import { useAuthStore } from '../../stores/useAuthStore';
 
 const auth = useAuthStore();
@@ -22,6 +23,7 @@ const auth = useAuthStore();
           </span>
         </div>
       </header>
+      <OfflineBanner />
       <div class="app-content">
         <router-view />
       </div>

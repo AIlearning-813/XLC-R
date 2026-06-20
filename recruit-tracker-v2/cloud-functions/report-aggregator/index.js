@@ -38,7 +38,7 @@ const FUNNEL_STAGES = [
 ];
 
 // 只需要 2 轮面试的岗位（无 final_interview 和 final_pass）
-const TWO_ROUND_JOB_TYPES = ['CR', 'HR-Cashier', 'TMK'];
+const TWO_ROUND_JOB_TYPES = ['CR', '人事出纳', 'TMK'];
 const THREE_ROUND_STAGES = ['final_interview', 'final_pass'];
 
 // 缓存 TTL（秒）
@@ -192,19 +192,23 @@ async function aggregateJobFunnel(jobId, jobType) {
     } catch (_) { /* 忽略 */ }
   }
 
-  // 查询该岗位所有未归档申请
-  const filter = { isArchived: _.neq(true) };
-  if (jobId) filter.jobId = jobId;
+  // 查询该岗位所有未归档申请（游标分页，处理 >500 条数据）
+  const baseFilter = { isArchived: _.neq(true) };
+  if (jobId) baseFilter.jobId = jobId;
 
   const allApps = [];
   let cursor = null;
   let hasMore = true;
 
   while (hasMore) {
-    const query = db.collection('Application').where(filter).limit(500);
+    let query = db.collection('Application').orderBy('_id', 'asc').limit(500);
+    // 组合过滤条件：基础过滤 + 游标分页
+    const combinedFilter = { ...baseFilter };
     if (cursor) {
-      // Note: 文档型数据库分页简化处理，每次从头查
+      combinedFilter._id = _.gt(cursor);
     }
+    query = query.where(combinedFilter);
+
     const { data } = await query.get();
     if (!data || data.length === 0) {
       hasMore = false;
@@ -306,16 +310,22 @@ async function aggregateTrend(months, jobId) {
     });
   }
 
-  // 查询所有未归档申请
-  const filter = { isArchived: _.neq(true) };
-  if (jobId) filter.jobId = jobId;
+  // 查询所有未归档申请（游标分页）
+  const baseFilter = { isArchived: _.neq(true) };
+  if (jobId) baseFilter.jobId = jobId;
 
   const allApps = [];
   let hasMore = true;
   let cursor = null;
 
   while (hasMore) {
-    const query = db.collection('Application').where(filter).limit(500);
+    let query = db.collection('Application').orderBy('_id', 'asc').limit(500);
+    const combinedFilter = { ...baseFilter };
+    if (cursor) {
+      combinedFilter._id = _.gt(cursor);
+    }
+    query = query.where(combinedFilter);
+
     const { data } = await query.get();
     if (!data || data.length === 0 || data.length < 500) {
       hasMore = false;
@@ -394,7 +404,7 @@ async function aggregateDeptMonthly(year, month) {
         jobId: job._id,
         isArchived: _.neq(true),
         stage: _.in(['first_interview', 'first_pass', 'second_interview', 'second_pass', 'final_interview', 'final_pass', 'offer', 'onboard']),
-        'funnel.firstInterviewAt': _.and(_.gte(monthStart), _.lte(monthEnd)),
+        'funnel.interview1At': _.and(_.gte(monthStart), _.lte(monthEnd)),
       }).count(),
       // Offer 发出的（本月）
       db.collection('Application').where({

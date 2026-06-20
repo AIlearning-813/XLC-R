@@ -17,8 +17,8 @@ const app = cloudbase.init({ env: cloudbase.SYMBOL_CURRENT_ENV });
 const db = app.database();
 const _ = db.command;
 
-// 预热缓存 TTL（24 小时）
-const WARM_CACHE_TTL = 24 * 60 * 60;
+// 预热缓存 TTL（30 分钟，与 report-aggregator 保持一致，避免覆盖运行时缓存）
+const WARM_CACHE_TTL = 30 * 60;
 
 // ========== 漏斗阶段定义（与 report-aggregator 一致） ==========
 const FUNNEL_STAGES = [
@@ -36,7 +36,7 @@ const FUNNEL_STAGES = [
   { key: 'onboard', order: 11 },
 ];
 
-const TWO_ROUND_JOB_TYPES = ['CR', 'HR-Cashier', 'TMK'];
+const TWO_ROUND_JOB_TYPES = ['CR', '人事出纳', 'TMK'];
 const THREE_ROUND_STAGES = ['final_interview', 'final_pass'];
 
 function getStagesForJob(jobType) {
@@ -172,7 +172,7 @@ async function warmDeptMonthly(year, month) {
       db.collection('Application').where({
         jobId: job._id, isArchived: _.neq(true),
         stage: _.in(['first_interview', 'first_pass', 'second_interview', 'second_pass', 'final_interview', 'final_pass', 'offer', 'onboard']),
-        'funnel.firstInterviewAt': _.and(_.gte(monthStart), _.lte(monthEnd)),
+        'funnel.interview1At': _.and(_.gte(monthStart), _.lte(monthEnd)),
       }).count(),
       db.collection('Application').where({
         jobId: job._id, isArchived: _.neq(true),
