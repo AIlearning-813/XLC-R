@@ -193,3 +193,47 @@ export function validateJobData(jobData) {
   const missing = JOB_REQUIRED_FIELDS.filter(f => !jobData[f]);
   return { valid: missing.length === 0, missing };
 }
+
+// ===== 阶段 6：数据导入列映射预置 =====
+
+export const COLUMN_MAPPING_PRESETS = {
+  boss: {
+    _label: 'BOSS直聘',
+    name: '姓名',
+    phone: '手机号',
+    email: '邮箱',
+    expectedPosition: '应聘岗位',
+    currentStage: '当前状态',
+    source: '来源',
+    gender: '性别',
+    age: '年龄',
+    education: '学历',
+    workYears: '工作年限',
+  },
+  zhilian: {
+    _label: '智联招聘',
+    name: '姓名',
+    phone: '联系电话',
+    email: '电子邮箱',
+    expectedPosition: '期望职位',
+    currentStage: '求职状态',
+    source: '渠道',
+    gender: '性别',
+    age: '年龄',
+    education: '最高学历',
+    workYears: '工作经验',
+  },
+  liepin: {
+    _label: '猎聘',
+    name: '候选人姓名',
+    phone: '手机号码',
+    email: '邮箱地址',
+    expectedPosition: '期望岗位',
+    currentStage: '当前状态',
+    source: '推荐来源',
+    gender: '性别',
+    age: '年龄',
+    education: '学历',
+    workYears: '工作年限',
+  },
+};
