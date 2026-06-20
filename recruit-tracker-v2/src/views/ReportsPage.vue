@@ -60,14 +60,15 @@ async function loadAllData() {
     funnelData.value = funnel;
     trendData.value = trend;
     deptData.value = dept;
+    loading.value = false;
 
-    // 渲染图表
+    // 渲染图表（必须在 loading=false 之后，否则 canvas 元素尚未挂载）
     await nextTick();
+    await nextTick(); // 双 nextTick 确保 v-else 块中的 canvas 已渲染
     renderFunnelChart();
     renderTrendChart();
   } catch (err) {
     error.value = err.message || '数据加载失败';
-  } finally {
     loading.value = false;
   }
 }
@@ -466,6 +467,7 @@ onMounted(async () => {
 .chart-card {
   padding: var(--spacing-lg);
   position: relative;
+  min-height: 360px;
 }
 
 .chart-card canvas {
