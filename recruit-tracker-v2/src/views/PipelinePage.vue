@@ -12,6 +12,7 @@ import { safeErrorMsg } from '../services/error-messages';
 import { isVersionConflict } from '../services/optimistic-lock';
 import { getInterviewRounds, getStagesForJob } from '../services/pipeline-engine';
 import { useBatchSelection } from '../composables/useBatchSelection';
+import { useToast } from '../composables/useToast';
 import KanbanBoard from '../components/pipeline/KanbanBoard.vue';
 import StageTransitionDialog from '../components/pipeline/StageTransitionDialog.vue';
 import BatchActionBar from '../components/pipeline/BatchActionBar.vue';
@@ -21,6 +22,7 @@ const jobStore = useJobStore();
 const appStore = useApplicationStore();
 const auth = useAuthStore();
 const db = cloudbase.db;
+const toast = useToast();
 
 // ===== 状态 =====
 const selectedJobId = ref('');
@@ -250,7 +252,7 @@ async function quickAssignToJob(appId, candidateId) {
     // 刷新看板
     await refreshBoard();
   } catch (err) {
-    alert('分配失败：' + safeErrorMsg(err));
+    toast.error('分配失败：' + safeErrorMsg(err));
   }
 }
 
@@ -333,9 +335,9 @@ async function handleTransitionConfirm({ note, reason }) {
   } catch (err) {
     console.error('[PipelinePage] 流转失败:', err.message);
     if (isVersionConflict(err)) {
-      alert('操作冲突：数据已被其他用户修改，页面将自动刷新获取最新数据。');
+      toast.error('操作冲突：数据已被其他用户修改，页面将自动刷新获取最新数据。');
     } else {
-      alert('流转失败：' + safeErrorMsg(err));
+      toast.error('流转失败：' + safeErrorMsg(err));
     }
     refreshBoard();
   }

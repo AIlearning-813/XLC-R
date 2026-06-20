@@ -12,10 +12,12 @@
 import { ref, reactive, onMounted, computed } from 'vue';
 import { useEmailConfigStore } from '../stores/useEmailConfigStore';
 import { useAuthStore } from '../stores/useAuthStore';
+import { useToast } from '../composables/useToast';
 import { EMAIL_PROVIDERS } from '../config/constants';
 
 const store = useEmailConfigStore();
 const auth = useAuthStore();
+const toast = useToast();
 
 // 弹窗状态
 const showForm = ref(false);
@@ -52,7 +54,7 @@ const formTitle = computed(() => (editingId.value ? '编辑邮箱配置' : '添�
 // 打开新增表单
 function openAddForm() {
   if (!store.cryptoReady) {
-    alert('加密密钥未配置，无法添加邮箱。请联系管理员设置加密主密钥和加密盐值环境变量。');
+    toast.warning('加密密钥未配置，无法添加邮箱。请联系管理员设置加密主密钥和加密盐值环境变量。');
     return;
   }
   editingId.value = null;
@@ -115,7 +117,7 @@ async function handleTestConnection() {
 // 保存配置
 async function handleSave() {
   if (!form.email || !form.imapPassword) {
-    alert('请填写邮箱地址和授权码');
+    toast.warning('请填写邮箱地址和授权码');
     return;
   }
 

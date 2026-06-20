@@ -56,7 +56,7 @@ function isActive(path) {
 </script>
 
 <template>
-  <aside class="sidebar">
+  <aside class="sidebar" role="complementary" aria-label="主导航侧边栏">
     <!-- Logo -->
     <div class="sidebar-header">
       <div class="sidebar-logo">
@@ -72,12 +72,14 @@ function isActive(path) {
     </div>
 
     <!-- 导航 -->
-    <nav class="sidebar-nav">
+    <nav class="sidebar-nav" role="navigation" aria-label="主导航">
       <button
         v-for="item in menuItems"
         :key="item.path"
         class="sidebar-item"
         :class="{ active: isActive(item.path) }"
+        :aria-label="item.title"
+        :aria-current="isActive(item.path) ? 'page' : undefined"
         @click="navigate(item.path)"
       >
         <span class="sidebar-item-icon" v-html="getIcon(item.icon)"></span>
@@ -96,7 +98,7 @@ function isActive(path) {
           <span class="sidebar-user-name">{{ auth.userName }}</span>
           <span class="sidebar-user-role">{{ auth.isAdmin ? '管理员' : '招聘专员' }}</span>
         </div>
-        <button class="sidebar-logout" @click="auth.logout()" title="退出登录">
+        <button class="sidebar-logout" @click="auth.logout()" title="退出登录" aria-label="退出登录">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4m7 14l5-5-5-5m5 5H9"/>
           </svg>

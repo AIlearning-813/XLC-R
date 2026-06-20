@@ -152,3 +152,44 @@ export const NOTIFICATION_TYPES = {
   parse_duplicate: { label: '检测到重复', icon: 'warning' },
   scan_summary: { label: '日报摘要', icon: 'info' },
 };
+
+// ===== P1-7：Job 模型完整字段定义 =====
+// Job 文档的推荐字段及默认值（确保数据一致性）
+
+export const JOB_REQUIRED_FIELDS = ['title', 'type', 'department'];
+
+export const JOB_OPTIONAL_FIELDS = {
+  headcount: { type: 'number', default: 1, label: '招聘人数' },
+  salaryRange: { type: 'object', default: () => ({ min: 0, max: 0 }), label: '薪资范围' },
+  workCity: { type: 'string', default: '', label: '工作城市' },
+  requirements: { type: 'string', default: '', label: '岗位要求' },
+  expiryDate: { type: 'date', default: null, label: '招聘截止日期' },
+  priority: { type: 'string', default: 'normal', label: '优先级' },
+};
+
+export const JOB_PRIORITIES = ['urgent', 'high', 'normal', 'low'];
+
+/**
+ * 为 Job 数据填充缺失的默认字段
+ * @param {Object} jobData - 原始岗位数据
+ * @returns {Object} 补充默认值后的数据
+ */
+export function normalizeJobData(jobData) {
+  const result = { ...jobData };
+  for (const [key, config] of Object.entries(JOB_OPTIONAL_FIELDS)) {
+    if (result[key] === undefined || result[key] === null) {
+      result[key] = typeof config.default === 'function' ? config.default() : config.default;
+    }
+  }
+  return result;
+}
+
+/**
+ * 校验 Job 必填字段
+ * @param {Object} jobData
+ * @returns {{ valid: boolean, missing: string[] }}
+ */
+export function validateJobData(jobData) {
+  const missing = JOB_REQUIRED_FIELDS.filter(f => !jobData[f]);
+  return { valid: missing.length === 0, missing };
+}

@@ -13,6 +13,13 @@
  */
 
 const cloudbase = require('@cloudbase/node-sdk');
+const crypto = require('crypto');
+
+// P1-3：计算 phone/email 的 SHA-256 哈希（用于去重比对）
+function computeHash(value) {
+  if (!value || typeof value !== 'string') return '';
+  return crypto.createHash('sha256').update(value.trim().toLowerCase()).digest('hex');
+}
 
 // format-router 可能因依赖问题加载失败，用 try-catch 保护
 let extractText = null;
@@ -303,12 +310,17 @@ async function processOneEntry(db, entry, summary) {
     }
 
     // 创建 Candidate（扁平化 DeepSeek 解析结果到顶层字段）
+    const phoneVal = basicInfo.phone || '';
+    const emailVal = basicInfo.email || '';
     const candidateDoc = {
       // 基本信息（顶层，方便直接查询和展示）
       name: basicInfo.name || '',
       gender: basicInfo.gender || '',
-      phone: basicInfo.phone || '',
-      email: basicInfo.email || '',
+      phone: phoneVal,
+      email: emailVal,
+      // P1-3：哈希值用于去重（不暴露明文）
+      phoneHash: computeHash(phoneVal),
+      emailHash: computeHash(emailVal),
       age: basicInfo.age || null,
       city: basicInfo.city || '',
       yearsOfExperience: basicInfo.years_of_experience || null,
@@ -489,13 +501,23 @@ async function autoMatchJob(db, candidateInfo) {
  * 检查候选人级重复（phone + email）
  */
 async function checkCandidateDuplicate(db, basicInfo) {
-  const { phone, email } = basicInfo;
+  const phoneVal = basicInfo.phone || '';
+  const emailVal = basicInfo.email || '';
 
-  if (!phone && !email) return null;
+  if (!phoneVal && !emailVal) return null;
 
+  // P1-3：优先用哈希匹配（不暴露明文查询），回退到明文匹配
   const conditions = [];
-  if (phone) conditions.push({ phone });
-  if (email) conditions.push({ email });
+  if (phoneVal) {
+    const phoneHash = computeHash(phoneVal);
+    conditions.push({ phoneHash });
+    conditions.push({ phone: phoneVal }); // 兼容旧数据无哈希字段
+  }
+  if (emailVal) {
+    const emailHash = computeHash(emailVal);
+    conditions.push({ emailHash });
+    conditions.push({ email: emailVal }); // 兼容旧数据无哈希字段
+  }
 
   if (conditions.length === 0) return null;
 

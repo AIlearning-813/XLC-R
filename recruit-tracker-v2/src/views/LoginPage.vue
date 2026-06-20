@@ -10,20 +10,34 @@ const displayName = ref('');
 const loading = ref(false);
 const error = ref('');
 
+// P2-3：增强的错误信息映射
+function mapLoginError(rawError) {
+  const msg = (rawError || '').toLowerCase();
+  if (msg.includes('timeout') || msg.includes('timed out')) return '连接超时，请检查网络后重试';
+  if (msg.includes('network') || msg.includes('fetch')) return '网络异常，请检查网络连接后重试';
+  if (msg.includes('env') || msg.includes('not found')) return '环境配置错误，请联系管理员检查 CloudBase 环境 ID';
+  if (msg.includes('permission') || msg.includes('unauthorized')) return '访问被拒绝，请确认已加入系统';
+  if (msg.includes('auth') || msg.includes('login')) return '认证失败，请确认账号已注册';
+  return rawError || '连接失败，请检查网络或配置';
+}
+
 async function handleLogin() {
   if (!selectedRole.value) return;
   loading.value = true;
   error.value = '';
 
-  const ok = await auth.initAuth();
-  if (!ok) {
-    error.value = auth.loginError || '连接失败，请检查网络或配置';
+  try {
+    const ok = await auth.initAuth();
+    if (!ok) {
+      error.value = mapLoginError(auth.loginError);
+      return;
+    }
+    auth.selectRole(selectedRole.value, displayName.value || undefined);
+  } catch (err) {
+    error.value = mapLoginError(err.message || '登录过程中发生未知错误');
+  } finally {
     loading.value = false;
-    return;
   }
-
-  auth.selectRole(selectedRole.value, displayName.value || undefined);
-  loading.value = false;
 }
 </script>
 

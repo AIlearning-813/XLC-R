@@ -13,6 +13,10 @@ export const useApplicationStore = defineStore('application', () => {
   const loading = ref(false);
   const error = ref('');
 
+  // P3-2：fetchByCandidate 去重缓存（避免同一候选人重复请求）
+  const _fetchCache = new Map();
+  const FETCH_CACHE_TTL = 30000; // 30 秒
+
   // ===== 计算属性 =====
   const activeApplications = computed(() =>
     applications.value.filter(a => a.status === 'active')
@@ -34,6 +38,12 @@ export const useApplicationStore = defineStore('application', () => {
    * 根据候选人 ID 获取所有申请
    */
   async function fetchByCandidate(candidateId) {
+    // P3-2：检查缓存（30 秒内重复请求直接返回）
+    const cached = _fetchCache.get(candidateId);
+    if (cached && Date.now() - cached.time < FETCH_CACHE_TTL) {
+      return cached.data;
+    }
+
     const db = cloudbase.db();
     if (!db) {
       error.value = '数据库未初始化';
@@ -58,6 +68,8 @@ export const useApplicationStore = defineStore('application', () => {
         }
       }
 
+      // P3-2：存入缓存
+      _fetchCache.set(candidateId, { data, time: Date.now() });
       return data;
     } catch (err) {
       console.error('[useApplicationStore] 获取申请列表失败:', err.message);

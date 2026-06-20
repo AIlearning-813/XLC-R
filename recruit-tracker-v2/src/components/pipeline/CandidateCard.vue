@@ -164,7 +164,7 @@ function handleToggleSelect(event) {
       <div class="card-top-right">
         <span class="card-source badge" :class="sourceBadgeClass">{{ sourceLabel }}</span>
         <div class="quick-move-wrap" @click.stop>
-          <button class="quick-move-btn" :class="{ active: menuOpen }" @click="toggleMenu" title="快速流转">
+          <button class="quick-move-btn" :class="{ active: menuOpen }" @click="toggleMenu" title="快速流转" aria-label="快速流转选项" aria-expanded="false">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
               <polyline points="9 18 15 12 9 6"/>
             </svg>

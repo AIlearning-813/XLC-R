@@ -3,7 +3,9 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import cloudbase from '../services/cloudbase';
+import { attachHashes } from '../services/hash';
 import { versionedUpdate, initialVersion, isVersionConflict, conflictMessage } from '../services/optimistic-lock';
+import { syncToParsedData } from '../services/candidate-sync';
 
 export const useCandidateStore = defineStore('candidate', () => {
   // ===== 状态 =====
@@ -64,8 +66,11 @@ export const useCandidateStore = defineStore('candidate', () => {
     const db = cloudbase.db();
     if (!db) throw new Error('数据库未初始化');
 
-    const result = await db.collection('Candidate').add({ ...candidateData, _version: initialVersion() });
-    const doc = { ...candidateData, _id: result.id };
+    // P1-3：附加 phoneHash / emailHash 用于去重
+    const dataWithHashes = await attachHashes(candidateData);
+
+    const result = await db.collection('Candidate').add({ ...dataWithHashes, _version: initialVersion() });
+    const doc = { ...dataWithHashes, _id: result.id };
     candidates.value.unshift(doc);
     currentCandidate.value = doc;
 
@@ -90,16 +95,19 @@ export const useCandidateStore = defineStore('candidate', () => {
     const doc = candidates.value.find(c => c._id === id) || currentCandidate.value;
     const expectedVersion = typeof doc?._version === 'number' ? doc._version : 0;
 
+    // P1-9：将顶层字段变更同步回 parsedData，防止双源数据不一致
+    const syncedData = syncToParsedData(doc, data);
+
     // 带版本锁更新
-    const newVersion = await versionedUpdate('Candidate', id, expectedVersion, data);
+    const newVersion = await versionedUpdate('Candidate', id, expectedVersion, syncedData);
 
     // 更新本地缓存
     const idx = candidates.value.findIndex(c => c._id === id);
     if (idx !== -1) {
-      candidates.value[idx] = { ...candidates.value[idx], ...data, _version: newVersion, updatedAt: new Date() };
+      candidates.value[idx] = { ...candidates.value[idx], ...syncedData, _version: newVersion, updatedAt: new Date() };
     }
     if (currentCandidate.value?._id === id) {
-      currentCandidate.value = { ...currentCandidate.value, ...data, _version: newVersion, updatedAt: new Date() };
+      currentCandidate.value = { ...currentCandidate.value, ...syncedData, _version: newVersion, updatedAt: new Date() };
     }
   }
 
@@ -123,8 +131,11 @@ export const useCandidateStore = defineStore('candidate', () => {
     const db = cloudbase.db();
     if (!db) throw new Error('数据库未初始化');
 
+    // P1-3：附加 phoneHash / emailHash 用于去重
+    const candidateWithHashes = await attachHashes(candidate);
+
     // 1. 创建 Candidate
-    const candidateResult = await db.collection('Candidate').add({ ...candidate, _version: initialVersion() });
+    const candidateResult = await db.collection('Candidate').add({ ...candidateWithHashes, _version: initialVersion() });
     const candidateId = candidateResult.id;
 
     // 2. 创建 Application
@@ -169,7 +180,7 @@ export const useCandidateStore = defineStore('candidate', () => {
     }
 
     // 更新本地缓存
-    const candidateDoc = { ...candidate, _id: candidateId };
+    const candidateDoc = { ...candidateWithHashes, _id: candidateId };
     candidates.value.unshift(candidateDoc);
     currentCandidate.value = candidateDoc;
 

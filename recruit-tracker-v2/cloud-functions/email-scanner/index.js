@@ -403,8 +403,9 @@ async function processMailbox(config, scanResult, forceRescan = false) {
             extractedText = result.text || '';
             extractedFormat = result.format || 'unknown';
           } catch (extractErr) {
+            // P1-4：文本提取失败时标记为空字符串，让 parse-queue-processor 跳过 AI 解析
             console.warn(`[email-scanner] 文本提取失败（${attachment.filename}）：${extractErr.message}`);
-            extractedText = `[文本提取失败：${extractErr.message}]`;
+            extractedText = '';
             extractedFormat = 'extraction_failed';
           }
         } else {

@@ -4,6 +4,7 @@ import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import cloudbase from '../services/cloudbase';
 import { versionedUpdate, initialVersion, isVersionConflict, conflictMessage } from '../services/optimistic-lock';
+import { normalizeJobData, validateJobData } from '../config/constants';
 
 export const useJobStore = defineStore('job', () => {
   // ===== 状态 =====
@@ -77,8 +78,17 @@ export const useJobStore = defineStore('job', () => {
     const db = cloudbase.db();
     if (!db) throw new Error('数据库未初始化');
 
+    // P1-7：校验必填字段
+    const validation = validateJobData(jobData);
+    if (!validation.valid) {
+      throw new Error(`岗位缺少必填字段：${validation.missing.join('、')}`);
+    }
+
+    // P1-7：填充默认值（headcount, salaryRange, workCity, requirements, expiryDate）
+    const normalized = normalizeJobData(jobData);
+
     const doc = {
-      ...jobData,
+      ...normalized,
       status: jobData.status || 'active',
       _version: initialVersion(),
       createdAt: new Date(),
@@ -88,6 +98,17 @@ export const useJobStore = defineStore('job', () => {
     const result = await db.collection('Job').add(doc);
     const newJob = { ...doc, _id: result.id };
     jobs.value.unshift(newJob);
+
+    // P2-2：审计日志
+    try {
+      await cloudbase.callFunction('write-audit-log', {
+        action: 'job_created',
+        entityType: 'Job',
+        entityIds: [result.id],
+        detail: { title: jobData.title || jobData.name, type: jobData.type, department: jobData.department },
+        operator: jobData.createdBy || 'system',
+      });
+    } catch (e) { console.warn('[useJobStore] 审计日志写入失败:', e.message); }
 
     return newJob;
   }
@@ -130,6 +151,17 @@ export const useJobStore = defineStore('job', () => {
 
     // 带版本锁更新
     const newVersion = await versionedUpdate('Job', id, expectedVersion, updateData);
+
+    // P2-2：审计日志
+    try {
+      await cloudbase.callFunction('write-audit-log', {
+        action: 'job_deleted',
+        entityType: 'Job',
+        entityIds: [id],
+        detail: { title: current.title || current.name, type: current.type },
+        operator: 'system',
+      });
+    } catch (e) { console.warn('[useJobStore] 审计日志写入失败:', e.message); }
 
     // 更新本地缓存
     const idx = jobs.value.findIndex(j => j._id === id);

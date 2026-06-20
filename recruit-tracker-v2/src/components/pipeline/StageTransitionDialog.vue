@@ -3,7 +3,7 @@
 
 import { ref, computed, watch } from 'vue';
 import { FUNNEL_STAGES, END_REASONS } from '../../config/constants';
-import { getIntermediateStages, stageToFunnelKey, STAGE_LABEL_MAP } from '../../services/pipeline-engine';
+import { getIntermediateStages, stageToFunnelKey, STAGE_LABEL_MAP, checkPreconditions } from '../../services/pipeline-engine';
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -69,6 +69,14 @@ const backfillStages = computed(() => {
 });
 
 const hasBackfill = computed(() => backfillStages.value.length > 0);
+
+// 前置条件检查（P1-1：防止跳过必经过的阶段）
+const preconditionResult = computed(() => {
+  if (isEnding.value) return { valid: true, missing: [] };
+  return checkPreconditions(props.toStage, props.application || {}, props.job);
+});
+
+const hasPreconditionWarnings = computed(() => !preconditionResult.value.valid);
 
 function handleConfirm() {
   let reasonLabel;
@@ -174,6 +182,21 @@ watch(() => props.visible, (v) => {
                 </div>
               </div>
               <p class="backfill-hint">回填时间戳均设为当前时间，不会覆盖已有漏斗数据</p>
+            </div>
+
+            <!-- 前置条件警告（P1-1：阻止跳过必须前置阶段） -->
+            <div v-if="hasPreconditionWarnings && !isEnding" class="precondition-warning">
+              <div class="precondition-header">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                  <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+                <span>缺少必要前置条件</span>
+              </div>
+              <ul class="precondition-list">
+                <li v-for="item in preconditionResult.missing" :key="item">{{ item }}</li>
+              </ul>
+              <p class="precondition-hint">建议按顺序完成前置阶段后再流转，强行跳过可能影响数据准确性</p>
             </div>
 
             <!-- 结束原因选择 -->
@@ -496,6 +519,40 @@ watch(() => props.visible, (v) => {
 }
 
 .backfill-hint {
+  margin: 0;
+  font-size: 10px;
+  color: var(--gray-400);
+  line-height: 1.4;
+}
+
+/* === 前置条件警告 === */
+.precondition-warning {
+  background: #fff8e6;
+  border: 1px solid #f0c060;
+  border-radius: var(--radius-sm);
+  padding: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+}
+
+.precondition-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: #b08500;
+  margin-bottom: 8px;
+}
+
+.precondition-list {
+  margin: 0 0 8px 0;
+  padding-left: 18px;
+  font-size: var(--font-size-xs);
+  color: var(--gray-600);
+  line-height: 1.8;
+}
+
+.precondition-hint {
   margin: 0;
   font-size: 10px;
   color: var(--gray-400);

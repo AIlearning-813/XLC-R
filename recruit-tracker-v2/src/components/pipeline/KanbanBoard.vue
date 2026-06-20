@@ -18,6 +18,9 @@ const props = defineProps({
 
 const emit = defineEmits(['card-move', 'card-click', 'card-quick-move', 'toggle-select']);
 
+// P2-1：拖拽竞态保护 —— 防止快速连续拖拽导致排序错乱
+const isMoving = ref(false);
+
 // ===== 按阶段分组（使用流转引擎） =====
 const applicationsByStage = computed(() => {
   return groupApplicationsByStage(props.applications, props.stages);
@@ -48,7 +51,7 @@ function initSortable() {
       delay: 100,
       delayOnTouchOnly: true,
       touchStartThreshold: 5,
-      filter: '.col-empty, .col-loading, .col-more, .skeleton-line',
+      filter: '.col-empty, .col-loading, .col-more, .skeleton-line, .is-moving',
       preventOnFilter: false,
       scroll: true,
       scrollSensitivity: 80,
@@ -56,14 +59,19 @@ function initSortable() {
       bubbleScroll: true,
 
       onStart: (evt) => {
-        evt.item.classList.add('is-dragging');
+        // P2-1：阻止并发拖拽
+        if (isMoving.value) return false;
+        isMoving.value = true;
+        evt.item.classList.add('is-dragging', 'is-moving');
       },
 
       onEnd: (evt) => {
-        evt.item.classList.remove('is-dragging');
+        evt.item.classList.remove('is-dragging', 'is-moving');
         const appId = evt.item?.dataset?.id;
         const fromStage = getStageFromEl(evt.from);
         const toStage = getStageFromEl(evt.to);
+        // P2-1：释放并发锁（延迟释放，确保动画完成）
+        setTimeout(() => { isMoving.value = false; }, 300);
         if (!appId || !fromStage || !toStage) return;
         if (fromStage === toStage) return;
         emit('card-move', { applicationId: appId, fromStage, toStage });
@@ -190,5 +198,25 @@ function onCardQuickMove(payload) {
 
 :deep(.is-dragging) {
   cursor: grabbing !important;
+}
+
+/* === P2-5：移动端响应式 === */
+@media (max-width: 768px) {
+  .kanban-grid {
+    gap: var(--spacing-sm);
+    padding: var(--spacing-xs);
+  }
+
+  .board-empty {
+    padding: var(--spacing-xl);
+    min-width: auto;
+  }
+}
+
+@media (max-width: 480px) {
+  .kanban-grid {
+    flex-direction: column;
+    gap: var(--spacing-sm);
+  }
 }
 </style>

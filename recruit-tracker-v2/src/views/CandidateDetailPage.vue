@@ -11,6 +11,7 @@ import cloudbase from '../services/cloudbase';
 import { getCommunications } from '../services/communication';
 import { safeErrorMsg } from '../services/error-messages';
 import { isVersionConflict } from '../services/optimistic-lock';
+import { useToast } from '../composables/useToast';
 import { FUNNEL_STAGES, JOB_TYPES, END_REASONS } from '../config/constants';
 import CommunicationLog from '../components/candidates/CommunicationLog.vue';
 import mammoth from 'mammoth';
@@ -22,6 +23,7 @@ const appStore = useApplicationStore();
 const jobStore = useJobStore();
 const auth = useAuthStore();
 const db = cloudbase.db;
+const toast = useToast();
 
 // ===== 状态 =====
 const loading = ref(false);
@@ -226,12 +228,12 @@ async function saveEdit() {
     editing.value = false;
   } catch (err) {
     if (isVersionConflict(err)) {
-      alert('保存失败：数据已被其他用户修改，页面将刷新获取最新数据。');
+      toast.error('保存失败：数据已被其他用户修改，页面将刷新获取最新数据。');
       // 重新加载数据
       candidate.value = await candidateStore.fetchById(candidateId.value);
       editing.value = false;
     } else {
-      alert('保存失败：' + safeErrorMsg(err));
+      toast.error('保存失败：' + safeErrorMsg(err));
     }
   } finally {
     saving.value = false;

@@ -246,6 +246,18 @@ async function aggregateJobFunnel(jobId, jobType) {
     }
   }
 
+  // P1-5：检测跳阶段回填（从 history 中识别 skippedBackfill）
+  for (const app of allApps) {
+    if (app.history && Array.isArray(app.history)) {
+      for (const h of app.history) {
+        if (h.skippedBackfill && h.skippedBackfill.length > 0) {
+          backfillCount++;
+          break;
+        }
+      }
+    }
+  }
+
   // 计算转化率
   const stageResults = stages.map(s => ({
     key: s.key,
@@ -386,18 +398,26 @@ async function aggregateDeptMonthly(year, month) {
   const monthStart = new Date(y, m - 1, 1);
   const monthEnd = new Date(y, m, 0, 23, 59, 59, 999);
 
-  // 获取所有活跃岗位
-  const { data: jobs } = await db.collection('Job')
-    .where({ status: 'active' })
-    .get();
+  // 获取所有活跃岗位（游标分页，防止 >500 岗位时截断）
+  const allJobs = [];
+  let jobCursor = null;
+  let hasMoreJobs = true;
+  while (hasMoreJobs) {
+    let query = db.collection('Job').where({ status: 'active' }).limit(500);
+    if (jobCursor) query = query.where({ _id: _.gt(jobCursor) });
+    const { data } = await query.get();
+    if (!data || data.length === 0 || data.length < 500) hasMoreJobs = false;
+    if (data) { allJobs.push(...data); jobCursor = data[data.length - 1]._id; }
+  }
 
-  if (!jobs || jobs.length === 0) {
+  if (allJobs.length === 0) {
     return { year: y, month: m, jobs: [], computedAt: new Date().toISOString() };
   }
 
-  // 对每个岗位统计
+  // P1-6：N+1 查询（每个岗位 4 个 count），在 <50 岗位时性能可接受。
+  // 优化方向：一次查询所有 Application 后内存分组。
   const jobResults = [];
-  for (const job of jobs) {
+  for (const job of allJobs) {
     const [interviewRes, offerRes, onboardRes, rejectedRes] = await Promise.all([
       // 进入面试阶段的（本月）
       db.collection('Application').where({

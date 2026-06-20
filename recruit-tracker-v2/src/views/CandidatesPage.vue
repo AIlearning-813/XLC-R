@@ -12,6 +12,7 @@ import { END_REASONS, FUNNEL_STAGES } from '../config/constants';
 import { safeErrorMsg } from '../services/error-messages';
 import { isVersionConflict } from '../services/optimistic-lock';
 import { getAvailableTargets } from '../services/pipeline-engine';
+import { useToast } from '../composables/useToast';
 import CandidateFilter from '../components/candidates/CandidateFilter.vue';
 import CandidateTable from '../components/candidates/CandidateTable.vue';
 import StageTransitionDialog from '../components/pipeline/StageTransitionDialog.vue';
@@ -22,6 +23,7 @@ const appStore = useApplicationStore();
 const candidateStore = useCandidateStore();
 const auth = useAuthStore();
 const db = cloudbase.db;
+const toast = useToast();
 
 // ===== 状态 =====
 const loading = ref(false);
@@ -302,9 +304,9 @@ async function confirmReactivate() {
     await loadData(currentFilters.value);
   } catch (err) {
     if (isVersionConflict(err)) {
-      alert('操作冲突：数据已被其他用户修改，请刷新后重试。');
+      toast.error('操作冲突：数据已被其他用户修改，请刷新后重试。');
     } else {
-      alert('重新激活失败：' + safeErrorMsg(err));
+      toast.error('重新激活失败：' + safeErrorMsg(err));
     }
     loadData(currentFilters.value);
   }
@@ -354,7 +356,7 @@ async function saveEdit() {
     editTarget.value = null;
     loadData(currentFilters.value);
   } catch (err) {
-    alert('保存失败：' + safeErrorMsg(err));
+    toast.error('保存失败：' + safeErrorMsg(err));
   }
 }
 
@@ -388,7 +390,7 @@ async function confirmAssignJob() {
     assignTarget.value = null;
     loadData(currentFilters.value);
   } catch (err) {
-    alert('分配岗位失败：' + safeErrorMsg(err));
+    toast.error('分配岗位失败：' + safeErrorMsg(err));
   }
 }
 
@@ -432,7 +434,7 @@ async function handleTransitionConfirm({ note, reason }) {
 
     await loadData(currentFilters.value);
   } catch (err) {
-    alert('流转失败：' + safeErrorMsg(err));
+    toast.error('流转失败：' + safeErrorMsg(err));
     loadData(currentFilters.value);
   }
 }
@@ -492,7 +494,7 @@ async function batchEndApplications(ids, status) {
   }
   selectedIds.value = new Set();
   loadData(currentFilters.value);
-  alert(`已完成：${success}/${ids.length} 位候选人`);
+  toast.success(`已完成：${success}/${ids.length} 位候选人`);
 }
 
 async function batchAssignJobs(ids, jobTitle) {
@@ -501,7 +503,7 @@ async function batchAssignJobs(ids, jobTitle) {
     (j.title || j.name || '').toLowerCase().includes(jobTitle.toLowerCase())
   );
   if (!job) {
-    alert('未找到匹配的岗位，请确认岗位名称');
+    toast.warning('未找到匹配的岗位，请确认岗位名称');
     return;
   }
 
@@ -519,7 +521,7 @@ async function batchAssignJobs(ids, jobTitle) {
   }
   selectedIds.value = new Set();
   loadData(currentFilters.value);
-  alert(`已分配：${success}/${ids.length} 位候选人来"${job.title || job.name}"`);
+  toast.success(`已分配：${success}/${ids.length} 位候选人来"${job.title || job.name}"`);
 }
 
 // ===== 事件处理 =====

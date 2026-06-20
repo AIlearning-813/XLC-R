@@ -139,6 +139,16 @@ async function warmJobFunnel(jobId, jobType) {
     if (app.status === 'rejected') { rejectedCount++; if (app.stage && stageMap[app.stage]) stageMap[app.stage].count++; }
     else if (app.status === 'withdrawn') { withdrawnCount++; if (app.stage && stageMap[app.stage]) stageMap[app.stage].count++; }
     else if (app.stage && stageMap[app.stage]) stageMap[app.stage].count++;
+
+    // P1-5：检测跳阶段回填
+    if (app.history && Array.isArray(app.history)) {
+      for (const h of app.history) {
+        if (h.skippedBackfill && h.skippedBackfill.length > 0) {
+          backfillCount++;
+          break;
+        }
+      }
+    }
   }
 
   const stageResults = stages.map(s => ({ key: s.key, count: stageMap[s.key]?.count || 0 }));
