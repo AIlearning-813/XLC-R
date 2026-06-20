@@ -1,0 +1,9 @@
+{
+  "name": "history-insight-generator",
+  "version": "1.0.0",
+  "description": "历史洞察生成器 — 分析历史数据生成招聘洞察",
+  "main": "index.js",
+  "dependencies": {
+    "@cloudbase/node-sdk": "latest"
+  }
+}

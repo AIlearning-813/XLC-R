@@ -1,0 +1,9 @@
+{
+  "name": "web-search-agent",
+  "version": "1.0.0",
+  "description": "AI 网络搜索代理 — 搜集公司信息写入知识库草稿",
+  "main": "index.js",
+  "dependencies": {
+    "@cloudbase/node-sdk": "latest"
+  }
+}
