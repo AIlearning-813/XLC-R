@@ -63,6 +63,12 @@ const routes = [
     meta: { title: '历史数据导入', icon: 'import', requireAdmin: true },
   },
   {
+    path: '/ai-chat',
+    name: 'AIChat',
+    component: () => import('../views/AIChatPage.vue'),
+    meta: { title: 'AI招聘助手', icon: 'ai' },
+  },
+  {
     path: '/admin-review',
     name: 'AdminReview',
     component: () => import('../views/AdminReviewPage.vue'),

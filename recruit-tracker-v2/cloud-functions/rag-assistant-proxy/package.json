@@ -1,0 +1,9 @@
+{
+  "name": "rag-assistant-proxy",
+  "version": "1.0.0",
+  "description": "RAG 检索增强生成代理 — 招聘 AI 助手核心云函数",
+  "main": "index.js",
+  "dependencies": {
+    "@cloudbase/node-sdk": "latest"
+  }
+}
