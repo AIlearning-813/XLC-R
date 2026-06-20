@@ -5,6 +5,8 @@ import { ref, computed } from 'vue';
 import cloudbase from '../services/cloudbase';
 import { versionedUpdate, initialVersion, isVersionConflict, conflictMessage } from '../services/optimistic-lock';
 import { normalizeJobData, validateJobData } from '../config/constants';
+import { useAuthStore } from './useAuthStore';
+import { usePendingChangeStore } from './usePendingChangeStore';
 
 export const useJobStore = defineStore('job', () => {
   // ===== 状态 =====
@@ -73,6 +75,9 @@ export const useJobStore = defineStore('job', () => {
 
   /**
    * 新增岗位
+   *
+   * Admin：直接写入 Job 集合
+   * Recruiter：提交到 PendingChanges，等待管理员审批
    */
   async function add(jobData) {
     const db = cloudbase.db();
@@ -87,6 +92,27 @@ export const useJobStore = defineStore('job', () => {
     // P1-7：填充默认值（headcount, salaryRange, workCity, requirements, expiryDate）
     const normalized = normalizeJobData(jobData);
 
+    const auth = useAuthStore();
+
+    // Recruiter：走审批流程
+    if (!auth.isAdmin) {
+      const pendingStore = usePendingChangeStore();
+      const result = await pendingStore.submitChange({
+        type: 'job',
+        action: 'create',
+        entityType: 'job',
+        entityId: '',
+        entityLabel: jobData.title || jobData.name || '新岗位',
+        after: {
+          ...normalized,
+          status: 'active',
+          createdBy: jobData.createdBy || auth.currentUser?.uid || 'system',
+        },
+      });
+      return { id: result.id, doc: result.doc, pending: true };
+    }
+
+    // Admin：直接写入
     const doc = {
       ...normalized,
       status: jobData.status || 'active',
@@ -115,14 +141,45 @@ export const useJobStore = defineStore('job', () => {
 
   /**
    * 更新岗位
+   *
+   * Admin：直接更新 Job 集合
+   * Recruiter：提交到 PendingChanges，等待管理员审批
    */
   async function update(id, data) {
     const db = cloudbase.db();
     if (!db) throw new Error('数据库未初始化');
 
-    // 获取当前版本号
+    // 获取当前状态
     const current = jobs.value.find(j => j._id === id);
     if (!current) throw new Error('岗位不存在');
+
+    const auth = useAuthStore();
+
+    // Recruiter：走审批流程
+    if (!auth.isAdmin) {
+      const pendingStore = usePendingChangeStore();
+      const result = await pendingStore.submitChange({
+        type: 'job',
+        action: 'update',
+        entityType: 'job',
+        entityId: id,
+        entityLabel: current.title || current.name || id,
+        before: {
+          title: current.title || current.name,
+          type: current.type,
+          department: current.department,
+          headcount: current.headcount,
+          salaryRange: current.salaryRange,
+          workCity: current.workCity,
+          requirements: current.requirements,
+          status: current.status,
+        },
+        after: { ...data },
+      });
+      return { id: result.id, doc: result.doc, pending: true };
+    }
+
+    // Admin：直接更新
     const expectedVersion = typeof current._version === 'number' ? current._version : 0;
 
     // 带版本锁更新
@@ -137,14 +194,41 @@ export const useJobStore = defineStore('job', () => {
 
   /**
    * 软删除岗位（设为 inactive）
+   *
+   * Admin：直接软删除
+   * Recruiter：提交到 PendingChanges，等待管理员审批
    */
   async function remove(id) {
     const db = cloudbase.db();
     if (!db) throw new Error('数据库未初始化');
 
-    // 获取当前版本号
+    // 获取当前状态
     const current = jobs.value.find(j => j._id === id);
     if (!current) throw new Error('岗位不存在');
+
+    const auth = useAuthStore();
+
+    // Recruiter：走审批流程
+    if (!auth.isAdmin) {
+      const pendingStore = usePendingChangeStore();
+      const result = await pendingStore.submitChange({
+        type: 'job',
+        action: 'delete',
+        entityType: 'job',
+        entityId: id,
+        entityLabel: current.title || current.name || id,
+        before: {
+          title: current.title || current.name,
+          type: current.type,
+          department: current.department,
+          status: current.status,
+        },
+        after: { status: 'inactive' },
+      });
+      return { id: result.id, doc: result.doc, pending: true };
+    }
+
+    // Admin：直接软删除
     const expectedVersion = typeof current._version === 'number' ? current._version : 0;
 
     const updateData = { status: 'inactive' };

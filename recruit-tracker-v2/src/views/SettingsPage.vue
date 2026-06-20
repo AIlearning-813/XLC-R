@@ -4,16 +4,26 @@
  *
  * 包含：
  *   - 邮箱配置：IMAP 自动归集
- *   - 系统设置：岗位管理等（阶段 6 实现）
+ *   - 公司信息：CompanyProfile 编辑
+ *   - 知识库：KnowledgeBase 管理
+ *   - 历史洞察：RecruitmentInsight 展示
+ *   - 系统配置：部门/城市/岗位类型/告警阈值管理
  */
 import { ref } from 'vue';
 import EmailConfigPage from './EmailConfigPage.vue';
+import CompanyInfoTab from '../components/settings/CompanyInfoTab.vue';
+import KnowledgeBaseTab from '../components/settings/KnowledgeBaseTab.vue';
+import InsightsTab from '../components/settings/InsightsTab.vue';
+import SystemConfigTab from '../components/settings/SystemConfigTab.vue';
 
 const activeTab = ref('email');
 
 const tabs = [
   { key: 'email', label: '邮箱配置', icon: '📧' },
-  { key: 'system', label: '系统设置', icon: '⚙️' },
+  { key: 'company', label: '公司信息', icon: '🏢' },
+  { key: 'knowledge', label: '知识库', icon: '📚' },
+  { key: 'insights', label: '历史洞察', icon: '📊' },
+  { key: 'system', label: '系统配置', icon: '⚙️' },
 ];
 </script>
 
@@ -41,11 +51,10 @@ const tabs = [
     <!-- Tab 内容 -->
     <div class="tab-content">
       <EmailConfigPage v-if="activeTab === 'email'" />
-      <div v-else class="card empty-state">
-        <div class="empty-state-icon">⚙️</div>
-        <div class="empty-state-text">系统设置</div>
-        <p class="text-muted">阶段 6 实现 — 岗位/部门/城市管理 + 知识库 + 权限管理 + 公司信息</p>
-      </div>
+      <CompanyInfoTab v-else-if="activeTab === 'company'" />
+      <KnowledgeBaseTab v-else-if="activeTab === 'knowledge'" />
+      <InsightsTab v-else-if="activeTab === 'insights'" />
+      <SystemConfigTab v-else-if="activeTab === 'system'" />
     </div>
   </div>
 </template>
