@@ -1,7 +1,7 @@
 <script setup>
 /* 新励成招聘管理系统 V2.0 — 登录页（账号密码认证） */
 
-import { ref } from 'vue';
+import { ref, onMounted } from 'vue';
 import { useAuthStore } from '../stores/useAuthStore';
 
 const auth = useAuthStore();
@@ -9,6 +9,21 @@ const username = ref('');
 const password = ref('');
 const loading = ref(false);
 const error = ref('');
+const restoring = ref(true);  // 正在尝试恢复登录态
+
+// 🆕 页面加载时自动初始化 SDK 并尝试恢复登录态
+onMounted(async () => {
+  try {
+    await auth.initSDK();
+    // 如果 restoreSession 恢复了用户身份，isLoggedIn 会变成 true，
+    // App.vue 会自动从 LoginPage 切换到主界面
+  } catch (e) {
+    // SDK 初始化失败（如网络不通），静默处理，用户仍可手动登录
+    console.warn('[LoginPage] 自动恢复登录态失败:', e.message);
+  } finally {
+    restoring.value = false;
+  }
+});
 
 // 错误信息映射
 function mapLoginError(rawError) {
@@ -101,7 +116,13 @@ async function handleInitSystem() {
 
     <!-- 右侧登录区 -->
     <div class="login-main">
-      <div class="login-form-card">
+      <!-- 恢复登录态中 -->
+      <div v-if="restoring" class="restoring-hint">
+        <span class="spinner"></span>
+        <span>正在恢复登录态…</span>
+      </div>
+
+      <div v-else class="login-form-card">
         <div class="login-form-header">
           <h2>登录系统</h2>
           <p>请输入您的账号和密码</p>
@@ -261,6 +282,14 @@ async function handleInitSystem() {
   align-items: center;
   justify-content: center;
   padding: var(--spacing-lg);
+}
+
+.restoring-hint {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  color: var(--gray-400);
+  font-size: var(--font-size-sm);
 }
 
 .login-form-card {
