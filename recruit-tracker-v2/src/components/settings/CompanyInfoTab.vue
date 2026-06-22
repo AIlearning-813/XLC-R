@@ -40,7 +40,8 @@ async function loadProfile() {
   if (!db) return;
   loading.value = true;
   try {
-    const { data } = await db.collection('CompanyProfile').doc('singleton').get().catch(() => ({ data: null }));
+    const result = await db.collection('CompanyProfile').doc('singleton').get().catch(() => ({ data: null }));
+    const data = Array.isArray(result.data) ? result.data[0] : result.data;
     if (data) {
       Object.assign(form, {
         shortIntro: data.shortIntro || '',
@@ -92,8 +93,8 @@ async function handleSave() {
     };
 
     // upsert
-    const existing = await db.collection('CompanyProfile').doc('singleton').get().catch(() => ({ data: null }));
-    if (existing?.data) {
+    const existing = await db.collection('CompanyProfile').doc('singleton').get().catch(() => ({ data: [] }));
+    if (existing?.data && existing.data.length > 0) {
       await db.collection('CompanyProfile').doc('singleton').update(profileData);
     } else {
       await db.collection('CompanyProfile').add({

@@ -80,10 +80,14 @@ export const useConfigStore = defineStore('config', () => {
         return;
       }
 
-      const { data } = await db.collection('Config')
+      const result = await db.collection('Config')
         .doc('system')
         .get()
         .catch(() => ({ data: null }));
+
+      // CloudBase JS SDK v3 非事务模式下 doc().get() 返回 { data: [doc] }
+      // 事务模式下返回 { data: doc }，这里兼容两种格式
+      const data = Array.isArray(result.data) ? result.data[0] : result.data;
 
       if (data) {
         if (data.departments?.length) departments.value = data.departments;
@@ -249,8 +253,8 @@ export const useConfigStore = defineStore('config', () => {
       };
 
       // upsert：先尝试更新，失败则创建
-      const existing = await db.collection('Config').doc('system').get().catch(() => ({ data: null }));
-      if (existing?.data) {
+      const existing = await db.collection('Config').doc('system').get().catch(() => ({ data: [] }));
+      if (existing?.data && existing.data.length > 0) {
         await db.collection('Config').doc('system').update(doc);
       } else {
         await db.collection('Config').add({ _id: 'system', ...doc, createdAt: new Date() });

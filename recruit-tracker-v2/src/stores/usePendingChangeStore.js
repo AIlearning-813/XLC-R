@@ -228,11 +228,11 @@ export const usePendingChangeStore = defineStore('pendingChange', () => {
         case 'config': {
           // Config 变更：直接更新 Config 集合
           if (change.after && change.entityType) {
-            const configDoc = await db.collection('Config').doc('system').get().catch(() => ({ data: null }));
-            const current = configDoc?.data || {};
+            const configDoc = await db.collection('Config').doc('system').get().catch(() => ({ data: [] }));
+            const current = (Array.isArray(configDoc?.data) ? configDoc.data[0] : configDoc?.data) || {};
             const updated = { ...current, ...change.after, updatedAt: new Date() };
 
-            if (configDoc?.data) {
+            if (configDoc?.data && configDoc.data.length > 0) {
               await db.collection('Config').doc('system').update(updated);
             } else {
               await db.collection('Config').add({ _id: 'system', ...updated, createdAt: new Date() });
