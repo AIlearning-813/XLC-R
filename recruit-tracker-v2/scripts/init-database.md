@@ -4,7 +4,10 @@
 
 ---
 
-## 一、集合与索引清单（15 个）
+## 一、集合与索引清单（19 个，P0-3 补齐 4 个缺失集合）
+
+| # | 集合名 | 权限预设 | 索引名 | 字段 | 方向 | 唯一 |
+|---|--------|---------|--------|------|------|------|
 
 | # | 集合名 | 权限预设 | 索引名 | 字段 | 方向 | 唯一 |
 |---|--------|---------|--------|------|------|------|
@@ -27,8 +30,12 @@
 | 17 | **DuplicateExclusion** | ADMINWRITE | `candA` | `candidateA` | ↑ 升序 | ❌ |
 | 18 | **DuplicateExclusion** | ADMINWRITE | `candB` | `candidateB` | ↑ 升序 | ❌ |
 | 19 | **ReportCache** | ADMINWRITE | `type_expires` | `reportType` + `expiresAt` | ↑ 升序 + ↑ 升序 | ❌ |
+| 20 | **CommunicationLog** | ADMINWRITE | `cand_time` | `candidateId` + `createdAt` | ↑ 升序 + ↓ 降序 | ❌ |
+| 21 | **ParseCorrectionBank** | ADMINWRITE | `field_ov_cv` | `field` + `originalValue` + `correctedValue` | ↑ 升序 + ↑ 升序 + ↑ 升序 | ❌ |
+| 22 | **ProcessingLock** | ADMINWRITE | `lock_unique` | `lockKey` | ↑ 升序 | ✅ |
+| 23 | **Config** | ADMINWRITE | — | — | — | — |
 
-> **注意**：Application 有 2 个索引，ErrorLog 有 2 个索引，KnowledgeBase 有 2 个索引，DuplicateExclusion 有 2 个索引。其余各 1 个或 0 个。**共 19 条索引**。
+> **注意**：Application 有 2 个索引，ErrorLog 有 2 个索引，KnowledgeBase 有 2 个索引，DuplicateExclusion 有 2 个索引。其余各 1 个或 0 个。**共 23 条索引**（原 19 条 + 新增 4 条）。
 
 ---
 

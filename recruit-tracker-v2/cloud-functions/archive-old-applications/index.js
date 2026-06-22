@@ -46,12 +46,14 @@ async function archiveApplications(filter, label) {
       ...filter.condition(cutoffDate),
     };
 
+    // P1 修复：始终排序，第一批也用 orderBy，避免与后续 startAfter 不一致
     let query = db.collection('Application')
       .where(conditions)
+      .orderBy('_id', 'asc')
       .limit(ARCHIVE_CONFIG.batchSize);
 
     if (cursor) {
-      query = query.orderBy('_id', 'asc').startAfter(cursor);
+      query = query.startAfter(cursor);
     }
 
     const { data } = await query.get();

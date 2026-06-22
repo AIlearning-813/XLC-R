@@ -52,6 +52,8 @@ const CACHE_TTL = 30 * 60; // 30 分钟
 function cacheKey(type, params) {
   const parts = [type];
   if (params.jobId) parts.push(`job:${params.jobId}`);
+  // P0 修复：jobType 不同的缓存键必须不同（如 CR 2轮 vs default 3轮）
+  if (params.jobType) parts.push(`type:${params.jobType}`);
   if (params.months) parts.push(`months:${params.months}`);
   if (params.year) parts.push(`y:${params.year}`);
   if (params.month) parts.push(`m:${params.month}`);

@@ -63,8 +63,8 @@ async function recognizeIntent(userMessage) {
     const data = await response.json();
     const text = data.choices?.[0]?.message?.content || '{}';
 
-    // 提取 JSON（可能在 markdown code block 中）
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    // 提取 JSON（P1 修复：非贪婪匹配，防止跨多个 JSON 对象错误匹配）
+    const jsonMatch = text.match(/\{[\s\S]*?\}/);
     return jsonMatch ? JSON.parse(jsonMatch[0]) : { intent: 'general', entities: {}, keywords: [] };
   } catch (err) {
     console.warn('[rag-assistant-proxy] 意图识别失败，回退到 general:', err.message);
@@ -291,8 +291,9 @@ exports.main = async (event, context) => {
     // 写入 ErrorLog
     try {
       await db.collection('ErrorLog').add({
+        type: 'cloudFunction',
         source: 'rag-assistant-proxy',
-        error: err.message,
+        severity: 'error',
         stack: err.stack?.substring(0, 1000),
         context: { userMessage: userMessage?.substring(0, 200) },
         timestamp: new Date(),

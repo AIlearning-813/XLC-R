@@ -1,42 +1,69 @@
 <script setup>
-/* 新励成招聘管理系统 V2.0 — 登录页 */
+/* 新励成招聘管理系统 V2.0 — 登录页（账号密码认证） */
 
 import { ref } from 'vue';
 import { useAuthStore } from '../stores/useAuthStore';
 
 const auth = useAuthStore();
-const selectedRole = ref(null);
-const displayName = ref('');
+const username = ref('');
+const password = ref('');
 const loading = ref(false);
 const error = ref('');
 
-// P2-3：增强的错误信息映射
+// 错误信息映射
 function mapLoginError(rawError) {
   const msg = (rawError || '').toLowerCase();
   if (msg.includes('timeout') || msg.includes('timed out')) return '连接超时，请检查网络后重试';
   if (msg.includes('network') || msg.includes('fetch')) return '网络异常，请检查网络连接后重试';
   if (msg.includes('env') || msg.includes('not found')) return '环境配置错误，请联系管理员检查 CloudBase 环境 ID';
   if (msg.includes('permission') || msg.includes('unauthorized')) return '访问被拒绝，请确认已加入系统';
-  if (msg.includes('auth') || msg.includes('login')) return '认证失败，请确认账号已注册';
+  if (msg.includes('账号不存在')) return '账号不存在，请检查账号名是否正确';
+  if (msg.includes('密码错误')) return '密码错误，请重试';
   return rawError || '连接失败，请检查网络或配置';
 }
 
 async function handleLogin() {
-  if (!selectedRole.value) return;
+  const u = username.value.trim();
+  const p = password.value;
+  if (!u || !p) {
+    error.value = '请输入账号和密码';
+    return;
+  }
   loading.value = true;
   error.value = '';
 
   try {
-    const ok = await auth.initAuth();
+    const ok = await auth.login(u, p);
     if (!ok) {
       error.value = mapLoginError(auth.loginError);
-      return;
     }
-    auth.selectRole(selectedRole.value, displayName.value || undefined);
   } catch (err) {
     error.value = mapLoginError(err.message || '登录过程中发生未知错误');
   } finally {
     loading.value = false;
+  }
+}
+
+// 首次初始化：创建默认账号（仅 Users 集合为空时生效）
+const initLoading = ref(false);
+const initMsg = ref('');
+async function handleInitSystem() {
+  if (!confirm('将创建 1 个管理员账号（admin）和 8 个招聘专员账号，密码均为 xlc2026。\n\n仅首次初始化时需要，已有账号则跳过。确定继续？')) return;
+  initLoading.value = true;
+  initMsg.value = '';
+  try {
+    // 先初始化 SDK 连接
+    await auth.initSDK();
+    const result = await auth.seedDefaultUsers();
+    if (result.skipped) {
+      initMsg.value = '账号已存在，无需初始化。请使用已有账号登录。';
+    } else {
+      initMsg.value = result.message + '。请使用 admin / xlc2026 登录。';
+    }
+  } catch (err) {
+    initMsg.value = `初始化失败：${err.message}`;
+  } finally {
+    initLoading.value = false;
   }
 }
 </script>
@@ -76,62 +103,33 @@ async function handleLogin() {
     <div class="login-main">
       <div class="login-form-card">
         <div class="login-form-header">
-          <h2>选择角色进入</h2>
-          <p>请选择您的身份以开始使用系统</p>
+          <h2>登录系统</h2>
+          <p>请输入您的账号和密码</p>
         </div>
 
-        <div class="role-options">
-          <button
-            class="role-card"
-            :class="{ selected: selectedRole === 'admin' }"
-            @click="selectedRole = 'admin'"
-          >
-            <div class="role-icon-wrap">
-              <svg class="role-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                <path d="M12 15v3m0 0v3m0-3h3m-3 0H9m6-9a3 3 0 11-6 0 3 3 0 016 0z"/>
-                <path d="M19 21v-2a4 4 0 00-4-4H9a4 4 0 00-4 4v2"/>
-              </svg>
-            </div>
-            <div class="role-text">
-              <span class="role-title">管理员</span>
-              <span class="role-desc">全部数据可见 · 审批变更 · 系统配置</span>
-            </div>
-            <div class="role-check" v-if="selectedRole === 'admin'">
-              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
-            </div>
-          </button>
-
-          <button
-            class="role-card"
-            :class="{ selected: selectedRole === 'recruiter' }"
-            @click="selectedRole = 'recruiter'"
-          >
-            <div class="role-icon-wrap">
-              <svg class="role-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                <path d="M16 7a4 4 0 11-8 0 4 4 0 018 0z"/>
-                <path d="M12 14c-4.418 0-8 1.79-8 4v2h16v-2c0-2.21-3.582-4-8-4z"/>
-              </svg>
-            </div>
-            <div class="role-text">
-              <span class="role-title">招聘专员</span>
-              <span class="role-desc">管理候选人 · 看板流转 · 邮箱配置</span>
-            </div>
-            <div class="role-check" v-if="selectedRole === 'recruiter'">
-              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
-            </div>
-          </button>
-        </div>
-
-        <div class="login-name-input" v-if="selectedRole">
-          <label class="form-label">显示名称</label>
-          <input
-            type="text"
-            class="form-input"
-            v-model="displayName"
-            :placeholder="selectedRole === 'admin' ? '例如：张经理' : '例如：李专员'"
-            @keyup.enter="handleLogin"
-          />
-          <span class="input-hint">选填，用于在系统中标识您的身份</span>
+        <div class="login-fields">
+          <div class="field-group">
+            <label class="form-label">账号</label>
+            <input
+              type="text"
+              class="form-input"
+              v-model="username"
+              placeholder="请输入账号"
+              @keyup.enter="handleLogin"
+              autocomplete="username"
+            />
+          </div>
+          <div class="field-group">
+            <label class="form-label">密码</label>
+            <input
+              type="password"
+              class="form-input"
+              v-model="password"
+              placeholder="请输入密码"
+              @keyup.enter="handleLogin"
+              autocomplete="current-password"
+            />
+          </div>
         </div>
 
         <div v-if="error" class="login-error">
@@ -140,12 +138,24 @@ async function handleLogin() {
 
         <button
           class="btn btn-primary btn-lg login-btn"
-          :disabled="!selectedRole || loading"
+          :disabled="!username.trim() || !password || loading"
           @click="handleLogin"
         >
           <span v-if="loading" class="spinner"></span>
-          {{ loading ? '正在进入...' : '进入系统' }}
+          {{ loading ? '正在登录…' : '登 录' }}
         </button>
+
+        <div class="init-section">
+          <div class="init-divider"><span>首次使用？</span></div>
+          <button
+            class="btn btn-sm btn-outline init-btn"
+            :disabled="initLoading"
+            @click="handleInitSystem"
+          >
+            {{ initLoading ? '初始化中…' : '⚡ 初始化系统账号' }}
+          </button>
+          <p v-if="initMsg" class="init-msg">{{ initMsg }}</p>
+        </div>
       </div>
     </div>
   </div>
@@ -275,108 +285,46 @@ async function handleLogin() {
   margin-top: var(--spacing-xs);
 }
 
-/* === 角色卡片 === */
-.role-options {
+/* === 登录表单 === */
+.login-fields {
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-sm);
-  margin-bottom: var(--spacing-lg);
-}
-
-.role-card {
-  display: flex;
-  align-items: center;
   gap: var(--spacing-md);
-  padding: var(--spacing-md);
-  border: 2px solid var(--gray-100);
-  border-radius: var(--radius);
-  background: #fff;
-  cursor: pointer;
-  transition: all var(--transition);
-  text-align: left;
-  width: 100%;
-  font-family: inherit;
-}
-
-.role-card:hover {
-  border-color: var(--gray-200);
-  box-shadow: var(--shadow);
-}
-
-.role-card.selected {
-  border-color: var(--primary);
-  background: var(--primary-bg);
-}
-
-.role-icon-wrap {
-  width: 44px;
-  height: 44px;
-  border-radius: var(--radius-sm);
-  background: var(--gray-50);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  color: var(--gray-400);
-  transition: all var(--transition);
-}
-
-.role-card.selected .role-icon-wrap {
-  background: var(--primary);
-  color: #fff;
-}
-
-.role-icon-svg {
-  width: 22px;
-  height: 22px;
-}
-
-.role-text {
-  flex: 1;
-  min-width: 0;
-}
-
-.role-title {
-  display: block;
-  font-weight: 600;
-  font-size: var(--font-size-base);
-  color: var(--gray-700);
-}
-
-.role-desc {
-  display: block;
-  font-size: var(--font-size-xs);
-  color: var(--gray-400);
-  margin-top: 2px;
-}
-
-.role-check {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  background: var(--primary);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.role-check svg {
-  width: 16px;
-  height: 16px;
-}
-
-/* === 名称输入 === */
-.login-name-input {
   margin-bottom: var(--spacing-lg);
 }
 
-.input-hint {
-  display: block;
-  font-size: var(--font-size-xs);
+.field-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.form-label {
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--gray-600);
+}
+
+.form-input {
+  padding: 10px 14px;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-base);
+  font-family: inherit;
+  color: var(--gray-700);
+  transition: border-color var(--transition);
+  outline: none;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.form-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-bg);
+}
+
+.form-input::placeholder {
   color: var(--gray-300);
-  margin-top: 4px;
 }
 
 /* === 错误提示 === */
@@ -391,6 +339,55 @@ async function handleLogin() {
 
 .login-btn {
   width: 100%;
+}
+
+/* === 初始化 === */
+.init-section {
+  margin-top: var(--spacing-lg);
+  text-align: center;
+}
+
+.init-divider {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-sm);
+  color: var(--gray-300);
+  font-size: var(--font-size-xs);
+}
+
+.init-divider::before,
+.init-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--gray-100);
+}
+
+.btn-outline {
+  border: 1px solid var(--gray-200);
+  background: #fff;
+  color: var(--gray-500);
+  cursor: pointer;
+  font-family: inherit;
+  padding: 6px 16px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  transition: all var(--transition);
+}
+
+.btn-outline:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.init-msg {
+  margin-top: var(--spacing-sm);
+  font-size: var(--font-size-sm);
+  color: var(--success);
+  padding: var(--spacing-sm);
+  background: var(--success-bg);
+  border-radius: var(--radius-sm);
 }
 
 /* === 移动端适配 === */

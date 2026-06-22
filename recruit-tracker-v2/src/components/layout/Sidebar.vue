@@ -1,13 +1,57 @@
 <script setup>
 /* 新励成招聘管理系统 V2.0 — 侧边栏导航 */
 
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useAuthStore } from '../../stores/useAuthStore';
+
+const props = defineProps({
+  mobileOpen: { type: Boolean, default: false },
+});
+const emit = defineEmits(['close']);
 
 const router = useRouter();
 const route = useRoute();
 const auth = useAuthStore();
+
+// ===== 修改密码 =====
+const showPwdDialog = ref(false);
+const pwdForm = ref({ oldPassword: '', newPassword: '', confirmPassword: '' });
+const pwdError = ref('');
+const pwdLoading = ref(false);
+
+function openPwdDialog() {
+  pwdForm.value = { oldPassword: '', newPassword: '', confirmPassword: '' };
+  pwdError.value = '';
+  showPwdDialog.value = true;
+}
+
+async function handleChangePassword() {
+  const { oldPassword, newPassword, confirmPassword } = pwdForm.value;
+  if (!oldPassword || !newPassword || !confirmPassword) {
+    pwdError.value = '请填写所有字段';
+    return;
+  }
+  if (newPassword.length < 4) {
+    pwdError.value = '新密码至少 4 位';
+    return;
+  }
+  if (newPassword !== confirmPassword) {
+    pwdError.value = '两次输入的新密码不一致';
+    return;
+  }
+  pwdLoading.value = true;
+  pwdError.value = '';
+  try {
+    await auth.changeOwnPassword(oldPassword, newPassword);
+    showPwdDialog.value = false;
+    alert('密码修改成功');
+  } catch (err) {
+    pwdError.value = err.message;
+  } finally {
+    pwdLoading.value = false;
+  }
+}
 
 /* SVG 图标（内联） */
 const icons = {
@@ -48,6 +92,8 @@ const menuItems = computed(() => {
 
 function navigate(path) {
   router.push(path);
+  // 移动端：点击导航后自动关闭侧边栏
+  emit('close');
 }
 
 function isActive(path) {
@@ -58,7 +104,7 @@ function isActive(path) {
 </script>
 
 <template>
-  <aside class="sidebar" role="complementary" aria-label="主导航侧边栏">
+  <aside class="sidebar" :class="{ 'mobile-open': props.mobileOpen }" role="complementary" aria-label="主导航侧边栏">
     <!-- Logo -->
     <div class="sidebar-header">
       <div class="sidebar-logo">
@@ -100,11 +146,42 @@ function isActive(path) {
           <span class="sidebar-user-name">{{ auth.userName }}</span>
           <span class="sidebar-user-role">{{ auth.isAdmin ? '管理员' : '招聘专员' }}</span>
         </div>
+        <button class="sidebar-logout" @click="openPwdDialog" title="修改密码" aria-label="修改密码">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/>
+          </svg>
+        </button>
         <button class="sidebar-logout" @click="auth.logout()" title="退出登录" aria-label="退出登录">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4m7 14l5-5-5-5m5 5H9"/>
           </svg>
         </button>
+      </div>
+    </div>
+
+    <!-- 修改密码弹窗 -->
+    <div v-if="showPwdDialog" class="pwd-overlay" @click.self="showPwdDialog = false">
+      <div class="pwd-dialog">
+        <h3>修改密码</h3>
+        <div class="pwd-field">
+          <label>旧密码</label>
+          <input type="password" v-model="pwdForm.oldPassword" placeholder="输入当前密码" />
+        </div>
+        <div class="pwd-field">
+          <label>新密码</label>
+          <input type="password" v-model="pwdForm.newPassword" placeholder="输入新密码（至少4位）" />
+        </div>
+        <div class="pwd-field">
+          <label>确认新密码</label>
+          <input type="password" v-model="pwdForm.confirmPassword" placeholder="再次输入新密码" />
+        </div>
+        <p v-if="pwdError" class="pwd-error">{{ pwdError }}</p>
+        <div class="pwd-actions">
+          <button class="btn btn-sm" @click="showPwdDialog = false">取消</button>
+          <button class="btn btn-sm btn-primary" @click="handleChangePassword" :disabled="pwdLoading">
+            {{ pwdLoading ? '修改中…' : '确认修改' }}
+          </button>
+        </div>
       </div>
     </div>
   </aside>
@@ -307,5 +384,44 @@ function isActive(path) {
 .sidebar-logout:hover {
   background: rgba(194, 84, 80, 0.15);
   color: var(--danger-light);
+}
+
+/* 修改密码弹窗 */
+.pwd-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.4);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 9999;
+}
+.pwd-dialog {
+  background: #fff; border-radius: var(--radius-md);
+  box-shadow: var(--shadow-xl);
+  width: 360px; max-width: 90vw;
+  padding: var(--spacing-lg);
+}
+.pwd-dialog h3 { margin: 0 0 var(--spacing-md); font-size: var(--font-size-lg); }
+.pwd-field { margin-bottom: var(--spacing-sm); }
+.pwd-field label {
+  display: block; font-size: var(--font-size-sm); color: var(--gray-500); margin-bottom: 4px;
+}
+.pwd-field input {
+  width: 100%; padding: 8px 10px; border: 1px solid var(--gray-200);
+  border-radius: var(--radius-sm); font-size: var(--font-size-sm); font-family: inherit;
+  box-sizing: border-box; outline: none;
+}
+.pwd-field input:focus { border-color: var(--primary); }
+.pwd-error { color: var(--danger); font-size: var(--font-size-sm); margin: var(--spacing-sm) 0; }
+.pwd-actions { display: flex; justify-content: flex-end; gap: var(--spacing-xs); margin-top: var(--spacing-md); }
+
+/* === 移动端响应式 === */
+@media (max-width: 768px) {
+  .sidebar {
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
+    z-index: 201;
+  }
+  .sidebar.mobile-open {
+    transform: translateX(0);
+  }
 }
 </style>

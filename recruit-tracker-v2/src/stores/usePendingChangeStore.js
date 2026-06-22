@@ -54,7 +54,7 @@ export const usePendingChangeStore = defineStore('pendingChange', () => {
       before: params.before || null,
       after: params.after || null,
       status: 'pending',
-      submittedBy: auth.currentUser?.uid || '',
+      submittedBy: auth.currentUsername || '',
       submittedByName: auth.userName || '',
       submittedAt: new Date(),
       reviewedBy: '',
@@ -78,7 +78,7 @@ export const usePendingChangeStore = defineStore('pendingChange', () => {
           entityType: params.entityType,
           entityId: params.entityId,
         },
-        operator: auth.currentUser?.uid || 'system',
+        operator: auth.currentUsername || 'system',
       });
     } catch (e) { console.warn('[usePendingChangeStore] 审计日志写入失败:', e.message); }
 
@@ -150,7 +150,7 @@ export const usePendingChangeStore = defineStore('pendingChange', () => {
     // 更新 PendingChanges 状态
     await db.collection('PendingChanges').doc(id).update({
       status: decision,
-      reviewedBy: auth.currentUser?.uid || '',
+      reviewedBy: auth.currentUsername || '',
       reviewedByName: auth.userName || '',
       reviewedAt: now,
       reviewComment: comment,
@@ -167,7 +167,7 @@ export const usePendingChangeStore = defineStore('pendingChange', () => {
       pendingChanges.value[idx] = {
         ...pendingChanges.value[idx],
         status: decision,
-        reviewedBy: auth.currentUser?.uid || '',
+        reviewedBy: auth.currentUsername || '',
         reviewedByName: auth.userName || '',
         reviewedAt: now,
         reviewComment: comment,
@@ -187,7 +187,7 @@ export const usePendingChangeStore = defineStore('pendingChange', () => {
           entityId: change.entityId,
           comment,
         },
-        operator: auth.currentUser?.uid || 'system',
+        operator: auth.currentUsername || 'system',
       });
     } catch (e) { console.warn('[usePendingChangeStore] 审计日志写入失败:', e.message); }
 
@@ -215,9 +215,9 @@ export const usePendingChangeStore = defineStore('pendingChange', () => {
               updatedAt: new Date(),
             });
           } else if (change.action === 'delete' && change.entityId) {
-            // 软删除
+            // 软删除（P0-3 修复：统一使用 'inactive'，与 useJobStore.remove() 一致）
             await db.collection('Job').doc(change.entityId).update({
-              status: 'deleted',
+              status: 'inactive',
               previousStatus: change.before?.status || 'active',
               deletedAt: new Date(),
             });
@@ -256,11 +256,11 @@ export const usePendingChangeStore = defineStore('pendingChange', () => {
     if (!db) return [];
 
     const auth = useAuthStore();
-    const uid = auth.currentUser?.uid || '';
+    const username = auth.currentUsername || '';
 
     try {
       const { data } = await db.collection('PendingChanges')
-        .where({ submittedBy: uid })
+        .where({ submittedBy: username })
         .orderBy('submittedAt', 'desc')
         .limit(50)
         .get();

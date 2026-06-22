@@ -106,7 +106,7 @@ export const useJobStore = defineStore('job', () => {
         after: {
           ...normalized,
           status: 'active',
-          createdBy: jobData.createdBy || auth.currentUser?.uid || 'system',
+          createdBy: jobData.createdBy || auth.currentUsername || 'system',
         },
       });
       return { id: result.id, doc: result.doc, pending: true };
@@ -223,15 +223,20 @@ export const useJobStore = defineStore('job', () => {
           department: current.department,
           status: current.status,
         },
-        after: { status: 'inactive' },
+        after: { status: 'inactive', previousStatus: current.status || 'active', deletedAt: new Date() },
       });
       return { id: result.id, doc: result.doc, pending: true };
     }
 
-    // Admin：直接软删除
+    // Admin：直接软删除（P0-3 修复：统一使用 'inactive'，记录 previousStatus 和 deletedAt）
     const expectedVersion = typeof current._version === 'number' ? current._version : 0;
 
-    const updateData = { status: 'inactive' };
+    const updateData = {
+      status: 'inactive',
+      previousStatus: current.status || 'active',
+      deletedAt: new Date(),
+      updatedAt: new Date(),
+    };
 
     // 带版本锁更新
     const newVersion = await versionedUpdate('Job', id, expectedVersion, updateData);
@@ -250,7 +255,7 @@ export const useJobStore = defineStore('job', () => {
     // 更新本地缓存
     const idx = jobs.value.findIndex(j => j._id === id);
     if (idx !== -1) {
-      jobs.value[idx] = { ...jobs.value[idx], status: 'inactive', _version: newVersion, updatedAt: new Date() };
+      jobs.value[idx] = { ...jobs.value[idx], ...updateData, _version: newVersion };
     }
   }
 

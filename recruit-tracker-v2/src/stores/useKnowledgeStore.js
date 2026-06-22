@@ -125,7 +125,7 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
       sourceVerified: entry.sourceVerified !== undefined ? entry.sourceVerified : true,
       status: entry.status || 'published', // manual entries default published
       useCount: 0,
-      createdBy: auth.currentUser?.uid || 'system',
+      createdBy: auth.currentUsername || 'system',
       createdAt: new Date(),
       updatedAt: new Date(),
     };
@@ -141,7 +141,7 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
         entityType: 'KnowledgeBase',
         entityIds: [result.id],
         detail: { title: entry.title, category: entry.category },
-        operator: auth.currentUser?.uid || 'system',
+        operator: auth.currentUsername || 'system',
       });
     } catch (e) { /* 忽略 */ }
 

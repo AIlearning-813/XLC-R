@@ -10,6 +10,7 @@ import { useAuthStore } from '../stores/useAuthStore';
 import cloudbase from '../services/cloudbase';
 import { getCommunications } from '../services/communication';
 import { safeErrorMsg } from '../services/error-messages';
+import DOMPurify from 'dompurify';
 import { isVersionConflict } from '../services/optimistic-lock';
 import { useToast } from '../composables/useToast';
 import { FUNNEL_STAGES, JOB_TYPES, END_REASONS } from '../config/constants';
@@ -399,6 +400,7 @@ async function loadFileUrl() {
     // 1. 通过云函数下载文件内容（管理员权限，返回 base64）
     const result = await cloudbase.callFunction('get-file-url', {
       fileId: candidate.value.fileId,
+      callerUsername: auth.currentUsername,
     });
     if (!result?.success) {
       throw new Error(result?.error || '获取文件失败');
@@ -422,7 +424,14 @@ async function loadFileUrl() {
     if (typeInfo.previewType === 'docx') {
       // DOCX → mammoth 转 HTML（不经过 Blob URL，避免浏览器误判）
       const docxResult = await mammoth.convertToHtml({ arrayBuffer: bytes.buffer });
-      docxHtml.value = docxResult.value;
+      // P0-2 修复：DOMPurify 消毒 mammoth 转换的 HTML，防止 XSS 注入
+      docxHtml.value = DOMPurify.sanitize(docxResult.value, {
+        ALLOWED_TAGS: ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'br', 'hr',
+          'ul', 'ol', 'li', 'table', 'thead', 'tbody', 'tr', 'th', 'td',
+          'strong', 'em', 'b', 'i', 'u', 's', 'span', 'div', 'img',
+          'a', 'blockquote', 'pre', 'code', 'sub', 'sup'],
+        ALLOWED_ATTR: ['src', 'alt', 'width', 'height', 'href', 'title', 'style', 'class', 'id'],
+      });
       // 同时生成 Blob URL 用于下载（下载按钮需要）
       if (fileUrl.value && fileUrl.value.startsWith('blob:')) {
         URL.revokeObjectURL(fileUrl.value);

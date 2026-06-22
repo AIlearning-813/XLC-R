@@ -123,11 +123,17 @@ async function warmJobFunnel(jobId, jobType) {
   const filter = { jobId, isArchived: _.neq(true) };
   const allApps = [];
   let hasMore = true;
+  let cursor = null;
 
+  // P0 修复：游标分页，防止重复读取同 500 条导致无限循环
   while (hasMore) {
-    const { data } = await db.collection('Application').where(filter).limit(500).get();
-    if (!data || data.length === 0 || data.length < 500) hasMore = false;
-    if (data) allApps.push(...data);
+    let query = db.collection('Application').where(filter).orderBy('_id', 'asc').limit(500);
+    if (cursor) query = query.startAfter(cursor);
+    const { data } = await query.get();
+    if (!data || data.length === 0) { hasMore = false; break; }
+    allApps.push(...data);
+    if (data.length < 500) hasMore = false;
+    else cursor = data[data.length - 1]._id;
   }
 
   const stages = getStagesForJob(jobType);
@@ -250,7 +256,8 @@ exports.main = async (event, context) => {
       for (const job of activeJobs) {
         try {
           const funnelData = await warmJobFunnel(job._id, job.type || job.jobType);
-          const key = `job_funnel:job:${job._id}`;
+          const jobType = job.type || job.jobType || 'social';
+          const key = `job_funnel:job:${job._id}:type:${jobType}`;
           if (await warmCache(key, funnelData)) {
             results.jobFunnels++;
           }

@@ -1,0 +1,9 @@
+{
+  "name": "auth-proxy",
+  "version": "1.0.0",
+  "description": "新励成招聘系统 V2.0 — 用户认证与账号管理云函数",
+  "main": "index.js",
+  "dependencies": {
+    "@cloudbase/node-sdk": "^3.4.0"
+  }
+}

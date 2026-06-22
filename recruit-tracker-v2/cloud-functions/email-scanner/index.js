@@ -416,7 +416,9 @@ async function processMailbox(config, scanResult, forceRescan = false) {
         let fileUrl = null;
         try {
           const dateStr = new Date().toISOString().slice(0, 10);
-          const cloudPath = `email-attachments/${dateStr}/${config._id}/${attachment.filename}`;
+          // P1 修复：净化文件名，防止路径遍历（../ 攻击）
+          const safeFilename = (attachment.filename || 'attachment').replace(/\.\./g, '').replace(/[\\/]/g, '_');
+          const cloudPath = `email-attachments/${dateStr}/${config._id}/${safeFilename}`;
           const uploadResult = await app.uploadFile({
             cloudPath,
             fileContent: attachment.content,

@@ -52,5 +52,11 @@ set_rule "CompanyProfile" '{"read":"auth.uid != null","write":"auth.uid != null"
 set_rule "KnowledgeBase" '{"read":"auth.uid != null","write":"auth.uid != null"}'
 set_rule "RecruitmentInsight" '{"read":"auth.uid != null","write":"auth.uid != null"}'
 
+# P0-3 修复：补齐缺失的 4 个集合安全规则
+set_rule "Config" '{"read":"auth.uid != null","write":"auth.uid != null"}'
+set_rule "CommunicationLog" '{"read":"auth.uid != null","write":"auth.uid != null"}'
+set_rule "ParseCorrectionBank" '{"read":"auth.uid != null","write":"auth.uid != null"}'
+set_rule "ProcessingLock" '{"read":"auth.uid != null","write":"auth.uid != null"}'
+
 echo ""
-echo "✅ 安全规则已修复（去掉 get() 跨集合依赖）"
+echo "✅ 安全规则已修复（去掉 get() 跨集合依赖，补齐 4 个缺失集合）"

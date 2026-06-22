@@ -7,9 +7,10 @@
 export function toChineseError(err) {
   const raw = (err?.message || err?.code || String(err || '')).toLowerCase();
 
-  // CloudBase 常见错误
+  // CloudBase 常见错误（具体匹配在前，通用匹配在后）
   if (raw.includes('permission denied') || raw.includes('unauthorized')) return '权限不足，请联系管理员';
   if (raw.includes('network') || raw.includes('timeout') || raw.includes('etimedout')) return '网络连接超时，请检查网络后重试';
+  if (raw.includes('storage') && raw.includes('nonexist')) return '文件不存在，可能已被删除';
   if (raw.includes('not found') || raw.includes('nonexist')) return '数据不存在，可能已被删除';
   if (raw.includes('rate limit') || raw.includes('too many')) return '操作过于频繁，请稍后再试';
   if (raw.includes('invalid') || raw.includes('malformed')) return '数据格式错误，请检查输入';
@@ -18,7 +19,6 @@ export function toChineseError(err) {
   if (raw.includes('collection.update:fail')) return '数据更新失败，请刷新后重试';
   if (raw.includes('collection.delete:fail')) return '数据删除失败，请稍后重试';
   if (raw.includes('database request fail')) return '数据库请求失败，请稍后重试';
-  if (raw.includes('storage') && raw.includes('nonexist')) return '文件不存在，可能已被删除';
   if (raw.includes('auth') && raw.includes('fail')) return '身份验证失败，请重新登录';
 
   // 如果消息已经是中文，直接返回

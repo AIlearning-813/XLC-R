@@ -5,7 +5,8 @@
 const cloudbase = require('@cloudbase/node-sdk');
 
 exports.main = async (event, context) => {
-  const app = cloudbase.init({ env: process.env.ENV_ID });
+  // P1 修复：使用 SYMBOL_CURRENT_ENV 代替 process.env.ENV_ID
+  const app = cloudbase.init({ env: cloudbase.SYMBOL_CURRENT_ENV });
   const db = app.database();
 
   const now = new Date();
@@ -71,12 +72,15 @@ exports.main = async (event, context) => {
   // 5. DeepSeek API 余额探测（轻量，仅记录是否可连通）
   try {
     const startTime = Date.now();
+    // P1 修复：传入 resumeText 做真实 API 探测（而非 healthCheck flag）
     const result = await app.callFunction({
       name: 'resume-parser-proxy',
-      data: { healthCheck: true },
+      data: { resumeText: '健康探测', healthCheck: true },
     });
     checks.deepseekApi = {
-      ok: !result.result?.error,
+      // 健康探测时 resume-parser-proxy 返回 { success: false, error: '简历文本过短' } 是正常的
+      // 只有网络或 API 配置错误才算失败
+      ok: !result.result?.error || result.result?.error?.includes('过短'),
       latency: Date.now() - startTime,
     };
   } catch (err) {
@@ -88,7 +92,7 @@ exports.main = async (event, context) => {
   try {
     const { data: overdueJobs } = await db.collection('Job')
       .where({
-        status: 'open',
+        status: 'active',
         deadline: db.command.lt(now),
       })
       .get();

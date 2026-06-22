@@ -1,20 +1,34 @@
 <script setup>
 /* 新励成招聘管理系统 V2.0 — 主布局壳 */
 
+import { ref } from 'vue';
 import Sidebar from './Sidebar.vue';
 import ToastContainer from '../common/ToastContainer.vue';
 import OfflineBanner from '../common/OfflineBanner.vue';
 import { useAuthStore } from '../../stores/useAuthStore';
 
 const auth = useAuthStore();
+const sidebarOpen = ref(false);
+
+function toggleSidebar() {
+  sidebarOpen.value = !sidebarOpen.value;
+}
 </script>
 
 <template>
-  <div class="app-layout">
-    <Sidebar />
+  <div class="app-layout" :class="{ 'sidebar-open': sidebarOpen }">
+    <Sidebar :mobile-open="sidebarOpen" @close="sidebarOpen = false" />
+    <!-- 移动端：侧边栏打开时的遮罩 -->
+    <div v-if="sidebarOpen" class="sidebar-overlay" @click="sidebarOpen = false"></div>
     <main class="app-main">
       <header class="app-topbar">
         <div class="topbar-left">
+          <!-- 移动端汉堡菜单按钮 -->
+          <button class="hamburger-btn" @click="toggleSidebar" aria-label="菜单">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+            </svg>
+          </button>
           <span class="topbar-title">{{ $route.meta.title || '工作台' }}</span>
         </div>
         <div class="topbar-right">
@@ -65,6 +79,7 @@ const auth = useAuthStore();
 .topbar-left {
   display: flex;
   align-items: center;
+  gap: var(--spacing-sm);
 }
 
 .topbar-title {
@@ -73,6 +88,19 @@ const auth = useAuthStore();
   color: var(--gray-700);
   letter-spacing: -0.01em;
 }
+
+/* 汉堡菜单按钮（默认隐藏，移动端显示） */
+.hamburger-btn {
+  display: none;
+  width: 36px; height: 36px;
+  border: none; border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--gray-600);
+  align-items: center; justify-content: center;
+  cursor: pointer;
+  transition: background var(--transition);
+}
+.hamburger-btn:hover { background: var(--gray-50); }
 
 .topbar-right {
   display: flex;
@@ -94,9 +122,40 @@ const auth = useAuthStore();
   color: var(--primary);
 }
 
+/* 移动端侧边栏遮罩 */
+.sidebar-overlay {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.3);
+  z-index: 190;
+}
+
 /* === 内容区 === */
 .app-content {
   flex: 1;
   padding: var(--spacing-xl);
+}
+
+/* === 移动端响应式 === */
+@media (max-width: 768px) {
+  .app-main {
+    margin-left: 0;
+  }
+
+  .hamburger-btn {
+    display: flex;
+  }
+
+  .sidebar-open .sidebar-overlay {
+    display: block;
+  }
+
+  .app-topbar {
+    padding: 10px var(--spacing-md);
+  }
+
+  .app-content {
+    padding: var(--spacing-md);
+  }
 }
 </style>

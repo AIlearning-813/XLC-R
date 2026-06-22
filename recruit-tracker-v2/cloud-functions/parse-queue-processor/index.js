@@ -420,8 +420,14 @@ async function processOneEntry(db, entry, summary) {
     summary.done++;
   } catch (createErr) {
     console.error('[parse-queue-processor] 创建 Candidate 失败:', createErr.message);
-    await scheduleRetry(db, entry, `创建记录失败：${createErr.message}`);
-    summary.retried++;
+    // P1 修复：仅可重试错误才调度重试（与 extractErr/parseErr 处理一致）
+    if (isRetryableError(createErr)) {
+      await scheduleRetry(db, entry, `创建记录失败：${createErr.message}`);
+      summary.retried++;
+    } else {
+      await markEntryFailed(db, entry, `创建记录失败（不可重试）：${createErr.message}`);
+      summary.failed++;
+    }
   }
 }
 

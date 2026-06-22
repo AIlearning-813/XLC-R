@@ -6,11 +6,15 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@cloudbase/js-sdk": "^3.4.6",
+    "@cloudbase/node-sdk": "^3.18.3",
     "chart.js": "^4.5.1",
+    "dompurify": "^3.4.11",
     "mammoth": "^1.12.0",
     "pdfjs-dist": "^6.0.227",
     "pinia": "^3.0.4",
@@ -20,6 +24,9 @@
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.6",
-    "vite": "^8.0.12"
+    "@vue/test-utils": "^2.4.11",
+    "jsdom": "^29.1.1",
+    "vite": "^8.0.12",
+    "vitest": "^4.1.9"
   }
 }

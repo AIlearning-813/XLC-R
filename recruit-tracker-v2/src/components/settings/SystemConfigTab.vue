@@ -2,7 +2,7 @@
 /**
  * SystemConfigTab.vue — 系统配置管理 Tab
  *
- * 管理：部门、城市、岗位类型、告警阈值。
+ * 管理：部门、城市、岗位类型、告警阈值、招聘专员账号。
  * Admin 直接修改，Recruiter 通过 PendingChanges 提交审批。
  */
 import { ref, onMounted } from 'vue';
@@ -17,6 +17,7 @@ const pendingStore = usePendingChangeStore();
 
 onMounted(() => {
   config.loadConfig();
+  if (auth.isAdmin) loadUsers();
 });
 
 // ===== Toast 反馈 =====
@@ -26,6 +27,92 @@ function showMsg(msg, type = 'success') {
   submitMsg.value = msg;
   submitMsgType.value = type;
   setTimeout(() => { submitMsg.value = ''; }, 3000);
+}
+
+// ===== 账号管理（仅管理员可见） =====
+const users = ref([]);
+const usersLoading = ref(false);
+const showAddUserForm = ref(false);
+const newUser = ref({ username: '', password: 'xlc2026', role: 'recruiter', name: '' });
+const actingUserId = ref(null);
+
+async function loadUsers() {
+  usersLoading.value = true;
+  try {
+    users.value = await auth.fetchUsers();
+  } catch (err) {
+    console.error('加载用户列表失败:', err);
+    showMsg(`加载用户列表失败：${err.message}`, 'error');
+  } finally {
+    usersLoading.value = false;
+  }
+}
+
+async function submitAddUser() {
+  const { username, password, role, name } = newUser.value;
+  if (!username.trim() || !password.trim()) {
+    showMsg('账号和密码不能为空', 'error');
+    return;
+  }
+  actingUserId.value = '__add__';
+  try {
+    await auth.addUserAccount(username.trim(), password, role, name || username.trim());
+    showMsg(`已添加用户「${username.trim()}」`);
+    newUser.value = { username: '', password: 'xlc2026', role: 'recruiter', name: '' };
+    showAddUserForm.value = false;
+    await loadUsers();
+  } catch (err) {
+    showMsg(`添加失败：${err.message}`, 'error');
+  } finally {
+    actingUserId.value = null;
+  }
+}
+
+async function handleDeleteUser(username) {
+  if (!confirm(`确定删除账号「${username}」？\n\n删除后该用户无法登录，但其创建的数据仍保留在系统中。`)) return;
+  actingUserId.value = username;
+  try {
+    await auth.deleteUserAccount(username);
+    showMsg(`已删除用户「${username}」`);
+    await loadUsers();
+  } catch (err) {
+    showMsg(`删除失败：${err.message}`, 'error');
+  } finally {
+    actingUserId.value = null;
+  }
+}
+
+async function handleResetPassword(username) {
+  const newPwd = prompt(`请输入「${username}」的新密码：`, 'xlc2026');
+  if (!newPwd) return;
+  actingUserId.value = username;
+  try {
+    await auth.resetUserPassword(username, newPwd);
+    showMsg(`已重置「${username}」的密码`);
+  } catch (err) {
+    showMsg(`重置失败：${err.message}`, 'error');
+  } finally {
+    actingUserId.value = null;
+  }
+}
+
+async function handleSeedDefaults() {
+  if (!confirm('将创建默认管理员账号（admin）和 8 个招聘专员账号，密码均为 xlc2026。\n\n仅当系统中没有用户时才会创建。确定继续？')) return;
+  try {
+    const result = await auth.seedDefaultUsers();
+    if (result.skipped) {
+      showMsg('账号已存在，跳过初始化');
+    } else {
+      showMsg(result.message);
+      await loadUsers();
+    }
+  } catch (err) {
+    showMsg(`初始化失败：${err.message}`, 'error');
+  }
+}
+
+function roleLabel(role) {
+  return role === 'admin' ? '管理员' : '招聘专员';
 }
 
 // ===== 部门管理 =====
@@ -303,6 +390,67 @@ async function onChangeThreshold(stageKey, days) {
       </div>
     </section>
 
+    <!-- 账号管理（仅管理员可见） -->
+    <section v-if="auth.isAdmin" class="config-section">
+      <h3 class="section-title">账号管理</h3>
+      <p class="section-desc">管理系统登录账号。管理员可添加/删除招聘专员账号、重置密码</p>
+
+      <div class="user-list">
+        <div v-if="usersLoading" class="text-muted">加载中…</div>
+        <div v-else-if="users.length === 0" class="text-muted">暂无用户，点击下方按钮初始化默认账号</div>
+        <div v-else class="table-mini">
+          <div class="table-row table-header">
+            <span class="col-user">账号</span>
+            <span class="col-name">显示名称</span>
+            <span class="col-role">角色</span>
+            <span class="col-action">操作</span>
+          </div>
+          <div v-for="user in users" :key="user.username" class="table-row">
+            <span class="col-user">{{ user.username }}</span>
+            <span class="col-name">{{ user.name }}</span>
+            <span class="col-role">
+              <span class="role-tag" :class="user.role === 'admin' ? 'role-admin' : 'role-recruiter'">
+                {{ roleLabel(user.role) }}
+              </span>
+            </span>
+            <span class="col-action">
+              <button
+                class="btn-text"
+                @click="handleResetPassword(user.username)"
+                :disabled="actingUserId === user.username"
+                title="重置密码"
+              >🔑</button>
+              <button
+                v-if="user.role !== 'admin'"
+                class="btn-text danger"
+                @click="handleDeleteUser(user.username)"
+                :disabled="actingUserId === user.username"
+                title="删除用户"
+              >🗑</button>
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 添加用户表单 -->
+      <div v-if="showAddUserForm" class="inline-form" style="margin-top: var(--spacing-sm);">
+        <input v-model="newUser.username" placeholder="账号名" class="input-sm" size="10" />
+        <input v-model="newUser.name" placeholder="显示名称（可选）" class="input-sm" size="10" />
+        <select v-model="newUser.role" class="input-sm">
+          <option value="recruiter">招聘专员</option>
+          <option value="admin">管理员</option>
+        </select>
+        <input v-model="newUser.password" type="text" placeholder="密码" class="input-sm" size="10" />
+        <button class="btn btn-sm btn-primary" @click="submitAddUser" :disabled="actingUserId === '__add__'">添加</button>
+        <button class="btn btn-sm" @click="showAddUserForm = false">取消</button>
+      </div>
+
+      <div class="user-actions" style="margin-top: var(--spacing-sm); display: flex; gap: var(--spacing-xs);">
+        <button v-if="!showAddUserForm" class="btn-link" @click="showAddUserForm = true">+ 添加用户</button>
+        <button v-if="users.length === 0" class="btn-link" @click="handleSeedDefaults" style="color: var(--warning);">⚡ 初始化默认账号</button>
+      </div>
+    </section>
+
     <!-- 底部提示 -->
     <p v-if="!auth.isAdmin" class="hint-recruiter">⚠ 你的修改将提交给管理员审核后生效</p>
   </div>
@@ -474,4 +622,19 @@ async function onChangeThreshold(stageKey, days) {
   border-radius: var(--radius-sm);
   font-size: var(--font-size-sm);
 }
+
+/* 账号管理 */
+.col-user { width: 120px; font-weight: 500; }
+.col-name { flex: 1; }
+.col-role { width: 100px; text-align: center; }
+
+.role-tag {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+}
+.role-admin { background: var(--primary-bg); color: var(--primary); }
+.role-recruiter { background: var(--gray-50); color: var(--gray-600); }
 </style>

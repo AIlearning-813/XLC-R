@@ -65,8 +65,8 @@ async function searchOne(query) {
     const data = await response.json();
     const text = data.choices?.[0]?.message?.content || '[]';
 
-    // 提取 JSON 数组
-    const jsonMatch = text.match(/\[[\s\S]*\]/);
+    // 提取 JSON 数组（P1 修复：非贪婪匹配）
+    const jsonMatch = text.match(/\[[\s\S]*?\]/);
     if (!jsonMatch) return [];
 
     return JSON.parse(jsonMatch[0]).filter(item => item.title && item.content);
