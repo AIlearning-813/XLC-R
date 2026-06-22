@@ -156,6 +156,7 @@ function getAvailableStages(row) {
           <th class="col-position">岗位</th>
           <th class="col-stage">当前阶段</th>
           <th class="col-source">来源</th>
+          <th class="col-recorder">录入人</th>
           <th class="col-date">更新时间</th>
           <th class="col-actions">操作</th>
         </tr>
@@ -164,14 +165,14 @@ function getAvailableStages(row) {
       <tbody>
         <!-- 加载中 -->
         <tr v-if="loading">
-          <td colspan="7" class="table-empty">
+          <td colspan="8" class="table-empty">
             <span class="spinner"></span>
           </td>
         </tr>
 
         <!-- 无数据 -->
         <tr v-else-if="candidates.length === 0">
-          <td colspan="7" class="table-empty">
+          <td colspan="8" class="table-empty">
             <div class="empty-inline">
               <span class="empty-inline-icon">👤</span>
               <span>暂无候选人</span>
@@ -212,6 +213,9 @@ function getAvailableStages(row) {
           </td>
           <td class="col-source">
             <span class="source-text">{{ sourceLabel(row.source) }}</span>
+          </td>
+          <td class="col-recorder">
+            <span class="recorder-text">{{ row.ownerId || row.createdBy || '—' }}</span>
           </td>
           <td class="col-date">
             <span class="date-text">{{ formatDate(row.updatedAt || row.createdAt) }}</span>
@@ -386,6 +390,8 @@ thead th {
 .col-position { min-width: 120px; }
 .col-stage { min-width: 100px; }
 .col-source { min-width: 80px; }
+.col-recorder { min-width: 70px; }
+.recorder-text { font-size: var(--font-size-sm); color: var(--gray-500); }
 .col-date { min-width: 90px; }
 .col-actions { width: 60px; text-align: center; }
 

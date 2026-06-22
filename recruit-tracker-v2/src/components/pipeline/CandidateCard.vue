@@ -202,6 +202,9 @@ function handleToggleSelect(event) {
         {{ stayLabel }}
       </span>
       <span class="card-phone" v-if="candidate?.phone">{{ candidate.phone }}</span>
+      <span class="card-recorder" v-if="candidate?.ownerId || candidate?.createdBy">
+        {{ candidate.ownerId || candidate.createdBy }}
+      </span>
     </div>
   </div>
 </template>
@@ -510,5 +513,10 @@ function handleToggleSelect(event) {
 .card-phone {
   font-size: 10px;
   color: var(--gray-300);
+}
+.card-recorder {
+  font-size: 10px;
+  color: var(--gray-400);
+  margin-left: auto;
 }
 </style>

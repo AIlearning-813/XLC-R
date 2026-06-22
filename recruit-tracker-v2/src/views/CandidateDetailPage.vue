@@ -595,6 +595,10 @@ watch(candidateId, (newId) => {
                 <label>来源</label>
                 <span>{{ candidate.source || '—' }}</span>
               </div>
+              <div class="info-item">
+                <label>录入人</label>
+                <span>{{ candidate.ownerId || candidate.createdBy || '—' }}</span>
+              </div>
               <div class="info-item full-width">
                 <label>期望岗位</label>
                 <span>{{ display.expectedPosition || '—' }}</span>
