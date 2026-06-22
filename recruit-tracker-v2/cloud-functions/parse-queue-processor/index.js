@@ -352,28 +352,8 @@ async function processOneEntry(db, entry, summary) {
     const candidateResult = await db.collection('Candidate').add(candidateDoc);
     const candidateId = candidateResult.id;
 
-    // 创建 Application（自动匹配岗位或留待专员分配）
-    const matchedJobId = await autoMatchJob(db, {
-      expectedPosition: candidateData.expected_position || basicInfo.expected_position || '',
-      expectedSalary: candidateData.expected_salary || basicInfo.expected_salary || '',
-    });
-
-    const applicationDoc = {
-      candidateId,
-      jobId: matchedJobId || '', // 自动匹配到岗位或留空待分配
-      stage: 'resume',
-      stageEnteredAt: new Date(),
-      status: 'active',
-      funnel: { resumeAt: new Date() },
-      funnelMeta: { entrySource: 'email', anchorDate: entry.sourceEmailDate || new Date() },
-      source: 'email',
-      ownerId: entry.userId || '',
-      _version: 0,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-
-    await db.collection('Application').add(applicationDoc);
+    // 🆕 不自动创建 Application，由招聘专员手动关联招聘需求
+    // 原因：邮箱无法判断候选人应关联哪个招聘需求，避免错配
 
     // 更新 ParseQueue 状态
     await db.collection('ParseQueue').doc(entry._id).update({
@@ -382,7 +362,7 @@ async function processOneEntry(db, entry, summary) {
       processedAt: new Date(),
     });
 
-    // 创建成功通知
+    // 创建通知（提示专员手动关联需求）
     await createNotification(db, {
       userId: entry.userId,
       type: 'parse_success',
@@ -394,6 +374,7 @@ async function processOneEntry(db, entry, summary) {
         fileName: entry.fileName,
         emailSubject: entry.sourceEmailSubject || '',
         parsedFields: Object.keys(basicInfo).filter((k) => basicInfo[k]),
+        needsAssignment: true,  // 🆕 标记需要手动分配
       },
     });
 

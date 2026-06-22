@@ -1,10 +1,14 @@
 <script setup>
-/* 新励成招聘管理系统 V2.0 — 候选人创建表单 */
+/* 新励成招聘管理系统 V2.0 — 候选人创建表单
+ *
+ * 增强版：支持按部门筛选岗位 + 关联招聘需求（选需求自动带岗位）
+ */
 
-import { ref, reactive, computed, onMounted } from 'vue';
+import { ref, reactive, computed, onMounted, watch } from 'vue';
 import cloudbase from '../../services/cloudbase';
-import { RESUME_SOURCES, JOB_TYPES, DEPARTMENTS } from '../../config/constants';
 import { useConfigStore } from '../../stores/useConfigStore';
+import { useJobStore } from '../../stores/useJobStore';
+import { useRecruitmentDemandStore } from '../../stores/useRecruitmentDemandStore';
 
 const db = cloudbase.db();
 
@@ -19,15 +23,30 @@ const emit = defineEmits([
   'cancel',
 ]);
 
+// ===== Store =====
+const configStore = useConfigStore();
+const jobStore = useJobStore();
+const demandStore = useRecruitmentDemandStore();
+
 // ===== 表单状态 =====
 const selectedJobId = ref('');
-const jobs = ref([]);
-const jobsLoading = ref(true);
-const configStore = useConfigStore();
 const source = ref('manual');
 const recruitmentSource = ref('');
 const notes = ref('');
 const duplicateAcknowledged = ref(false);
+
+// 部门筛选
+const selectedDept = ref('');
+const availableDepts = ref([]);
+
+// 招聘需求关联
+const selectedDemandId = ref('');
+const recruitingDemands = ref([]);
+const demandsLoading = ref(false);
+
+// 岗位列表
+const jobs = ref([]);
+const jobsLoading = ref(true);
 
 // ===== 补充信息 =====
 const basicInfo = reactive({
@@ -40,31 +59,67 @@ const basicInfo = reactive({
 const initFromParseResult = () => {
   const data = props.parseResult;
   if (!data) return;
-
   const info = data.basic_info || {};
   if (info.name) basicInfo.name = info.name;
   if (info.phone) basicInfo.phone = info.phone;
   if (info.email) basicInfo.email = info.email;
 };
-
 initFromParseResult();
 
-// ===== 加载岗位列表 =====
+// ===== 加载数据 =====
 onMounted(async () => {
+  // 加载岗位列表（通过 store）
   try {
-    const result = await db.collection('Job')
-      .where({ status: 'active' })
-      .get();
-    jobs.value = result.data || [];
+    jobsLoading.value = true;
+    const fetchedJobs = await jobStore.fetchActive();
+    jobs.value = fetchedJobs;
+    // 提取部门列表
+    const deptSet = new Set();
+    for (const j of fetchedJobs) {
+      const dept = j.department || '未分配';
+      deptSet.add(dept);
+    }
+    availableDepts.value = [...deptSet].sort();
   } catch (err) {
     console.warn('[CandidateForm] 加载岗位列表失败:', err.message);
     jobs.value = [];
   } finally {
     jobsLoading.value = false;
   }
+
+  // 加载招聘需求列表
+  try {
+    demandsLoading.value = true;
+    const demands = await demandStore.fetchAll('recruiting');
+    recruitingDemands.value = demands || [];
+  } catch (err) {
+    console.warn('[CandidateForm] 加载招聘需求失败:', err.message);
+  } finally {
+    demandsLoading.value = false;
+  }
 });
 
 // ===== 计算属性 =====
+
+/** 按部门筛选后的岗位 */
+const filteredJobs = computed(() => {
+  if (!selectedDept.value) return jobs.value;
+  return jobs.value.filter(j => (j.department || '未分配') === selectedDept.value);
+});
+
+/** 当前选中需求对应的岗位 */
+const demandLinkedJobId = computed(() => {
+  if (!selectedDemandId.value) return null;
+  const demand = recruitingDemands.value.find(d => d._id === selectedDemandId.value);
+  return demand?.linkedJobId || null;
+});
+
+/** 当前选中需求的信息 */
+const selectedDemand = computed(() => {
+  return recruitingDemands.value.find(d => d._id === selectedDemandId.value) || null;
+});
+
+/** 表单是否有效 */
 const isFormValid = computed(() => {
   return basicInfo.name.trim() && selectedJobId.value;
 });
@@ -77,7 +132,31 @@ const canSubmit = computed(() => {
 
 const hasDuplicates = computed(() => props.duplicates.length > 0);
 
+// ===== 监听：选需求 → 自动填岗位 =====
+watch(selectedDemandId, (newDemandId) => {
+  if (newDemandId) {
+    const demand = recruitingDemands.value.find(d => d._id === newDemandId);
+    if (demand?.linkedJobId) {
+      selectedJobId.value = demand.linkedJobId;
+      // 如果有部门信息，同步设置部门筛选
+      const job = jobs.value.find(j => j._id === demand.linkedJobId);
+      if (job?.department) {
+        selectedDept.value = job.department;
+      }
+    }
+  }
+});
+
 // ===== 方法 =====
+
+/** 切换部门筛选时，如果当前选中的岗位不在该部门，清除选择 */
+watch(selectedDept, () => {
+  const job = jobs.value.find(j => j._id === selectedJobId.value);
+  if (job && selectedDept.value && (job.department || '未分配') !== selectedDept.value) {
+    selectedJobId.value = '';
+  }
+});
+
 function handleSubmit() {
   if (!canSubmit.value) return;
 
@@ -91,6 +170,7 @@ function handleSubmit() {
   if (basicInfo.email.trim()) mergedData.basic_info.email = basicInfo.email.trim();
 
   const selectedJob = jobs.value.find(j => j._id === selectedJobId.value);
+  const demand = selectedDemand.value;
 
   emit('create', {
     candidate: {
@@ -104,6 +184,8 @@ function handleSubmit() {
     },
     application: {
       jobId: selectedJobId.value,
+      demandId: demand?._id || '',  // 🆕 关联招聘需求
+      demandTitle: demand?.title || '',
     },
     corrections: props.parseResult?._corrections || [],
   });
@@ -151,34 +233,81 @@ function handleSubmit() {
       </div>
     </section>
 
+    <!-- 关联招聘需求 -->
+    <section class="form-section card">
+      <h3 class="section-title">关联招聘需求</h3>
+      <p class="section-hint">选择需求后自动关联对应岗位。如暂无需求直接选岗位即可。</p>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">招聘需求（可选）</label>
+          <select
+            v-model="selectedDemandId"
+            class="form-select"
+            :disabled="submitting || demandsLoading"
+          >
+            <option value="">不关联需求（直接选岗位）</option>
+            <option
+              v-for="d in recruitingDemands"
+              :key="d._id"
+              :value="d._id"
+            >
+              {{ d.title }} — {{ d.department?.displayName || d.department || '' }} ({{ d.headcount || 0 }}人)
+              <template v-if="!d.linkedJobId">⚠未关联岗位</template>
+            </option>
+          </select>
+          <span v-if="recruitingDemands.length === 0 && !demandsLoading" class="form-hint">
+            暂无招聘中的需求，请直接选择岗位
+          </span>
+        </div>
+      </div>
+    </section>
+
     <!-- 岗位选择 -->
     <section class="form-section card">
       <h3 class="section-title">选择岗位 <span class="required">*</span></h3>
 
-      <div class="form-group">
-        <select
-          v-model="selectedJobId"
-          class="form-select"
-          :disabled="submitting || jobsLoading"
-        >
-          <option value="" disabled>{{ jobsLoading ? '加载中...' : '请选择招聘岗位' }}</option>
-          <option
-            v-for="job in jobs"
-            :key="job._id"
-            :value="job._id"
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">部门筛选（可选）</label>
+          <select
+            v-model="selectedDept"
+            class="form-select"
+            :disabled="submitting"
           >
-            {{ job.title }} — {{ job.department || '未分配部门' }}
-            <template v-if="job.interviewRounds">
-              ({{ job.interviewRounds }}轮面试)
-            </template>
-          </option>
-        </select>
-        <span v-if="jobs.length === 0 && !jobsLoading" class="form-hint form-hint-warning">
-          ⚠️ 系统中暂无活跃岗位，请联系管理员创建岗位或运行初始化脚本（scripts/seed-data.js）。
-        </span>
-        <span v-else class="form-hint">
-          如果未显示目标岗位，请联系管理员在"系统设置"中添加。
-        </span>
+            <option value="">全部部门</option>
+            <option v-for="dept in availableDepts" :key="dept" :value="dept">{{ dept }}</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">
+            岗位
+            <span v-if="demandLinkedJobId && selectedJobId === demandLinkedJobId" class="tag-auto">已自动关联</span>
+          </label>
+          <select
+            v-model="selectedJobId"
+            class="form-select"
+            :disabled="submitting || jobsLoading"
+          >
+            <option value="" disabled>{{ jobsLoading ? '加载中...' : '请选择招聘岗位' }}</option>
+            <option
+              v-for="job in filteredJobs"
+              :key="job._id"
+              :value="job._id"
+            >
+              {{ job.title }} — {{ job.department || '未分配部门' }}
+              <template v-if="job.interviewRounds">
+                ({{ job.interviewRounds }}轮面试)
+              </template>
+            </option>
+          </select>
+          <span v-if="filteredJobs.length === 0 && !jobsLoading" class="form-hint form-hint-warning">
+            ⚠️ 系统中暂无活跃岗位，请联系管理员创建岗位或运行初始化脚本（scripts/seed-data.js）。
+          </span>
+          <span v-else class="form-hint">
+            如果未显示目标岗位，请联系管理员在"系统设置"中添加。
+          </span>
+        </div>
       </div>
     </section>
 
@@ -299,8 +428,23 @@ function handleSubmit() {
   margin-bottom: var(--spacing-lg);
 }
 
-.required {
-  color: var(--danger);
+.section-hint {
+  font-size: var(--font-size-sm);
+  color: var(--gray-400);
+  margin: -8px 0 var(--spacing-md);
+}
+
+.required { color: var(--danger); }
+
+.tag-auto {
+  display: inline-block;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--success);
+  background: #e8f5e9;
+  border-radius: var(--radius-full);
+  vertical-align: middle;
 }
 
 /* === 表单 === */
@@ -417,8 +561,7 @@ function handleSubmit() {
 }
 
 .duplicate-checkbox {
-  width: 18px;
-  height: 18px;
+  width: 18px; height: 18px;
   accent-color: var(--primary);
   cursor: pointer;
 }

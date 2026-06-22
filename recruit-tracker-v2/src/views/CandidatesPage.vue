@@ -1,7 +1,7 @@
 <script setup>
 /* 新励成招聘管理系统 V2.0 — 候选人列表（含批量操作+行内操作+岗位分配） */
 
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useJobStore } from '../stores/useJobStore';
 import { useApplicationStore } from '../stores/useApplicationStore';
@@ -17,6 +17,7 @@ import { useToast } from '../composables/useToast';
 import CandidateFilter from '../components/candidates/CandidateFilter.vue';
 import CandidateTable from '../components/candidates/CandidateTable.vue';
 import StageTransitionDialog from '../components/pipeline/StageTransitionDialog.vue';
+import AssignDemandDialog from '../components/candidates/AssignDemandDialog.vue';
 
 const router = useRouter();
 const jobStore = useJobStore();
@@ -33,8 +34,8 @@ const rows = ref([]);
 const selectedIds = ref(new Set());
 const currentFilters = ref({});
 
-// Tab 切换：活跃 vs 已结束
-const activeTab = ref('active'); // 'active' | 'ended'
+// Tab 切换：活跃 vs 已结束 vs 待分配
+const activeTab = ref('active'); // 'active' | 'ended' | 'unassigned'
 
 // 分页
 const page = ref(1);
@@ -74,6 +75,11 @@ const assignJobVisible = ref(false);
 const assignTarget = ref(null);
 const assignJobId = ref('');
 
+// 🆕 关联招聘需求弹窗
+const assignDemandVisible = ref(false);
+const assignDemandCandidateId = ref('');
+const assignDemandCandidateName = ref('');
+
 // 编辑弹窗（简易内联编辑）
 const editVisible = ref(false);
 const editTarget = ref(null);
@@ -87,6 +93,12 @@ async function loadData(filters = {}) {
 
   try {
     const dbInstance = db();
+
+    // 🆕 待分配 Tab：查询没有 Application 的 Candidate
+    if (activeTab.value === 'unassigned') {
+      await loadUnassigned(dbInstance, filters);
+      return;
+    }
 
     let query = dbInstance.collection('Application');
 
@@ -224,6 +236,70 @@ async function loadData(filters = {}) {
   }
 }
 
+// ===== 待分配候选人的加载 =====
+
+async function loadUnassigned(dbInstance, filters = {}) {
+  try {
+    // 1. 获取所有已创建 Application 的 candidateId
+    const { data: allApps } = await dbInstance.collection('Application')
+      .field({ candidateId: true })
+      .where({ isArchived: dbInstance.command.neq(true) })
+      .limit(500)
+      .get();
+
+    const assignedIds = new Set((allApps || []).map(a => a.candidateId).filter(Boolean));
+
+    // 2. 查询 Candidate 集合
+    let candidateQuery = dbInstance.collection('Candidate').orderBy('createdAt', 'desc').limit(200);
+
+    const { data: candidates } = await candidateQuery.get();
+    let unassigned = (candidates || []).filter(c => !assignedIds.has(c._id));
+
+    // 搜索过滤
+    if (filters.search) {
+      const q = filters.search.toLowerCase();
+      unassigned = unassigned.filter(c =>
+        (c.name || '').toLowerCase().includes(q)
+        || (c.phone || '').includes(q)
+        || (c.email || '').toLowerCase().includes(q)
+      );
+    }
+
+    // owner 过滤
+    const of = ownerFilter();
+    if (of) {
+      unassigned = unassigned.filter(c => c.createdBy === of.ownerId);
+    }
+
+    totalCount.value = unassigned.length;
+    const start = (page.value - 1) * pageSize;
+    rows.value = unassigned.slice(start, start + pageSize).map(c => ({
+      _id: c._id,
+      candidateId: c._id,
+      name: c.name,
+      phone: c.phone,
+      email: c.email,
+      expectedPosition: c.expectedPosition || '',
+      jobTitle: '',
+      jobName: '',
+      jobId: '',
+      stage: '',
+      source: c.source || 'email',
+      status: 'unassigned',
+      createdAt: c.createdAt,
+      updatedAt: c.updatedAt,
+      _candidate: c,
+      _application: null,
+      _job: null,
+    }));
+  } catch (err) {
+    console.error('[CandidatesPage] 加载未分配失败:', err.message);
+    error.value = '加载未分配候选人失败：' + err.message;
+  } finally {
+    loading.value = false;
+  }
+}
+
 // ===== 行内操作处理 =====
 
 function handleAction({ action, row }) {
@@ -233,6 +309,9 @@ function handleAction({ action, row }) {
       break;
     case 'assignJob':
       openAssignJobDialog(row);
+      break;
+    case 'assignDemand':
+      openAssignDemandDialog(row);
       break;
     case 'moveStage':
       openTransitionDialog(row, row.toStage);
@@ -421,6 +500,25 @@ async function confirmAssignJob() {
   } catch (err) {
     toast.error('分配岗位失败：' + safeErrorMsg(err));
   }
+}
+
+// 🆕 关联招聘需求弹窗
+function openAssignDemandDialog(row) {
+  assignDemandCandidateId.value = row.candidateId || row._id;
+  assignDemandCandidateName.value = row.name || '';
+  assignDemandVisible.value = true;
+}
+
+function onDemandAssigned(result) {
+  assignDemandVisible.value = false;
+  if (result.isNew) {
+    toast.success(`「${assignDemandCandidateName.value}」已关联至「${result.demandTitle}」`);
+  } else {
+    toast.success(`已更新关联`);
+  }
+  assignDemandCandidateId.value = '';
+  assignDemandCandidateName.value = '';
+  loadData(currentFilters.value);
 }
 
 // ===== 阶段流转弹窗（淘汰/放弃/阶段推进）=====
@@ -633,7 +731,7 @@ onMounted(async () => {
       </div>
     </div>
 
-    <!-- Tab 切换：活跃 / 已结束 -->
+    <!-- Tab 切换：活跃 / 已结束 / 待分配 -->
     <div class="tab-switcher">
       <button
         class="tab-btn"
@@ -641,6 +739,14 @@ onMounted(async () => {
         @click="switchTab('active')"
       >
         活跃候选人
+      </button>
+      <button
+        class="tab-btn"
+        :class="{ active: activeTab === 'unassigned' }"
+        @click="switchTab('unassigned')"
+      >
+        待分配
+        <span v-if="activeTab === 'unassigned'" class="tab-badge">{{ totalCount }}</span>
       </button>
       <button
         class="tab-btn"
@@ -774,44 +880,14 @@ onMounted(async () => {
       </Transition>
     </Teleport>
 
-    <!-- 分配岗位弹窗 -->
-    <Teleport to="body">
-      <Transition name="dialog">
-        <div v-if="assignJobVisible" class="dialog-overlay" @click.self="assignJobVisible = false">
-          <div class="dialog-card dialog-sm">
-            <div class="dialog-header">
-              <h3 class="dialog-title">分配岗位</h3>
-              <button class="dialog-close" @click="assignJobVisible = false">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-                </svg>
-              </button>
-            </div>
-            <div class="dialog-body">
-              <p class="assign-info">
-                为 <strong>{{ assignTarget?.name || '未命名' }}</strong> 分配岗位
-              </p>
-              <div class="form-group">
-                <label class="form-label">选择岗位</label>
-                <select v-model="assignJobId" class="form-select" style="width: 100%;">
-                  <option value="" disabled>请选择岗位...</option>
-                  <option v-for="job in jobStore.activeJobs" :key="job._id" :value="job._id">
-                    {{ job.title || job.name }}
-                  </option>
-                </select>
-              </div>
-              <p v-if="assignTarget?.expectedPosition" class="assign-hint">
-                💡 候选人期望岗位：{{ assignTarget.expectedPosition }}
-              </p>
-            </div>
-            <div class="dialog-footer">
-              <button class="btn btn-secondary" @click="assignJobVisible = false">取消</button>
-              <button class="btn btn-primary" :disabled="!assignJobId" @click="confirmAssignJob">确认分配</button>
-            </div>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
+    <!-- 🆕 关联招聘需求弹窗（替代旧的"分配岗位"弹窗） -->
+    <AssignDemandDialog
+      v-if="assignDemandVisible"
+      :candidate-id="assignDemandCandidateId"
+      :candidate-name="assignDemandCandidateName"
+      @assigned="onDemandAssigned"
+      @close="assignDemandVisible = false"
+    />
 
     <!-- 重新激活弹窗 -->
     <Teleport to="body">
@@ -929,6 +1005,16 @@ onMounted(async () => {
 .tab-btn.active {
   color: var(--primary);
   border-bottom-color: var(--primary);
+}
+
+.tab-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--primary); color: #fff;
+  font-size: 11px; font-weight: 600;
+  margin-left: 4px;
 }
 
 /* === 批量操作工具栏 === */

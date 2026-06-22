@@ -236,10 +236,12 @@ async function onCreateCandidate(data) {
     const candidateResult = await db.collection('Candidate').add(candidateDoc);
     const candidateId = candidateResult.id;
 
-    // 3. 创建 Application
+    // 3. 创建 Application（含需求关联）
     const applicationDoc = {
       candidateId,
       jobId: appData.jobId,
+      demandId: appData.demandId || '',       // 🆕 关联的招聘需求ID
+      demandTitle: appData.demandTitle || '',  // 🆕 需求标题（便于列表展示）
       stage: 'resume',
       stageEnteredAt: new Date(),
       status: 'active',

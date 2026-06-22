@@ -15,6 +15,7 @@ import { isVersionConflict } from '../services/optimistic-lock';
 import { useToast } from '../composables/useToast';
 import { FUNNEL_STAGES, JOB_TYPES, END_REASONS } from '../config/constants';
 import CommunicationLog from '../components/candidates/CommunicationLog.vue';
+import AssignDemandDialog from '../components/candidates/AssignDemandDialog.vue';
 import mammoth from 'mammoth';
 
 const route = useRoute();
@@ -47,8 +48,27 @@ const fileError = ref('');
 const filePreviewType = ref('');  // 'pdf' | 'docx' | 'image' | 'text' | 'unknown'
 const docxHtml = ref('');         // DOCX→HTML 渲染结果
 
+// 🆕 关联招聘需求弹窗
+const assignDemandVisible = ref(false);
+const assignDemandAppId = ref('');
+
 // ===== 计算属性 =====
 const candidateId = computed(() => route.params.id);
+
+/** 当前关联的招聘需求（取第一个 Application 的 demandId） */
+const currentDemand = computed(() => {
+  const app = applications.value[0];
+  if (!app?.demandId) return null;
+  return {
+    demandId: app.demandId,
+    demandTitle: app.demandTitle || '',
+  };
+});
+
+/** 当前 Application ID（用于修改关联） */
+const currentAppId = computed(() => {
+  return applications.value[0]?._id || '';
+});
 
 const tabs = [
   { key: 'basic', label: '基本信息' },
@@ -295,6 +315,17 @@ function getJobTitle(app) {
 
 function goBack() {
   router.back();
+}
+
+// 🆕 关联需求
+function openAssignDemand() {
+  assignDemandAppId.value = currentAppId.value;
+  assignDemandVisible.value = true;
+}
+
+function onDemandAssigned() {
+  assignDemandVisible.value = false;
+  loadApplications();  // 刷新申请记录以显示新关联
 }
 
 // ===== 文件类型检测 =====
@@ -551,13 +582,27 @@ watch(candidateId, (newId) => {
         <div class="card">
           <div class="card-header">
             <span class="card-header-title">基本信息</span>
-            <button
-              v-if="!editing"
-              class="btn btn-sm btn-secondary"
-              @click="startEdit"
-            >
-              编辑
-            </button>
+            <div class="card-header-actions">
+              <!-- 关联需求 -->
+              <span v-if="currentDemand" class="demand-tag" title="关联的招聘需求">
+                📋 {{ currentDemand.demandTitle }}
+              </span>
+              <button
+                v-if="!editing"
+                class="btn btn-sm btn-ghost"
+                @click="openAssignDemand"
+                title="关联/修改招聘需求"
+              >
+                {{ currentDemand ? '修改关联' : '关联需求' }}
+              </button>
+              <button
+                v-if="!editing"
+                class="btn btn-sm btn-secondary"
+                @click="startEdit"
+              >
+                编辑
+              </button>
+            </div>
           </div>
 
           <div class="card-body">
@@ -945,6 +990,16 @@ watch(candidateId, (newId) => {
         </div>
       </div>
     </template>
+
+    <!-- 🆕 关联招聘需求弹窗 -->
+    <AssignDemandDialog
+      v-if="assignDemandVisible"
+      :candidate-id="candidateId"
+      :candidate-name="candidate?.name || ''"
+      :existing-app-id="assignDemandAppId"
+      @assigned="onDemandAssigned"
+      @close="assignDemandVisible = false"
+    />
   </div>
 </template>
 
@@ -1316,6 +1371,15 @@ function getFunnelKey(stage) {
 .card-header-meta {
   font-size: var(--font-size-xs);
   color: var(--gray-400);
+}
+
+/* 需求关联标签 */
+.demand-tag {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 10px;
+  background: var(--primary-bg); color: var(--primary);
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-xs); font-weight: 500;
 }
 
 /* === 申请卡片 === */
