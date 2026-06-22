@@ -344,17 +344,15 @@ async function deleteCandidate(row) {
   if (!confirm(confirmMsg)) return;
 
   try {
-    showMsg.value = '';
     const result = await candidateStore.softDelete(row._id || row.candidateId, { skipApproval: isAdmin });
     if (result?.pending) {
-      showMsg.value = '已提交删除审批，请等待管理员审核';
+      toast.success('已提交删除审批，请等待管理员审核');
     } else {
-      showMsg.value = '简历已删除';
+      toast.success('简历已删除');
       loadData(currentFilters.value);
     }
-    setTimeout(() => { showMsg.value = ''; }, 3000);
   } catch (err) {
-    showMsg.value = `删除失败：${safeErrorMsg(err)}`;
+    toast.error(`删除失败：${safeErrorMsg(err)}`);
   }
 }
 
