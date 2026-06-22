@@ -8,7 +8,12 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "seed": "node scripts/seed-data.js",
+    "seed:force": "node scripts/seed-data.js --force",
+    "deploy": "bash scripts/deploy.sh",
+    "deploy:dev": "bash scripts/deploy.sh dev",
+    "smoke": "node scripts/smoke-test.cjs"
   },
   "dependencies": {
     "@cloudbase/js-sdk": "^3.4.6",

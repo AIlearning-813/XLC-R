@@ -4,13 +4,41 @@
  * 通过调用云函数验证系统核心链路可用性，
  * 不依赖浏览器，可在 CI 中运行。
  *
- * 使用方式：node scripts/smoke-test.cjs
+ * 使用方式：
+ *   TCB_SECRET_ID=xxx TCB_SECRET_KEY=xxx node scripts/smoke-test.cjs
+ *
+ * 前置条件：
+ *   需要在环境变量中设置 CloudBase 管理员凭据：
+ *   - TCB_SECRET_ID: 腾讯云 SecretId
+ *   - TCB_SECRET_KEY: 腾讯云 SecretKey
+ *   获取方式：https://console.cloud.tencent.com/cam/capi
  */
 
 const cloudbase = require('@cloudbase/node-sdk');
 
-const ENV_ID = 'xlc-recruit-d1gmbx8gybc8a3565';
-const app = cloudbase.init({ env: ENV_ID });
+const ENV_ID = process.env.CLOUDBASE_ENV_ID || 'xlc-recruit-d1gmbx8gybc8a3565';
+const SECRET_ID = process.env.TCB_SECRET_ID || process.env.TENCENT_SECRET_ID || '';
+const SECRET_KEY = process.env.TCB_SECRET_KEY || process.env.TENCENT_SECRET_KEY || '';
+
+if (!SECRET_ID || !SECRET_KEY) {
+  console.log('⚠️  未检测到 CloudBase 管理员凭据，冒烟测试需要以下环境变量：');
+  console.log('   TCB_SECRET_ID=你的腾讯云SecretId');
+  console.log('   TCB_SECRET_KEY=你的腾讯云SecretKey');
+  console.log('');
+  console.log('💡 本地验证建议：');
+  console.log('   • 运行单元测试：npm test');
+  console.log('   • 启动开发服务器：npm run dev');
+  console.log('   • 在浏览器中手动测试部署环境');
+  console.log('');
+  console.log('   获取凭据：https://console.cloud.tencent.com/cam/capi');
+  process.exit(0);
+}
+
+const app = cloudbase.init({
+  env: ENV_ID,
+  secretId: SECRET_ID,
+  secretKey: SECRET_KEY,
+});
 
 const PASS = '✅';
 const FAIL = '❌';
