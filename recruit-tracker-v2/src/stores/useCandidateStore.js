@@ -258,6 +258,25 @@ export const useCandidateStore = defineStore('candidate', () => {
 
     await db.collection('Candidate').doc(id).update(updateData);
 
+    // 同时将关联的 Application 标记为 withdrawn，否则列表刷新后候选人会重新出现
+    try {
+      const { data: apps } = await db.collection('Application')
+        .where({ candidateId: id, status: 'active' })
+        .limit(100)
+        .get();
+      if (apps && apps.length > 0) {
+        const batchUpdate = apps.map(app =>
+          db.collection('Application').doc(app._id).update({
+            status: 'withdrawn',
+            updatedAt: new Date(),
+          })
+        );
+        await Promise.allSettled(batchUpdate);
+      }
+    } catch (e) {
+      console.warn('[useCandidateStore] 关联Application更新失败:', e.message);
+    }
+
     // 更新本地缓存
     const idx = candidates.value.findIndex(c => c._id === id);
     if (idx !== -1) {
