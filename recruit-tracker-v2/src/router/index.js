@@ -75,6 +75,12 @@ const routes = [
     meta: { title: '变更审核', icon: 'review', requireAdmin: true },
   },
   {
+    path: '/trash',
+    name: 'Trash',
+    component: () => import('../views/TrashPage.vue'),
+    meta: { title: '回收站', icon: 'trash', requireAdmin: true },
+  },
+  {
     path: '/demands',
     name: 'RecruitmentDemands',
     component: () => import('../views/RecruitmentDemandPage.vue'),

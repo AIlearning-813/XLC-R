@@ -287,6 +287,121 @@ export const useCandidateStore = defineStore('candidate', () => {
     }
   }
 
+  /**
+   * 查询已删除候选人（回收站）
+   */
+  async function fetchDeleted() {
+    const db = cloudbase.db();
+    if (!db) return [];
+    loading.value = true;
+    error.value = '';
+    try {
+      const conditions = { status: 'deleted' };
+      const of = ownerFilter();
+      if (of) conditions.ownerId = of.ownerId;
+
+      const { data } = await db.collection('Candidate')
+        .where(conditions)
+        .orderBy('deletedAt', 'desc')
+        .limit(200)
+        .get();
+      candidates.value = data || [];
+      return data || [];
+    } catch (err) {
+      error.value = err.message;
+      return [];
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  /**
+   * 恢复已删除候选人
+   * - Candidate status → previousStatus（删除前的状态）
+   * - 关联 Application status: 'withdrawn' → 'active'
+   */
+  async function restore(id) {
+    const db = cloudbase.db();
+    if (!db) throw new Error('数据库未初始化');
+
+    // 先从数据库获取完整 Candidate 记录
+    let candidate;
+    try {
+      const { data } = await db.collection('Candidate').doc(id).get();
+      candidate = data?.[0] || null;
+    } catch { /* fallback */ }
+    if (!candidate) throw new Error('候选人不存在');
+
+    const previousStatus = candidate.previousStatus || 'active';
+
+    // 恢复 Candidate
+    const updateData = {
+      status: previousStatus,
+      deletedBy: db.command.remove(),
+      deletedAt: db.command.remove(),
+      previousStatus: db.command.remove(),
+      updatedAt: new Date(),
+    };
+    await db.collection('Candidate').doc(id).update(updateData);
+
+    // 恢复关联 Application
+    try {
+      const { data: apps } = await db.collection('Application')
+        .where({ candidateId: id, status: 'withdrawn' })
+        .limit(100)
+        .get();
+      if (apps && apps.length > 0) {
+        await Promise.allSettled(
+          apps.map(app =>
+            db.collection('Application').doc(app._id).update({
+              status: 'active',
+              updatedAt: new Date(),
+            })
+          )
+        );
+      }
+    } catch (e) {
+      console.warn('[useCandidateStore] 恢复关联Application失败:', e.message);
+    }
+
+    // 从本地缓存移除
+    candidates.value = candidates.value.filter(c => c._id !== id);
+  }
+
+  /**
+   * 永久删除候选人（硬删除）
+   * - 删除 Candidate 文档
+   * - 删除关联 Application 文档
+   */
+  async function permanentDelete(id) {
+    const db = cloudbase.db();
+    if (!db) throw new Error('数据库未初始化');
+
+    // 删除 Candidate
+    await db.collection('Candidate').doc(id).remove();
+
+    // 删除关联 Application
+    try {
+      const { data: apps } = await db.collection('Application')
+        .where({ candidateId: id })
+        .limit(100)
+        .get();
+      if (apps && apps.length > 0) {
+        await Promise.allSettled(
+          apps.map(app => db.collection('Application').doc(app._id).remove())
+        );
+      }
+    } catch (e) {
+      console.warn('[useCandidateStore] 永久删除关联Application失败:', e.message);
+    }
+
+    // 从本地缓存移除
+    candidates.value = candidates.value.filter(c => c._id !== id);
+    if (currentCandidate.value?._id === id) {
+      currentCandidate.value = null;
+    }
+  }
+
   return {
     // state
     candidates,
@@ -301,6 +416,9 @@ export const useCandidateStore = defineStore('candidate', () => {
     update,
     createWithApplication,
     softDelete,
+    fetchDeleted,
+    restore,
+    permanentDelete,
     // 乐观锁工具
     isVersionConflict,
     conflictMessage,
