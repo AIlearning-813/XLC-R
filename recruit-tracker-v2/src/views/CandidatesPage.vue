@@ -344,7 +344,9 @@ async function deleteCandidate(row) {
   if (!confirm(confirmMsg)) return;
 
   try {
-    const result = await candidateStore.softDelete(row._id || row.candidateId, { skipApproval: isAdmin });
+    // row._id 是 Application ID，row.candidateId 才是 Candidate ID
+    const candidateId = row.candidateId || row._id;
+    const result = await candidateStore.softDelete(candidateId, { skipApproval: isAdmin });
     if (result?.pending) {
       toast.success('已提交删除审批，请等待管理员审核');
     } else {

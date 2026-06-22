@@ -210,15 +210,23 @@ export const useCandidateStore = defineStore('candidate', () => {
     const db = cloudbase.db();
     if (!db) throw new Error('数据库未初始化');
 
-    const current = candidates.value.find(c => c._id === id)
+    // 先从本地缓存查找，找不到再从数据库查
+    let current = candidates.value.find(c => c._id === id)
       || (currentCandidate.value?._id === id ? currentCandidate.value : null);
-    if (!current) throw new Error('候选人不存在');
+
+    if (!current) {
+      try {
+        const { data } = await db.collection('Candidate').doc(id).get();
+        current = data?.[0] || null;
+      } catch { /* DB 查询失败也继续 */ }
+    }
 
     const auth = useAuthStore();
     const isAdmin = skipApproval || auth.isAdmin;
 
     // Recruiter：走审批流程
     if (!isAdmin) {
+      if (!current) throw new Error('候选人不存在');
       const { usePendingChangeStore } = await import('./usePendingChangeStore');
       const pendingStore = usePendingChangeStore();
       const result = await pendingStore.submitChange({
@@ -238,12 +246,12 @@ export const useCandidateStore = defineStore('candidate', () => {
       return { pending: true, changeId: result.id };
     }
 
-    // Admin：直接软删除
+    // Admin：直接软删除（找不到本地缓存也直接删 DB，不需要 name/status）
     const updateData = {
       status: 'deleted',
       deletedBy: auth.currentUsername || 'admin',
       deletedAt: new Date(),
-      previousStatus: current.status || 'active',
+      previousStatus: current?.status || 'active',
       updatedAt: new Date(),
     };
 
