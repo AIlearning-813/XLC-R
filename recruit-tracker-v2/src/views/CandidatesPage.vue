@@ -128,6 +128,7 @@ async function loadData(filters = {}) {
     const of = ownerFilter();
     if (of) conditions.ownerId = of.ownerId;
 
+    console.log('[loadData] 查询条件:', JSON.stringify(conditions), 'activeTab:', activeTab.value, 'filters:', JSON.stringify(filters));
     if (Object.keys(conditions).length > 0) {
       for (const [key, value] of Object.entries(conditions)) {
         query = query.where({ [key]: value });
@@ -144,6 +145,14 @@ async function loadData(filters = {}) {
 
     const { data: allApps } = await query.limit(200).get();
     let appList = allApps || [];
+
+    // 诊断：检查是否有 withdrawn 的 Application 出现在结果中
+    const withdrawnApps = appList.filter(a => a.status === 'withdrawn');
+    console.log('[loadData] 查询结果:', appList.length, '条, 其中withdrawn:', withdrawnApps.length, '条',
+      withdrawnApps.map(a => ({ _id: a._id, candidateId: a.candidateId, status: a.status })));
+    const nonActiveApps = appList.filter(a => a.status !== 'active');
+    console.log('[loadData] 非active的Application:', nonActiveApps.length, '条',
+      nonActiveApps.map(a => ({ _id: a._id, candidateId: a.candidateId, status: a.status })));
 
     if (filters.dateTo) {
       const toDate = new Date(filters.dateTo);
