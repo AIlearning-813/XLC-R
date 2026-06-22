@@ -551,9 +551,9 @@ tbody td {
 /* === 子菜单 === */
 .submenu {
   position: absolute;
-  left: 100%;
+  right: 100%;
   top: -4px;
-  margin-left: 4px;
+  margin-right: 4px;
   min-width: 120px;
   background: #fff;
   border: 1px solid var(--gray-200);
