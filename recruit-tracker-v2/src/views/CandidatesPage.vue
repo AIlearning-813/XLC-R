@@ -335,7 +335,9 @@ function handleAction({ action, row }) {
 
 async function deleteCandidate(row) {
   const name = row.name || '未命名';
-  const isAdmin = auth.isAdmin;
+  // 三重校验管理员身份：Pinia store + localStorage 新格式 + localStorage 旧格式
+  const isAdmin = auth.isAdmin
+    || (() => { try { const s = JSON.parse(localStorage.getItem('xlc_auth_session') || '{}'); return s.r === 'admin' || s.role === 'admin'; } catch { return false; } })();
   const confirmMsg = isAdmin
     ? `确定要删除「${name}」的简历吗？\n\n管理员删除将立即生效，简历将从列表中移除。`
     : `确定要删除「${name}」的简历吗？\n\n删除后将提交至管理员审批，审批通过后简历将不再出现在任何列表中。`;
