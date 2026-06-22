@@ -125,7 +125,6 @@ async function loadData(filters = {}) {
     const of = ownerFilter();
     if (of) conditions.ownerId = of.ownerId;
 
-    console.log('[loadData] DB查询条件:', JSON.stringify(conditions), 'activeTab:', activeTab.value);
     if (Object.keys(conditions).length > 0) {
       query = query.where(conditions);
     }
@@ -141,13 +140,8 @@ async function loadData(filters = {}) {
     const { data: allApps } = await query.limit(200).get();
     let appList = allApps || [];
 
-    // 排除已归档数据（JS 端过滤，避免 CloudBase 复合查询不稳定）
+    // isArchived 在 JS 端过滤（避免与 status 条件一起放 CloudBase where 时被忽略）
     appList = appList.filter(a => a.isArchived !== true);
-
-    // 诊断：检查是否有 withdrawn 的 Application 出现在结果中
-    const withdrawnApps = appList.filter(a => a.status === 'withdrawn');
-    console.log('[loadData] 查询结果:', appList.length, '条, 其中withdrawn:', withdrawnApps.length, '条',
-      withdrawnApps.length > 0 ? withdrawnApps.map(a => ({ _id: a._id, candidateId: a.candidateId, status: a.status })) : '');
 
     if (filters.dateTo) {
       const toDate = new Date(filters.dateTo);
@@ -350,9 +344,7 @@ async function deleteCandidate(row) {
   try {
     // row._id 是 Application ID，row.candidateId 才是 Candidate ID
     const candidateId = row.candidateId || row._id;
-    console.log('[deleteCandidate] row详情:', JSON.stringify({ _id: row._id, candidateId: row.candidateId, appId: row.appId, name, isAdmin }));
     const result = await candidateStore.softDelete(candidateId, { skipApproval: isAdmin });
-    console.log('[deleteCandidate] softDelete 结果:', result);
     if (result?.pending) {
       toast.success('已提交删除审批，请等待管理员审核');
     } else {
@@ -362,7 +354,6 @@ async function deleteCandidate(row) {
       toast.success('简历已删除');
     }
   } catch (err) {
-    console.error('[deleteCandidate] 删除失败:', err);
     toast.error(`删除失败：${safeErrorMsg(err)}`);
   }
 }

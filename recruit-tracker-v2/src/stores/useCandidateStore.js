@@ -212,8 +212,6 @@ export const useCandidateStore = defineStore('candidate', () => {
     const db = cloudbase.db();
     if (!db) throw new Error('数据库未初始化');
 
-    console.log('[softDelete] 开始, id:', id, 'skipApproval:', skipApproval);
-
     // 先从本地缓存查找，找不到再从数据库查
     let current = candidates.value.find(c => c._id === id)
       || (currentCandidate.value?._id === id ? currentCandidate.value : null);
@@ -222,12 +220,7 @@ export const useCandidateStore = defineStore('candidate', () => {
       try {
         const { data } = await db.collection('Candidate').doc(id).get();
         current = data?.[0] || null;
-        console.log('[softDelete] 从DB查到Candidate:', current ? current._id : '未找到');
-      } catch (e) {
-        console.warn('[softDelete] DB查询Candidate失败:', e.message);
-      }
-    } else {
-      console.log('[softDelete] 从本地缓存找到Candidate:', current._id);
+      } catch { /* DB 查询失败也继续 */ }
     }
 
     const auth = useAuthStore();
@@ -264,37 +257,23 @@ export const useCandidateStore = defineStore('candidate', () => {
       updatedAt: new Date(),
     };
 
-    console.log('[softDelete] 更新Candidate:', id, updateData);
     await db.collection('Candidate').doc(id).update(updateData);
-    console.log('[softDelete] Candidate更新成功');
 
     // 同时将关联的 Application 标记为 withdrawn，否则列表刷新后候选人会重新出现
-    // 不限制 status，确保所有关联 Application 都被处理
     try {
       const { data: apps } = await db.collection('Application')
         .where({ candidateId: id })
         .limit(100)
         .get();
-      console.log('[softDelete] 找到关联Application:', apps?.length || 0, '条', apps?.map(a => ({ _id: a._id, status: a.status })));
       if (apps && apps.length > 0) {
-        const batchUpdate = apps.map(app =>
-          db.collection('Application').doc(app._id).update({
-            status: 'withdrawn',
-            updatedAt: new Date(),
-          })
+        await Promise.allSettled(
+          apps.map(app =>
+            db.collection('Application').doc(app._id).update({
+              status: 'withdrawn',
+              updatedAt: new Date(),
+            })
+          )
         );
-        await Promise.allSettled(batchUpdate);
-        console.log('[softDelete] Application批量更新完成');
-
-        // 验证：回读确认更新生效
-        for (const app of apps) {
-          try {
-            const { data: check } = await db.collection('Application').doc(app._id).get();
-            console.log('[softDelete] 回读验证 Application:', app._id, 'status:', check?.[0]?.status);
-          } catch (e) {
-            console.warn('[softDelete] 回读验证失败:', app._id, e.message);
-          }
-        }
       }
     } catch (e) {
       console.warn('[useCandidateStore] 关联Application更新失败:', e.message);
@@ -323,18 +302,15 @@ export const useCandidateStore = defineStore('candidate', () => {
       const of = ownerFilter();
       if (of) conditions.ownerId = of.ownerId;
 
-      console.log('[fetchDeleted] 查询条件:', conditions);
       const { data } = await db.collection('Candidate')
         .where(conditions)
         .orderBy('deletedAt', 'desc')
         .limit(200)
         .get();
-      console.log('[fetchDeleted] 找到已删除候选人:', data?.length || 0, '条');
       candidates.value = data || [];
       return data || [];
     } catch (err) {
       error.value = err.message;
-      console.error('[fetchDeleted] 查询失败:', err.message);
       return [];
     } finally {
       loading.value = false;
