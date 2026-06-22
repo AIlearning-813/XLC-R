@@ -346,7 +346,9 @@ async function deleteCandidate(row) {
   try {
     // row._id 是 Application ID，row.candidateId 才是 Candidate ID
     const candidateId = row.candidateId || row._id;
+    console.log('[deleteCandidate] 删除目标:', { candidateId, rowId: row._id, appId: row.appId, name, isAdmin });
     const result = await candidateStore.softDelete(candidateId, { skipApproval: isAdmin });
+    console.log('[deleteCandidate] softDelete 结果:', result);
     if (result?.pending) {
       toast.success('已提交删除审批，请等待管理员审核');
     } else {
@@ -356,6 +358,7 @@ async function deleteCandidate(row) {
       toast.success('简历已删除');
     }
   } catch (err) {
+    console.error('[deleteCandidate] 删除失败:', err);
     toast.error(`删除失败：${safeErrorMsg(err)}`);
   }
 }

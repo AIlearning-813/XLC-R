@@ -211,6 +211,8 @@ export const useCandidateStore = defineStore('candidate', () => {
     const db = cloudbase.db();
     if (!db) throw new Error('数据库未初始化');
 
+    console.log('[softDelete] 开始, id:', id, 'skipApproval:', skipApproval);
+
     // 先从本地缓存查找，找不到再从数据库查
     let current = candidates.value.find(c => c._id === id)
       || (currentCandidate.value?._id === id ? currentCandidate.value : null);
@@ -219,7 +221,12 @@ export const useCandidateStore = defineStore('candidate', () => {
       try {
         const { data } = await db.collection('Candidate').doc(id).get();
         current = data?.[0] || null;
-      } catch { /* DB 查询失败也继续 */ }
+        console.log('[softDelete] 从DB查到Candidate:', current ? current._id : '未找到');
+      } catch (e) {
+        console.warn('[softDelete] DB查询Candidate失败:', e.message);
+      }
+    } else {
+      console.log('[softDelete] 从本地缓存找到Candidate:', current._id);
     }
 
     const auth = useAuthStore();
@@ -256,7 +263,9 @@ export const useCandidateStore = defineStore('candidate', () => {
       updatedAt: new Date(),
     };
 
+    console.log('[softDelete] 更新Candidate:', id, updateData);
     await db.collection('Candidate').doc(id).update(updateData);
+    console.log('[softDelete] Candidate更新成功');
 
     // 同时将关联的 Application 标记为 withdrawn，否则列表刷新后候选人会重新出现
     try {
@@ -264,6 +273,7 @@ export const useCandidateStore = defineStore('candidate', () => {
         .where({ candidateId: id, status: 'active' })
         .limit(100)
         .get();
+      console.log('[softDelete] 找到活跃Application:', apps?.length || 0, '条');
       if (apps && apps.length > 0) {
         const batchUpdate = apps.map(app =>
           db.collection('Application').doc(app._id).update({
@@ -272,6 +282,7 @@ export const useCandidateStore = defineStore('candidate', () => {
           })
         );
         await Promise.allSettled(batchUpdate);
+        console.log('[softDelete] Application批量更新完成');
       }
     } catch (e) {
       console.warn('[useCandidateStore] 关联Application更新失败:', e.message);
@@ -300,15 +311,18 @@ export const useCandidateStore = defineStore('candidate', () => {
       const of = ownerFilter();
       if (of) conditions.ownerId = of.ownerId;
 
+      console.log('[fetchDeleted] 查询条件:', conditions);
       const { data } = await db.collection('Candidate')
         .where(conditions)
         .orderBy('deletedAt', 'desc')
         .limit(200)
         .get();
+      console.log('[fetchDeleted] 找到已删除候选人:', data?.length || 0, '条');
       candidates.value = data || [];
       return data || [];
     } catch (err) {
       error.value = err.message;
+      console.error('[fetchDeleted] 查询失败:', err.message);
       return [];
     } finally {
       loading.value = false;
