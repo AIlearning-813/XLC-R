@@ -335,7 +335,11 @@ function handleAction({ action, row }) {
 
 async function deleteCandidate(row) {
   const name = row.name || '未命名';
-  if (!confirm(`确定要删除「${name}」的简历吗？\n\n删除后将提交至管理员审批，审批通过后简历将不再出现在任何列表中。`)) return;
+  const isAdmin = auth.isAdmin;
+  const confirmMsg = isAdmin
+    ? `确定要删除「${name}」的简历吗？\n\n管理员删除将立即生效，简历将从列表中移除。`
+    : `确定要删除「${name}」的简历吗？\n\n删除后将提交至管理员审批，审批通过后简历将不再出现在任何列表中。`;
+  if (!confirm(confirmMsg)) return;
 
   try {
     showMsg.value = '';

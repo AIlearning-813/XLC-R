@@ -33,27 +33,39 @@ export const useAuthStore = defineStore('auth', () => {
     return hash.toString(36);
   }
 
-  /** 从 localStorage 恢复登录态（含过期校验和签名校验） */
+  /** 从 localStorage 恢复登录态（含过期校验和签名校验，兼容旧格式） */
   function restoreSession() {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const session = JSON.parse(saved);
-        // 签名校验
-        const expectedSig = signPayload({ u: session.u, r: session.r, n: session.n, e: session.e });
-        if (session.sig !== expectedSig) {
-          localStorage.removeItem(STORAGE_KEY);
-          return false;
-        }
-        // 过期校验
-        if (session.e && Date.now() > session.e) {
-          localStorage.removeItem(STORAGE_KEY);
-          return false;
-        }
+
+        // 新格式（含签名 + 过期）
         if (session.u && session.r) {
+          const expectedSig = signPayload({ u: session.u, r: session.r, n: session.n, e: session.e });
+          if (session.sig !== expectedSig) {
+            localStorage.removeItem(STORAGE_KEY);
+            return false;
+          }
+          if (session.e && Date.now() > session.e) {
+            localStorage.removeItem(STORAGE_KEY);
+            return false;
+          }
           userRole.value = session.r;
           userName.value = session.n || session.u;
           currentUsername.value = session.u;
+          // 自动迁移到新格式（刷新过期时间）
+          saveSession();
+          return true;
+        }
+
+        // 旧格式兼容（无签名、无过期的纯 JSON）
+        if (session.username && session.role) {
+          userRole.value = session.role;
+          userName.value = session.name || session.username;
+          currentUsername.value = session.username;
+          // 自动迁移到新格式
+          saveSession();
           return true;
         }
       }
