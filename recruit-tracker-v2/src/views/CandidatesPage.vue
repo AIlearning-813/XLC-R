@@ -343,7 +343,7 @@ async function deleteCandidate(row) {
 
   try {
     showMsg.value = '';
-    const result = await candidateStore.softDelete(row._id || row.candidateId);
+    const result = await candidateStore.softDelete(row._id || row.candidateId, { skipApproval: isAdmin });
     if (result?.pending) {
       showMsg.value = '已提交删除审批，请等待管理员审核';
     } else {

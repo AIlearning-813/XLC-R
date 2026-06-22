@@ -40,7 +40,7 @@ async function changeStatus(demand, newStatus) {
 async function handleDelete(demand) {
   if (!confirm(`确定删除「${demand.title}」？`)) return;
   try {
-    const r = await store.softDelete(demand._id);
+    const r = await store.softDelete(demand._id, { skipApproval: auth.isAdmin });
     msg.value = r?.pending ? '已提交删除审批' : '已删除';
     load(); setTimeout(() => msg.value = '', 2000);
   } catch (e) { msg.value = safeErrorMsg(e); }

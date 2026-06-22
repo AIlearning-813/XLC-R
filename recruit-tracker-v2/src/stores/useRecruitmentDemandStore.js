@@ -109,11 +109,12 @@ export const useRecruitmentDemandStore = defineStore('recruitmentDemand', () => 
     if (idx !== -1) demands.value[idx].status = status;
   }
 
-  async function softDelete(id) {
+  async function softDelete(id, { skipApproval = false } = {}) {
     const db = cloudbase.db();
     if (!db) throw new Error('数据库未初始化');
     const auth = useAuthStore();
-    if (!auth.isAdmin) {
+    const isAdmin = skipApproval || auth.isAdmin;
+    if (!isAdmin) {
       const { usePendingChangeStore } = await import('./usePendingChangeStore');
       return usePendingChangeStore().submitChange({
         type: 'recruitmentDemand', action: 'delete', entityType: 'recruitmentDemand',

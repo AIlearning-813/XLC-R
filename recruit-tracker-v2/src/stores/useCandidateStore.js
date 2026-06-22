@@ -203,10 +203,10 @@ export const useCandidateStore = defineStore('candidate', () => {
 
   /**
    * 软删除候选人
-   * Admin：直接标记 status:'deleted'
-   * Recruiter：提交 PendingChanges 审批
+   * Admin（skipApproval=true）：直接标记 status:'deleted'
+   * Recruiter（skipApproval=false/未传）：提交 PendingChanges 审批
    */
-  async function softDelete(id) {
+  async function softDelete(id, { skipApproval = false } = {}) {
     const db = cloudbase.db();
     if (!db) throw new Error('数据库未初始化');
 
@@ -215,9 +215,10 @@ export const useCandidateStore = defineStore('candidate', () => {
     if (!current) throw new Error('候选人不存在');
 
     const auth = useAuthStore();
+    const isAdmin = skipApproval || auth.isAdmin;
 
     // Recruiter：走审批流程
-    if (!auth.isAdmin) {
+    if (!isAdmin) {
       const { usePendingChangeStore } = await import('./usePendingChangeStore');
       const pendingStore = usePendingChangeStore();
       const result = await pendingStore.submitChange({
