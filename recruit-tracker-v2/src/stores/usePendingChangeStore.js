@@ -243,13 +243,39 @@ export const usePendingChangeStore = defineStore('pendingChange', () => {
 
         case 'candidate': {
           if (change.action === 'delete' && change.entityId) {
-            // Phase 3：软删除候选人
             await db.collection('Candidate').doc(change.entityId).update({
-              status: 'deleted',
-              deletedBy: change.after?.deletedBy || 'system',
-              deletedAt: new Date(),
-              previousStatus: change.before?.status || 'active',
-              updatedAt: new Date(),
+              status: 'deleted', deletedBy: change.after?.deletedBy || 'system',
+              deletedAt: new Date(), previousStatus: change.before?.status || 'active', updatedAt: new Date(),
+            });
+          }
+          break;
+        }
+
+        case 'recruitmentDemand': {
+          if (change.action === 'create' && change.after) {
+            const doc = { ...change.after, status: 'recruiting', updatedAt: new Date() };
+            if (change.entityId) {
+              await db.collection('RecruitmentDemand').doc(change.entityId).update(doc);
+            } else {
+              const result = await db.collection('RecruitmentDemand').add(doc);
+              change.entityId = result.id;
+            }
+            // Auto-create linked Job
+            try {
+              const jobStore = (await import('./useJobStore')).useJobStore();
+              const jobResult = await jobStore().add({
+                title: doc.title, department: doc.department?.displayName || '',
+                headcount: doc.headcount || 1, requirements: doc.jobRequirements || '',
+                ownerId: doc.ownerId, createdBy: doc.ownerId, status: 'active',
+              });
+              await db.collection('RecruitmentDemand').doc(change.entityId || result?.id).update({ linkedJobId: jobResult._id || jobResult.id });
+            } catch (e) { console.warn('[executeChange] 自动创建Job失败:', e.message); }
+          } else if (change.action === 'update' && change.entityId && change.after) {
+            await db.collection('RecruitmentDemand').doc(change.entityId).update({ ...change.after, updatedAt: new Date() });
+          } else if (change.action === 'delete' && change.entityId) {
+            await db.collection('RecruitmentDemand').doc(change.entityId).update({
+              status: 'deleted', deletedAt: new Date(),
+              deletedBy: change.after?.deletedBy || 'system', updatedAt: new Date(),
             });
           }
           break;

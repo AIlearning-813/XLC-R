@@ -74,6 +74,24 @@ const routes = [
     component: () => import('../views/AdminReviewPage.vue'),
     meta: { title: '变更审核', icon: 'review', requireAdmin: true },
   },
+  {
+    path: '/demands',
+    name: 'RecruitmentDemands',
+    component: () => import('../views/RecruitmentDemandPage.vue'),
+    meta: { title: '招聘需求', icon: 'demand' },
+  },
+  {
+    path: '/demands/new',
+    name: 'NewDemand',
+    component: () => import('../views/RecruitmentDemandFormPage.vue'),
+    meta: { title: '新建需求' },
+  },
+  {
+    path: '/demands/:id',
+    name: 'DemandDetail',
+    component: () => import('../views/RecruitmentDemandDetailPage.vue'),
+    meta: { title: '需求详情' },
+  },
   // 404 兜底
   {
     path: '/:pathMatch(.*)*',
