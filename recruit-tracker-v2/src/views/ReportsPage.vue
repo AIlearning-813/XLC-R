@@ -4,9 +4,9 @@
 import { ref, onMounted, computed, watch, nextTick, reactive } from 'vue';
 import { Chart, BarController, LineController, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend, Filler } from 'chart.js';
 import { getJobFunnel, getDeptMonthly, getDemandMetrics, getRecruiterEfficiency, getConversionRates, getDeptOnboardOverview, getSourceOnboardStats, getDemandVsOnboard } from '../services/funnel-report';
-import cloudbase from '../services/cloudbase';
 import { batchExportCSV } from '../services/batch-operations';
 import { useAuthStore } from '../stores/useAuthStore';
+import { useJobStore } from '../stores/useJobStore';
 import DateRangePicker from '../components/common/DateRangePicker.vue';
 import ConversionRatePanel from '../components/reports/ConversionRatePanel.vue';
 import DeptOnboardOverview from '../components/reports/DeptOnboardOverview.vue';
@@ -16,8 +16,8 @@ import DemandVsOnboardChart from '../components/reports/DemandVsOnboardChart.vue
 // 注册 Chart.js 组件
 Chart.register(BarController, LineController, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend, Filler);
 
-const db = cloudbase.db();
 const auth = useAuthStore();
+const jobStore = useJobStore();
 
 // ===== 状态 =====
 const activeJobs = ref([]);
@@ -59,15 +59,13 @@ const selectedJobLabel = computed(() => {
 // ===== 数据加载 =====
 async function loadJobs() {
   try {
-    const { data } = await db.collection('Job').where({ status: 'active' }).get();
-    activeJobs.value = data || [];
+    activeJobs.value = await jobStore.fetchActive();
   } catch (err) {
     console.warn('[Reports] 岗位列表加载失败:', err.message);
   }
-  // 加载专员列表（Phase 6）
+  // 加载专员列表
   try {
-    const { data } = await db.collection('Users').where({ role: 'recruiter' }).field({ username: true, name: true }).limit(50).get();
-    recruiters.value = data || [];
+    recruiters.value = await auth.fetchUsers();
   } catch (_) {}
 }
 

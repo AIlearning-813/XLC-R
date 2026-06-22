@@ -91,18 +91,21 @@ export async function executeHandover(leavingOwnerId, newOwnerId, options = {}) 
     action: 'owner_transferred',
   };
 
-  for (const app of targetApps) {
-    try {
-      await dbInstance.collection('Application').doc(app._id).update({
+  // 并发更新所有 Application（Promise.all 消除 N+1）
+  const updateResults = await Promise.allSettled(
+    targetApps.map((app) =>
+      dbInstance.collection('Application').doc(app._id).update({
         ownerId: newOwnerId,
         updatedAt: now,
         history: dbInstance.command.push(historyEntry),
-      });
-      transferred++;
-    } catch (err) {
-      errors.push(`${app._id}: ${err.message}`);
-    }
-  }
+      })
+    )
+  );
+
+  transferred = updateResults.filter((r) => r.status === 'fulfilled').length;
+  errors = updateResults
+    .filter((r) => r.status === 'rejected')
+    .map((r, i) => `${targetApps[i]?._id}: ${r.reason?.message}`);
 
   // 3. 停用离职专员的邮箱配置
   try {
@@ -111,11 +114,16 @@ export async function executeHandover(leavingOwnerId, newOwnerId, options = {}) 
       .where({ userId: leavingOwnerId, enabled: true })
       .get();
 
-    for (const config of (configs || [])) {
-      await dbInstance.collection('EmailConfig').doc(config._id).update({
-        enabled: false,
-        updatedAt: now,
-      });
+    // 并发停用邮箱配置
+    if (configs && configs.length > 0) {
+      await Promise.allSettled(
+        configs.map((config) =>
+          dbInstance.collection('EmailConfig').doc(config._id).update({
+            enabled: false,
+            updatedAt: now,
+          })
+        )
+      );
     }
   } catch (err) {
     console.warn('[handover] 停用邮箱配置失败:', err.message);

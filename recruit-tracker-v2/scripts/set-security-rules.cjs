@@ -12,6 +12,8 @@ const rules = [
     rule: {
       read: "auth.uid != null && (doc._openid == auth.uid || get('database.User.' + auth.uid).role == 'admin')",
       write: "get('database.User.' + auth.uid).role == 'admin'",
+      // 注：passwordHash/salt 敏感字段通过 auth-proxy 云函数的 .field() 过滤，
+      // 前端不直接读取 Users 集合，所有用户查询走云函数
     },
   },
   {

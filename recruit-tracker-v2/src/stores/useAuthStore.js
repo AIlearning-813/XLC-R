@@ -19,17 +19,41 @@ export const useAuthStore = defineStore('auth', () => {
 
   // ===== 持久化 key =====
   const STORAGE_KEY = 'xlc_auth_session';
+  const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 小时过期
 
-  /** 从 localStorage 恢复登录态 */
+  /** 简单签名：防止 localStorage 被手动篡改 */
+  function signPayload(data) {
+    const str = JSON.stringify(data) + STORAGE_KEY;
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      const ch = str.charCodeAt(i);
+      hash = ((hash << 5) - hash) + ch;
+      hash |= 0;
+    }
+    return hash.toString(36);
+  }
+
+  /** 从 localStorage 恢复登录态（含过期校验和签名校验） */
   function restoreSession() {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const session = JSON.parse(saved);
-        if (session.username && session.role) {
-          userRole.value = session.role;
-          userName.value = session.name || session.username;
-          currentUsername.value = session.username;
+        // 签名校验
+        const expectedSig = signPayload({ u: session.u, r: session.r, n: session.n, e: session.e });
+        if (session.sig !== expectedSig) {
+          localStorage.removeItem(STORAGE_KEY);
+          return false;
+        }
+        // 过期校验
+        if (session.e && Date.now() > session.e) {
+          localStorage.removeItem(STORAGE_KEY);
+          return false;
+        }
+        if (session.u && session.r) {
+          userRole.value = session.r;
+          userName.value = session.n || session.u;
+          currentUsername.value = session.u;
           return true;
         }
       }
@@ -37,14 +61,17 @@ export const useAuthStore = defineStore('auth', () => {
     return false;
   }
 
-  /** 保存登录态到 localStorage */
+  /** 保存登录态到 localStorage（含过期时间和签名） */
   function saveSession() {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        username: currentUsername.value,
-        role: userRole.value,
-        name: userName.value,
-      }));
+      const payload = {
+        u: currentUsername.value,
+        r: userRole.value,
+        n: userName.value,
+        e: Date.now() + SESSION_TTL_MS,
+      };
+      payload.sig = signPayload(payload);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
     } catch (e) { /* ignore */ }
   }
 

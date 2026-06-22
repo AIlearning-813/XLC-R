@@ -2,7 +2,7 @@
  * auth-proxy — 用户认证与账号管理云函数
  *
  * 职责：
- *   1. login — 验证账号密码，返回角色和名称
+ *   1. login — 验证账号密码，返回角色和名称（含暴力破解防护）
  *   2. listUsers — 管理员列出所有用户
  *   3. addUser — 管理员添加新用户
  *   4. deleteUser — 管理员删除用户
@@ -10,6 +10,7 @@
  *   6. seedDefaultUsers — 初始化默认账号（首次部署时调用）
  *
  * 密码使用 PBKDF2-SHA256 哈希存储，永不存明文
+ * 默认密码通过环境变量 XLC_INIT_PASSWORD 注入，无环境变量时自动生成随机密码
  */
 const cloudbase = require('@cloudbase/node-sdk');
 const crypto = require('crypto');
@@ -22,17 +23,37 @@ const PBKDF2_ITERATIONS = 100000;
 const PBKDF2_KEY_LENGTH = 64;
 const PBKDF2_DIGEST = 'sha256';
 
-// 默认账号列表
+// 暴力破解防护参数
+const MAX_LOGIN_ATTEMPTS = 5;
+const LOCK_DURATION_MS = 15 * 60 * 1000; // 15 分钟
+
+/** 生成指定长度的随机密码 */
+function generateRandomPassword(length = 12) {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+  let password = '';
+  const bytes = crypto.randomBytes(length);
+  for (let i = 0; i < length; i++) {
+    password += chars[bytes[i] % chars.length];
+  }
+  return password;
+}
+
+/** 获取初始密码：环境变量 > 随机生成 */
+function getInitPassword() {
+  return process.env.XLC_INIT_PASSWORD || generateRandomPassword();
+}
+
+// 默认账号列表（密码来自环境变量，部署时设置）
 const DEFAULT_USERS = [
-  { username: 'admin', password: 'xlc2026', role: 'admin', name: '管理员' },
-  { username: '王莉', password: 'xlc2026', role: 'recruiter', name: '王莉' },
-  { username: '卢思颖', password: 'xlc2026', role: 'recruiter', name: '卢思颖' },
-  { username: '刘滢滢', password: 'xlc2026', role: 'recruiter', name: '刘滢滢' },
-  { username: '麦欣瑜', password: 'xlc2026', role: 'recruiter', name: '麦欣瑜' },
-  { username: '章蓓蓓', password: 'xlc2026', role: 'recruiter', name: '章蓓蓓' },
-  { username: '高艺', password: 'xlc2026', role: 'recruiter', name: '高艺' },
-  { username: '杨紫莹', password: 'xlc2026', role: 'recruiter', name: '杨紫莹' },
-  { username: '高艳翠', password: 'xlc2026', role: 'recruiter', name: '高艳翠' },
+  { username: 'admin', role: 'admin', name: '管理员' },
+  { username: '王莉', role: 'recruiter', name: '王莉' },
+  { username: '卢思颖', role: 'recruiter', name: '卢思颖' },
+  { username: '刘滢滢', role: 'recruiter', name: '刘滢滢' },
+  { username: '麦欣瑜', role: 'recruiter', name: '麦欣瑜' },
+  { username: '章蓓蓓', role: 'recruiter', name: '章蓓蓓' },
+  { username: '高艺', role: 'recruiter', name: '高艺' },
+  { username: '杨紫莹', role: 'recruiter', name: '杨紫莹' },
+  { username: '高艳翠', role: 'recruiter', name: '高艳翠' },
 ];
 
 // ===== 密码工具函数 =====
@@ -72,7 +93,7 @@ async function verifyAdmin(callerUsername) {
 
 // ===== 核心操作 =====
 
-/** 登录 */
+/** 登录（含暴力破解防护：5 次失败锁定 15 分钟） */
 async function handleLogin(params) {
   const { username, password } = params;
 
@@ -80,20 +101,66 @@ async function handleLogin(params) {
     return { success: false, error: '请输入账号和密码' };
   }
 
+  const trimmedUsername = username.trim();
+
   try {
     const { data } = await db.collection('Users')
-      .where({ username: username.trim() })
+      .where({ username: trimmedUsername })
       .limit(1)
       .get();
 
     if (!data || data.length === 0) {
-      return { success: false, error: '账号不存在' };
+      // 固定耗时，防止用户名枚举
+      await new Promise((r) => setTimeout(r, 500));
+      return { success: false, error: '账号或密码错误' };
     }
 
     const user = data[0];
 
+    // 检查是否被锁定
+    if (user.lockedUntil && Date.now() < user.lockedUntil) {
+      const remainingMin = Math.ceil((user.lockedUntil - Date.now()) / 60000);
+      return {
+        success: false,
+        error: `账户已被临时锁定，请 ${remainingMin} 分钟后再试`,
+        locked: true,
+        remainingMinutes: remainingMin,
+      };
+    }
+
+    // 验证密码
     if (!verifyPassword(password, user.salt, user.passwordHash)) {
-      return { success: false, error: '密码错误' };
+      const newAttempts = (user.loginAttempts || 0) + 1;
+      const updateData = { loginAttempts: newAttempts };
+
+      // 超过最大尝试次数 → 锁定账户
+      if (newAttempts >= MAX_LOGIN_ATTEMPTS) {
+        updateData.lockedUntil = Date.now() + LOCK_DURATION_MS;
+        console.log(`[auth-proxy] 账户已锁定: ${trimmedUsername}（${newAttempts} 次失败）`);
+      }
+
+      await db.collection('Users').doc(user._id).update(updateData);
+
+      // 人工延迟，增加暴力破解成本
+      await new Promise((r) => setTimeout(r, 500));
+
+      if (newAttempts >= MAX_LOGIN_ATTEMPTS) {
+        return {
+          success: false,
+          error: `密码错误次数过多，账户已锁定 15 分钟`,
+          locked: true,
+        };
+      }
+
+      return { success: false, error: '账号或密码错误' };
+    }
+
+    // 登录成功 → 重置失败计数和锁定状态
+    if (user.loginAttempts > 0 || user.lockedUntil) {
+      await db.collection('Users').doc(user._id).update({
+        loginAttempts: 0,
+        lockedUntil: null,
+      });
     }
 
     console.log(`[auth-proxy] 登录成功: ${user.username} (${user.role})`);
@@ -143,6 +210,10 @@ async function handleAddUser(params) {
 
   if (!username || !password) {
     return { success: false, error: '账号和密码不能为空' };
+  }
+
+  if (password.length < 8) {
+    return { success: false, error: '密码至少 8 位' };
   }
 
   if (!['admin', 'recruiter'].includes(role)) {
@@ -233,6 +304,10 @@ async function handleResetPassword(params) {
     return { success: false, error: '账号和新密码不能为空' };
   }
 
+  if (newPassword.length < 8) {
+    return { success: false, error: '新密码至少 8 位' };
+  }
+
   try {
     const { data } = await db.collection('Users')
       .where({ username })
@@ -265,8 +340,8 @@ async function handleChangePassword(params) {
     return { success: false, error: '账号、旧密码和新密码不能为空' };
   }
 
-  if (newPassword.length < 4) {
-    return { success: false, error: '新密码至少 4 位' };
+  if (newPassword.length < 8) {
+    return { success: false, error: '新密码至少 8 位' };
   }
 
   try {
@@ -326,10 +401,11 @@ async function handleSeedDefaults() {
       return { success: true, message: '账号已存在，跳过初始化', skipped: true };
     }
 
+    const initPassword = getInitPassword();
     const created = [];
     for (const user of DEFAULT_USERS) {
       const salt = generateSalt();
-      const passwordHash = hashPassword(user.password, salt);
+      const passwordHash = hashPassword(initPassword, salt);
 
       await db.collection('Users').add({
         username: user.username,
@@ -339,12 +415,18 @@ async function handleSeedDefaults() {
         name: user.name,
         createdAt: new Date(),
         createdBy: 'system',
+        loginAttempts: 0,
       });
       created.push(user.username);
     }
 
     console.log(`[auth-proxy] 初始化完成，创建了 ${created.length} 个默认账号`);
-    return { success: true, message: `已创建 ${created.length} 个默认账号`, created };
+    return {
+      success: true,
+      message: `已创建 ${created.length} 个默认账号，初始密码为: ${initPassword}（请立即修改）`,
+      created,
+      initPassword, // 仅首次返回，后续不再可见
+    };
   } catch (err) {
     console.error('[auth-proxy] 初始化失败:', err.message);
     return { success: false, error: `初始化失败: ${err.message}` };

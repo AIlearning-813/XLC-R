@@ -4,10 +4,9 @@
 import { ref, onMounted, computed, reactive, watch } from 'vue';
 import { useAuthStore } from '../stores/useAuthStore';
 import { useNotificationStore } from '../stores/useNotificationStore';
-import { getDashboardOverview, getDemandVsOnboard } from '../services/funnel-report';
+import { getDashboardOverview, getDemandVsOnboard, getSystemStatus, getDuplicateCandidates } from '../services/funnel-report';
 import { getDemandTracking, getDemandAlerts } from '../services/demand-report';
 import { ownerFilter } from '../services/data-filter';
-import cloudbase from '../services/cloudbase';
 import NotificationCard from '../components/dashboard/NotificationCard.vue';
 import DateRangePicker from '../components/common/DateRangePicker.vue';
 import PeriodMetricsCards from '../components/dashboard/PeriodMetricsCards.vue';
@@ -16,7 +15,6 @@ import DemandAlertBoard from '../components/dashboard/DemandAlertBoard.vue';
 
 const auth = useAuthStore();
 const notify = useNotificationStore();
-const db = cloudbase.db();
 
 const isAdmin = computed(() => auth.isAdmin);
 
@@ -124,37 +122,14 @@ async function loadOverview() {
 }
 
 async function loadSystemStatus() {
-  // 检查数据库连接
-  try {
-    await db.collection('Job').where({ status: 'active' }).count();
-    systemStatus.value.dbStatus = 'ok';
-  } catch {
-    systemStatus.value.dbStatus = 'error';
-  }
-
-  // 检查邮箱配置
-  try {
-    const { data } = await db.collection('EmailConfig').where({ enabled: true }).get();
-    systemStatus.value.emailConfigCount = data?.length || 0;
-    if (data && data.length > 0) {
-      const lastScans = data.map(d => d.lastScanAt).filter(Boolean).sort();
-      systemStatus.value.lastScanTime = lastScans.length > 0 ? lastScans[lastScans.length - 1] : null;
-    }
-  } catch {
-    // EmailConfig 集合可能尚未创建
-    systemStatus.value.emailConfigCount = 0;
-  }
+  const status = await getSystemStatus();
+  systemStatus.value = status;
 }
 
 async function loadDuplicates() {
   duplicateLoading.value = true;
   try {
-    // 查手机号重复的候选人
-    const { data: candidates } = await db.collection('Candidate')
-      .where({ phone: cloudbase.db().command.neq(null) })
-      .field({ phone: true, name: true, _id: true })
-      .limit(200)
-      .get();
+    const candidates = await getDuplicateCandidates();
 
     if (!candidates || candidates.length < 2) {
       duplicateGroups.value = [];

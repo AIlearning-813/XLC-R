@@ -5,7 +5,7 @@
 const cloudbase = require('@cloudbase/node-sdk');
 
 exports.main = async (event, context) => {
-  const app = cloudbase.init({ env: process.env.ENV_ID });
+  const app = cloudbase.init({ env: cloudbase.SYMBOL_CURRENT_ENV });
   const db = app.database();
 
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);

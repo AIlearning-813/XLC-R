@@ -109,6 +109,57 @@ export async function getDemandVsOnboard(params = {}) {
   return callAggregator('demand_vs_onboard', { ...params, ...(of ? { ownerId: of.ownerId } : {}) });
 }
 
+/**
+ * 🆕 获取系统状态（数据库连接 + 邮箱配置）
+ * 替代 DashboardPage 中的直接 DB 查询
+ */
+export async function getSystemStatus() {
+  const db = cloudbase.db();
+  if (!db) return { dbStatus: 'error', emailConfigCount: 0 };
+
+  const result = { dbStatus: 'ok', emailConfigCount: 0, lastScanTime: null };
+
+  try {
+    await db.collection('Job').where({ status: 'active' }).count();
+  } catch {
+    result.dbStatus = 'error';
+  }
+
+  try {
+    const { data } = await db.collection('EmailConfig').where({ enabled: true }).get();
+    result.emailConfigCount = data?.length || 0;
+    if (data && data.length > 0) {
+      const lastScans = data.map(d => d.lastScanAt).filter(Boolean).sort();
+      result.lastScanTime = lastScans.length > 0 ? lastScans[lastScans.length - 1] : null;
+    }
+  } catch {
+    result.emailConfigCount = 0;
+  }
+
+  return result;
+}
+
+/**
+ * 🆕 获取重复候选人（按手机号）
+ * 替代 DashboardPage 中的直接 Candidate 查询
+ */
+export async function getDuplicateCandidates() {
+  const db = cloudbase.db();
+  if (!db) return [];
+
+  try {
+    const { data: candidates } = await db.collection('Candidate')
+      .where({ phone: db.command.neq(null) })
+      .field({ phone: true, name: true, _id: true })
+      .limit(200)
+      .get();
+    return candidates || [];
+  } catch (err) {
+    console.warn('[funnel-report] 重复检测查询失败:', err.message);
+    return [];
+  }
+}
+
 export default {
   getDashboardOverview,
   getJobFunnel,
@@ -121,4 +172,6 @@ export default {
   getDeptOnboardOverview,
   getSourceOnboardStats,
   getDemandVsOnboard,
+  getSystemStatus,
+  getDuplicateCandidates,
 };

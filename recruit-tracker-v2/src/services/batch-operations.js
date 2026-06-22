@@ -148,6 +148,26 @@ export async function batchEndApplications(applications, status, reason, options
   return batchExecute(applications, processOne, onProgress);
 }
 
+// ===== 数据脱敏工具函数 =====
+
+/** 手机号脱敏：138****1234 */
+export function maskPhone(phone) {
+  if (!phone || typeof phone !== 'string') return '';
+  const cleaned = phone.replace(/\D/g, '');
+  if (cleaned.length < 7) return phone;
+  return cleaned.slice(0, 3) + '****' + cleaned.slice(-4);
+}
+
+/** 邮箱脱敏：a***@example.com */
+export function maskEmail(email) {
+  if (!email || typeof email !== 'string') return '';
+  const atIdx = email.indexOf('@');
+  if (atIdx <= 1) return email;
+  const local = email.slice(0, atIdx);
+  const domain = email.slice(atIdx);
+  return local[0] + '***' + domain;
+}
+
 // ===== 3. 导出 Excel =====
 
 export function batchExportExcel(applications, candidatesMap = {}, jobsMap = {}) {
@@ -159,8 +179,8 @@ export function batchExportExcel(applications, candidatesMap = {}, jobsMap = {})
 
     return {
       '姓名': candidate.name || '',
-      '手机': candidate.phone || '',
-      '邮箱': candidate.email || '',
+      '手机': maskPhone(candidate.phone),
+      '邮箱': maskEmail(candidate.email),
       '岗位': job.title || job.name || '',
       '当前阶段': app.stage || '',
       '入职时间': funnel.onboardAt ? new Date(funnel.onboardAt).toLocaleDateString() : '',
@@ -205,8 +225,8 @@ export function batchExportCSV(applications, candidatesMap = {}, jobsMap = {}) {
     const job = jobsMap[app.jobId] || {};
     return {
       '姓名': candidate.name || '',
-      '手机': candidate.phone || '',
-      '邮箱': candidate.email || '',
+      '手机': maskPhone(candidate.phone),
+      '邮箱': maskEmail(candidate.email),
       '岗位': job.title || job.name || '',
       '当前阶段': app.stage || '',
       '状态': app.status === 'active' ? '活跃' : app.status === 'rejected' ? '淘汰' : '放弃',

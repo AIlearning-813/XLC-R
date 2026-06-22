@@ -432,50 +432,64 @@ async function aggregateDeptMonthly(year, month) {
     return { year: y, month: m, jobs: [], computedAt: new Date().toISOString() };
   }
 
-  // P1-6：N+1 查询（每个岗位 4 个 count），在 <50 岗位时性能可接受。
-  // 优化方向：一次查询所有 Application 后内存分组。
-  const jobResults = [];
-  for (const job of allJobs) {
-    const [interviewRes, offerRes, onboardRes, rejectedRes] = await Promise.all([
-      // 进入面试阶段的（本月）
-      db.collection('Application').where({
-        jobId: job._id,
-        isArchived: _.neq(true),
-        stage: _.in(['first_interview', 'first_pass', 'second_interview', 'second_pass', 'final_interview', 'final_pass', 'offer', 'onboard']),
-        'funnel.interview1At': _.and(_.gte(monthStart), _.lte(monthEnd)),
-      }).count(),
-      // Offer 发出的（本月）
-      db.collection('Application').where({
-        jobId: job._id,
-        isArchived: _.neq(true),
-        'funnel.offerAt': _.and(_.gte(monthStart), _.lte(monthEnd)),
-      }).count(),
-      // 入职的（本月）
-      db.collection('Application').where({
-        jobId: job._id,
-        isArchived: _.neq(true),
-        stage: 'onboard',
-        status: 'active',
-        'funnel.onboardAt': _.and(_.gte(monthStart), _.lte(monthEnd)),
-      }).count(),
-      // 淘汰的（本月）
-      db.collection('Application').where({
-        jobId: job._id,
-        isArchived: _.neq(true),
-        status: 'rejected',
-        updatedAt: _.and(_.gte(monthStart), _.lte(monthEnd)),
-      }).count(),
-    ]);
+  // P1-6 修复：一次查询所有 Application 后内存分组，消除 N+1（原 4N 次查询 → 1 次）
+  const monthStartTs = new Date(monthStart).getTime();
+  const monthEndTs = new Date(monthEnd).getTime();
+  const jobIds = allJobs.map(j => j._id);
 
-    jobResults.push({
+  const { data: allApps } = await db.collection('Application')
+    .where({
+      jobId: _.in(jobIds),
+      isArchived: _.neq(true),
+    })
+    .field({ jobId: true, stage: true, status: true, funnel: true, updatedAt: true })
+    .limit(5000)
+    .get();
+
+  // 内存分组统计
+  const jobStats = {};
+  for (const j of allJobs) {
+    jobStats[j._id] = { interview: 0, offer: 0, onboard: 0, rejected: 0 };
+  }
+
+  const interviewStages = ['first_interview', 'first_pass', 'second_interview', 'second_pass', 'final_interview', 'final_pass', 'offer', 'onboard'];
+  for (const app of (allApps || [])) {
+    const s = jobStats[app.jobId];
+    if (!s) continue;
+
+    // 面试阶段（本月进入）
+    if (interviewStages.includes(app.stage) && app.funnel?.interview1At) {
+      const t = new Date(app.funnel.interview1At).getTime();
+      if (t >= monthStartTs && t <= monthEndTs) s.interview++;
+    }
+    // Offer（本月发出）
+    if (app.funnel?.offerAt) {
+      const t = new Date(app.funnel.offerAt).getTime();
+      if (t >= monthStartTs && t <= monthEndTs) s.offer++;
+    }
+    // 入职（本月）
+    if (app.stage === 'onboard' && app.status === 'active' && app.funnel?.onboardAt) {
+      const t = new Date(app.funnel.onboardAt).getTime();
+      if (t >= monthStartTs && t <= monthEndTs) s.onboard++;
+    }
+    // 淘汰（本月）
+    if (app.status === 'rejected' && app.updatedAt) {
+      const t = new Date(app.updatedAt).getTime();
+      if (t >= monthStartTs && t <= monthEndTs) s.rejected++;
+    }
+  }
+
+  const jobResults = allJobs.map(job => {
+    const s = jobStats[job._id] || { interview: 0, offer: 0, onboard: 0, rejected: 0 };
+    return {
       jobId: job._id,
       jobTitle: job.title || job.name || '未知岗位',
-      interviewCount: interviewRes?.total || 0,
-      offerCount: offerRes?.total || 0,
-      onboardCount: onboardRes?.total || 0,
-      rejectedCount: rejectedRes?.total || 0,
-    });
-  }
+      interviewCount: s.interview,
+      offerCount: s.offer,
+      onboardCount: s.onboard,
+      rejectedCount: s.rejected,
+    };
+  });
 
   return {
     year: y,

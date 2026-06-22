@@ -24,7 +24,7 @@ function computeHash(value) {
 // format-router 可能因依赖问题加载失败，用 try-catch 保护
 let extractText = null;
 try {
-  extractText = require('./format-router').route;
+  extractText = require('../common/format-router').route;
   console.log('[parse-queue-processor] ✅ format-router 加载成功');
 } catch (err) {
   console.warn('[parse-queue-processor] ⚠️ format-router 加载失败，将依赖 preExtractedText:', err.message);

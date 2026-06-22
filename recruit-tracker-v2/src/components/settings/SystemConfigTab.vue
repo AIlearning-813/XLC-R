@@ -34,7 +34,7 @@ function showMsg(msg, type = 'success') {
 const users = ref([]);
 const usersLoading = ref(false);
 const showAddUserForm = ref(false);
-const newUser = ref({ username: '', password: 'xlc2026', role: 'recruiter', name: '' });
+const newUser = ref({ username: '', password: '', role: 'recruiter', name: '' });
 const actingUserId = ref(null);
 
 async function loadUsers() {
@@ -59,7 +59,7 @@ async function submitAddUser() {
   try {
     await auth.addUserAccount(username.trim(), password, role, name || username.trim());
     showMsg(`已添加用户「${username.trim()}」`);
-    newUser.value = { username: '', password: 'xlc2026', role: 'recruiter', name: '' };
+    newUser.value = { username: '', password: '', role: 'recruiter', name: '' };
     showAddUserForm.value = false;
     await loadUsers();
   } catch (err) {
@@ -84,7 +84,7 @@ async function handleDeleteUser(username) {
 }
 
 async function handleResetPassword(username) {
-  const newPwd = prompt(`请输入「${username}」的新密码：`, 'xlc2026');
+  const newPwd = prompt(`请输入「${username}」的新密码（至少8位）：`);
   if (!newPwd) return;
   actingUserId.value = username;
   try {
@@ -98,7 +98,7 @@ async function handleResetPassword(username) {
 }
 
 async function handleSeedDefaults() {
-  if (!confirm('将创建默认管理员账号（admin）和 8 个招聘专员账号，密码均为 xlc2026。\n\n仅当系统中没有用户时才会创建。确定继续？')) return;
+  if (!confirm('将创建默认管理员账号（admin）和 8 个招聘专员账号。\n\n系统将自动生成随机初始密码。\n\n仅当系统中没有用户时才会创建。确定继续？')) return;
   try {
     const result = await auth.seedDefaultUsers();
     if (result.skipped) {

@@ -32,8 +32,8 @@ async function handleChangePassword() {
     pwdError.value = '请填写所有字段';
     return;
   }
-  if (newPassword.length < 4) {
-    pwdError.value = '新密码至少 4 位';
+  if (newPassword.length < 8) {
+    pwdError.value = '新密码至少 8 位';
     return;
   }
   if (newPassword !== confirmPassword) {
@@ -176,7 +176,7 @@ function isActive(path) {
         </div>
         <div class="pwd-field">
           <label>新密码</label>
-          <input type="password" v-model="pwdForm.newPassword" placeholder="输入新密码（至少4位）" />
+          <input type="password" v-model="pwdForm.newPassword" placeholder="输入新密码（至少8位）" />
         </div>
         <div class="pwd-field">
           <label>确认新密码</label>

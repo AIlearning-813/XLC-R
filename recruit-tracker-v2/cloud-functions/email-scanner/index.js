@@ -20,7 +20,7 @@ const loadErrors = {};
 
 // crypto（内置 crypto，已验证 OK）
 try {
-  modules.crypto = require('./crypto');
+  modules.crypto = require('../common/crypto');
   console.log('[email-scanner] ✅ crypto 加载成功');
 } catch (e) {
   loadErrors.crypto = e.message;
@@ -29,7 +29,7 @@ try {
 
 // deduplicator（依赖 crypto + db）
 try {
-  modules.deduplicator = require('./deduplicator');
+  modules.deduplicator = require('../common/deduplicator');
   console.log('[email-scanner] ✅ deduplicator 加载成功');
 } catch (e) {
   loadErrors.deduplicator = e.message;
@@ -38,7 +38,7 @@ try {
 
 // format-router（依赖 pdfjs-dist, mammoth, adm-zip, rtf-parser）
 try {
-  modules.formatRouter = require('./format-router');
+  modules.formatRouter = require('../common/format-router');
   console.log('[email-scanner] ✅ format-router 加载成功');
 } catch (e) {
   loadErrors.formatRouter = e.message;
@@ -291,7 +291,7 @@ async function handleDiagnose(event) {
   let recentSenders = [];
   try {
     const { ImapFlow } = require('imapflow');
-    const { decrypt } = require('./crypto');
+    const { decrypt } = require('../common/crypto');
     const plainPassword = decrypt(config.imapPassword);
 
     const client = new ImapFlow({

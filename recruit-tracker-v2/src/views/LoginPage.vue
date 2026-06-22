@@ -63,7 +63,7 @@ async function handleLogin() {
 const initLoading = ref(false);
 const initMsg = ref('');
 async function handleInitSystem() {
-  if (!confirm('将创建 1 个管理员账号（admin）和 8 个招聘专员账号，密码均为 xlc2026。\n\n仅首次初始化时需要，已有账号则跳过。确定继续？')) return;
+  if (!confirm('将创建 1 个管理员账号（admin）和 8 个招聘专员账号。\n\n系统将自动生成随机初始密码，请妥善保存。\n\n仅首次初始化时需要，已有账号则跳过。确定继续？')) return;
   initLoading.value = true;
   initMsg.value = '';
   try {
@@ -73,7 +73,7 @@ async function handleInitSystem() {
     if (result.skipped) {
       initMsg.value = '账号已存在，无需初始化。请使用已有账号登录。';
     } else {
-      initMsg.value = result.message + '。请使用 admin / xlc2026 登录。';
+      initMsg.value = result.message + '。请妥善保存初始密码，登录后请立即修改。';
     }
   } catch (err) {
     initMsg.value = `初始化失败：${err.message}`;

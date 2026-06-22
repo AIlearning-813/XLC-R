@@ -10,7 +10,7 @@
 
 const cloudbase = require('@cloudbase/node-sdk');
 
-const app = cloudbase.init({ env: process.env.ENV_ID || 'xlc-recruit-d1gmbx8gybc8a3565' });
+const app = cloudbase.init({ env: cloudbase.SYMBOL_CURRENT_ENV });
 const db = app.database();
 const _ = db.command;
 

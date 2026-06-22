@@ -73,5 +73,7 @@ echo ""
 
 echo "✅ 一键初始化完成！"
 echo "   登录地址：https://${ENV_ID}.tcloudbaseapp.com"
-echo "   管理员账号：admin / xlc2026"
+echo "   管理员账号：admin"
+echo "   初始密码：请查看 CloudBase 云函数日志（auth-proxy → seedDefaults）"
+echo "   ⚠️  首次登录后请立即修改密码！"
 echo ""
