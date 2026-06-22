@@ -13,12 +13,26 @@ import { DEPARTMENTS, JOB_TYPES } from '../config/constants';
 export const useConfigStore = defineStore('config', () => {
   // ===== 状态 =====
   const departments = ref([...DEPARTMENTS]);
+  const departmentTree = ref([]);  // Phase 4: 四级部门树
   const cities = ref(['广州', '深圳', '北京', '上海', '成都', '杭州', '武汉', '南京']);
   const jobTypes = ref({ ...JOB_TYPES });
   const alertThresholds = ref({});
   const loading = ref(false);
   const error = ref('');
   const loaded = ref(false);
+
+  // 从树生成扁平的部门名列表（用于向后兼容）
+  function flattenTree(nodes) {
+    const names = [];
+    function walk(list) {
+      for (const n of list) {
+        names.push(n.name);
+        if (n.children?.length) walk(n.children);
+      }
+    }
+    walk(nodes);
+    return names;
+  }
 
   // ===== 计算属性 =====
   const departmentOptions = computed(() =>
@@ -73,6 +87,7 @@ export const useConfigStore = defineStore('config', () => {
 
       if (data) {
         if (data.departments?.length) departments.value = data.departments;
+        if (data.departmentTree?.length) departmentTree.value = data.departmentTree;
         if (data.cities?.length) cities.value = data.cities;
         if (data.jobTypes) jobTypes.value = { ...JOB_TYPES, ...data.jobTypes };
         if (data.alertThresholds) {
@@ -111,6 +126,75 @@ export const useConfigStore = defineStore('config', () => {
   async function removeDepartment(name) {
     departments.value = departments.value.filter(d => d !== name);
     await saveToCloudBase();
+  }
+
+  // ===== 树形部门 CRUD（Phase 4） =====
+
+  /** 在树中查找节点 */
+  function findNode(id, nodes = departmentTree.value) {
+    for (const n of nodes) {
+      if (n.id === id) return n;
+      if (n.children?.length) {
+        const found = findNode(id, n.children);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+
+  /** 移除树中节点 */
+  function removeFromTree(id, nodes) {
+    for (let i = 0; i < nodes.length; i++) {
+      if (nodes[i].id === id) { nodes.splice(i, 1); return true; }
+      if (nodes[i].children?.length) {
+        if (removeFromTree(id, nodes[i].children)) return true;
+      }
+    }
+    return false;
+  }
+
+  function addDepartmentNode(parentId, name) {
+    const node = { id: 'dept_' + Date.now(), name, level: 1, children: [] };
+    if (!parentId) {
+      departmentTree.value.push(node);
+    } else {
+      const parent = findNode(parentId);
+      if (parent) {
+        node.level = parent.level + 1;
+        parent.children = parent.children || [];
+        parent.children.push(node);
+      }
+    }
+    departments.value = flattenTree(departmentTree.value);
+    saveToCloudBase();
+  }
+
+  function updateDepartmentNode(id, newName) {
+    const node = findNode(id);
+    if (node) { node.name = newName; departments.value = flattenTree(departmentTree.value); saveToCloudBase(); }
+  }
+
+  function removeDepartmentNode(id) {
+    if (removeFromTree(id, departmentTree.value)) {
+      departments.value = flattenTree(departmentTree.value);
+      saveToCloudBase();
+    }
+  }
+
+  /** 获取节点的完整层级路径 */
+  function getNodePath(id) {
+    function walk(nodes, path) {
+      for (const n of nodes) {
+        const p = [...path, { level: n.level, name: n.name }];
+        if (n.id === id) return p;
+        if (n.children?.length) {
+          const r = walk(n.children, p);
+          if (r) return r;
+        }
+      }
+      return null;
+    }
+    return walk(departmentTree.value, []);
   }
 
   // ===== 城市 CRUD =====
@@ -157,6 +241,7 @@ export const useConfigStore = defineStore('config', () => {
     try {
       const doc = {
         departments: departments.value,
+        departmentTree: departmentTree.value,
         cities: cities.value,
         jobTypes: jobTypes.value,
         alertThresholds: alertThresholds.value,
@@ -183,6 +268,7 @@ export const useConfigStore = defineStore('config', () => {
   return {
     // state
     departments,
+    departmentTree,
     cities,
     jobTypes,
     alertThresholds,
@@ -199,6 +285,10 @@ export const useConfigStore = defineStore('config', () => {
     addDepartment,
     updateDepartment,
     removeDepartment,
+    addDepartmentNode,
+    updateDepartmentNode,
+    removeDepartmentNode,
+    getNodePath,
     addCity,
     removeCity,
     addJobType,

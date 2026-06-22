@@ -10,6 +10,7 @@ import { useConfigStore } from '../../stores/useConfigStore';
 import { useAuthStore } from '../../stores/useAuthStore';
 import { usePendingChangeStore } from '../../stores/usePendingChangeStore';
 import { FUNNEL_STAGES } from '../../config/constants';
+import DepartmentTreeEditor from './DepartmentTreeEditor.vue';
 
 const config = useConfigStore();
 const auth = useAuthStore();
@@ -301,9 +302,15 @@ async function onChangeThreshold(stageKey, days) {
       </div>
     </transition>
 
-    <!-- 部门管理 -->
+    <!-- 部门管理（四级树形） -->
     <section class="config-section">
-      <h3 class="section-title">部门管理</h3>
+      <h3 class="section-title">部门管理（四级架构）</h3>
+      <DepartmentTreeEditor />
+      <p class="section-hint">来源于员工名册：12个一级部门 / 30个二级部门 / 25个三级部门 / 54个校区</p>
+    </section>
+    <!-- 扁平部门（兼容旧版，隐藏保留） -->
+    <section class="config-section" style="display:none">
+      <h3 class="section-title">部门管理（旧）</h3>
       <div class="chip-group">
         <span v-for="dept in config.departments" :key="dept" class="chip">
           <template v-if="editingDept === dept">
@@ -314,10 +321,6 @@ async function onChangeThreshold(stageKey, days) {
             <button class="chip-edit" @click="startEditDept(dept)" title="编辑">✎</button>
             <button class="chip-remove" @click="removeDept(dept)" title="删除">×</button>
           </template>
-        </span>
-        <span class="chip chip-add">
-          <input v-model="newDept" class="chip-input" placeholder="新部门" @keyup.enter="submitAddDept" size="10" />
-          <button class="chip-confirm" @click="submitAddDept">+</button>
         </span>
       </div>
     </section>
