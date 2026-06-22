@@ -1,9 +1,11 @@
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { useRecruitmentDemandStore } from '../stores/useRecruitmentDemandStore';
 import { useAuthStore } from '../stores/useAuthStore';
 import { safeErrorMsg } from '../services/error-messages';
+import { getDemandTracking } from '../services/demand-report';
+import DemandTrackingBoard from '../components/demand/DemandTrackingBoard.vue';
 
 const router = useRouter();
 const store = useRecruitmentDemandStore();
@@ -11,9 +13,25 @@ const auth = useAuthStore();
 
 const filterStatus = ref('');
 const msg = ref('');
+const viewMode = ref('list'); // 'list' | 'board'
+const trackingData = ref(null);
+const trackingLoading = ref(false);
 
 onMounted(() => { load(); });
 async function load() { await store.fetchAll(filterStatus.value || null); }
+
+async function loadTracking() {
+  trackingLoading.value = true;
+  try {
+    trackingData.value = await getDemandTracking();
+  } catch (e) { console.warn('[DemandPage] 跟踪数据加载失败:', e.message); }
+  finally { trackingLoading.value = false; }
+}
+
+function toggleView(mode) {
+  viewMode.value = mode;
+  if (mode === 'board' && !trackingData.value) loadTracking();
+}
 
 async function changeStatus(demand, newStatus) {
   try { await store.updateStatus(demand._id, newStatus); msg.value = '已更新'; setTimeout(() => msg.value = '', 2000); }
@@ -33,9 +51,25 @@ async function handleDelete(demand) {
   <div class="page">
     <div class="page-header">
       <h2>招聘需求</h2>
-      <button class="btn btn-primary" @click="router.push('/demands/new')">+ 新建需求</button>
+      <div class="header-right">
+        <div class="view-toggle">
+          <button class="toggle-btn" :class="{ active: viewMode === 'list' }" @click="toggleView('list')">列表</button>
+          <button class="toggle-btn" :class="{ active: viewMode === 'board' }" @click="toggleView('board')">看板</button>
+        </div>
+        <button class="btn btn-primary" @click="router.push('/demands/new')">+ 新建需求</button>
+      </div>
     </div>
     <div v-if="msg" class="toast-bar">{{ msg }}</div>
+
+    <!-- 看板视图 -->
+    <template v-if="viewMode === 'board'">
+      <div v-if="trackingLoading" class="loading">加载中...</div>
+      <DemandTrackingBoard v-else-if="trackingData" :demands="trackingData.demands" />
+      <div v-else class="empty">暂无跟踪数据</div>
+    </template>
+
+    <!-- 列表视图 -->
+    <template v-else>
     <div class="filter-bar">
       <select v-model="filterStatus" @change="load" class="filter-select">
         <option value="">全部状态</option>
@@ -69,6 +103,7 @@ async function handleDelete(demand) {
         </tr>
       </tbody>
     </table>
+    </template>
   </div>
 </template>
 
@@ -76,6 +111,10 @@ async function handleDelete(demand) {
 .page { padding: var(--spacing-lg); max-width: 1200px; }
 .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--spacing-md); }
 .page-header h2 { margin: 0; font-size: var(--font-size-xl); }
+.header-right { display: flex; align-items: center; gap: var(--spacing-md); }
+.view-toggle { display: flex; border: 1px solid var(--gray-200); border-radius: var(--radius-sm); overflow: hidden; }
+.toggle-btn { padding: 5px 14px; border: none; background: #fff; font-size: var(--font-size-xs); color: var(--gray-500); cursor: pointer; font-family: inherit; }
+.toggle-btn.active { background: var(--primary); color: #fff; }
 .filter-bar { margin-bottom: var(--spacing-md); }
 .filter-select { padding: 6px 12px; border: 1px solid var(--gray-200); border-radius: var(--radius-sm); font-family: inherit; font-size: var(--font-size-sm); }
 .table { width: 100%; border-collapse: collapse; font-size: var(--font-size-sm); }

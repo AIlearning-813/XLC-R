@@ -15,6 +15,7 @@ export const useConfigStore = defineStore('config', () => {
   const departments = ref([...DEPARTMENTS]);
   const departmentTree = ref([]);  // Phase 4: 四级部门树
   const cities = ref(['广州', '深圳', '北京', '上海', '成都', '杭州', '武汉', '南京']);
+  const recruitmentSources = ref(['BOSS直聘', '内部推荐', '返岗', '其他']);
   const jobTypes = ref({ ...JOB_TYPES });
   const alertThresholds = ref({});
   const loading = ref(false);
@@ -41,6 +42,10 @@ export const useConfigStore = defineStore('config', () => {
 
   const cityOptions = computed(() =>
     cities.value.map(c => ({ value: c, label: c }))
+  );
+
+  const sourceOptions = computed(() =>
+    recruitmentSources.value.map(s => ({ value: s, label: s }))
   );
 
   const jobTypeOptions = computed(() =>
@@ -93,6 +98,7 @@ export const useConfigStore = defineStore('config', () => {
         if (data.departments?.length) departments.value = data.departments;
         if (data.departmentTree?.length) departmentTree.value = data.departmentTree;
         if (data.cities?.length) cities.value = data.cities;
+        if (data.recruitmentSources?.length) recruitmentSources.value = data.recruitmentSources;
         if (data.jobTypes) jobTypes.value = { ...JOB_TYPES, ...data.jobTypes };
         if (data.alertThresholds) {
           alertThresholds.value = { ...defaultThresholds, ...data.alertThresholds };
@@ -213,6 +219,25 @@ export const useConfigStore = defineStore('config', () => {
     await saveToCloudBase();
   }
 
+  // ===== 渠道来源 CRUD =====
+  async function addSource(name) {
+    if (!name || recruitmentSources.value.includes(name)) return;
+    recruitmentSources.value.push(name);
+    await saveToCloudBase();
+  }
+
+  async function updateSource(oldName, newName) {
+    const idx = recruitmentSources.value.indexOf(oldName);
+    if (idx === -1 || !newName || recruitmentSources.value.includes(newName)) return;
+    recruitmentSources.value[idx] = newName;
+    await saveToCloudBase();
+  }
+
+  async function removeSource(name) {
+    recruitmentSources.value = recruitmentSources.value.filter(s => s !== name);
+    await saveToCloudBase();
+  }
+
   // ===== 岗位类型 CRUD =====
   async function addJobType(key, config) {
     if (!key || jobTypes.value[key]) return;
@@ -247,6 +272,7 @@ export const useConfigStore = defineStore('config', () => {
         departments: departments.value,
         departmentTree: departmentTree.value,
         cities: cities.value,
+        recruitmentSources: recruitmentSources.value,
         jobTypes: jobTypes.value,
         alertThresholds: alertThresholds.value,
         updatedAt: new Date(),
@@ -274,6 +300,7 @@ export const useConfigStore = defineStore('config', () => {
     departments,
     departmentTree,
     cities,
+    recruitmentSources,
     jobTypes,
     alertThresholds,
     loading,
@@ -282,6 +309,7 @@ export const useConfigStore = defineStore('config', () => {
     // computed
     departmentOptions,
     cityOptions,
+    sourceOptions,
     jobTypeOptions,
     defaultThresholds,
     // actions
@@ -295,6 +323,9 @@ export const useConfigStore = defineStore('config', () => {
     getNodePath,
     addCity,
     removeCity,
+    addSource,
+    updateSource,
+    removeSource,
     addJobType,
     updateJobType,
     removeJobType,

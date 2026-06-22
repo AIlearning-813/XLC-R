@@ -4,6 +4,7 @@
 import { ref, reactive, computed, onMounted } from 'vue';
 import cloudbase from '../../services/cloudbase';
 import { RESUME_SOURCES, JOB_TYPES, DEPARTMENTS } from '../../config/constants';
+import { useConfigStore } from '../../stores/useConfigStore';
 
 const db = cloudbase.db();
 
@@ -22,7 +23,9 @@ const emit = defineEmits([
 const selectedJobId = ref('');
 const jobs = ref([]);
 const jobsLoading = ref(true);
+const configStore = useConfigStore();
 const source = ref('manual');
+const recruitmentSource = ref('');
 const notes = ref('');
 const duplicateAcknowledged = ref(false);
 
@@ -95,6 +98,7 @@ function handleSubmit() {
       phone: basicInfo.phone.trim(),
       email: basicInfo.email.trim(),
       source: source.value,
+      recruitmentSource: recruitmentSource.value,
       notes: notes.value.trim(),
       parsedData: mergedData,
     },
@@ -189,6 +193,13 @@ function handleSubmit() {
             <option value="manual">手动上传</option>
             <option value="email">邮箱收取</option>
             <option value="import">批量导入</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">招聘渠道</label>
+          <select v-model="recruitmentSource" class="form-select" :disabled="submitting">
+            <option value="">请选择</option>
+            <option v-for="s in configStore.recruitmentSources" :key="s" :value="s">{{ s }}</option>
           </select>
         </div>
       </div>

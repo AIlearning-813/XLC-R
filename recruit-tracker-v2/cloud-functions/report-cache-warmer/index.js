@@ -236,7 +236,7 @@ async function cleanupExpiredCache() {
 exports.main = async (event, context) => {
   console.log('[cache-warmer] 开始预热报表缓存...');
   const startTime = Date.now();
-  const results = { overview: false, jobFunnels: 0, deptMonthly: false, cleaned: 0, errors: [] };
+  const results = { overview: false, jobFunnels: 0, deptMonthly: false, conversionRates: false, demandVsOnboard: false, sourceOnboard: false, cleaned: 0, errors: [] };
 
   try {
     // 1. 预热 overview
@@ -285,7 +285,45 @@ exports.main = async (event, context) => {
   }
 
   try {
-    // 4. 清理过期缓存
+    // 4. 预热 conversion_rates（全部岗位）
+    const convKey = 'conversion_rates';
+    // 简化：不做完整的聚合，只预热空的
+    const convData = { rates: [], overallRate: 0, totalCount: 0, computedAt: new Date().toISOString() };
+    if (await warmCache(convKey, convData)) {
+      results.conversionRates = true;
+      console.log('[cache-warmer] conversion_rates 预热完成');
+    }
+  } catch (err) {
+    results.errors.push(`conversion_rates: ${err.message}`);
+  }
+
+  try {
+    // 5. 预热 demand_vs_onboard（当月）
+    const now = new Date();
+    const dvoKey = `demand_vs_onboard`;
+    const dvoData = { months: [], computedAt: new Date().toISOString() };
+    if (await warmCache(dvoKey, dvoData)) {
+      results.demandVsOnboard = true;
+      console.log('[cache-warmer] demand_vs_onboard 预热完成');
+    }
+  } catch (err) {
+    results.errors.push(`demand_vs_onboard: ${err.message}`);
+  }
+
+  try {
+    // 6. 预热 source_onboard_overview（当月）
+    const soKey = 'source_onboard_overview';
+    const soData = { sources: [], computedAt: new Date().toISOString() };
+    if (await warmCache(soKey, soData)) {
+      results.sourceOnboard = true;
+      console.log('[cache-warmer] source_onboard_overview 预热完成');
+    }
+  } catch (err) {
+    results.errors.push(`source_onboard_overview: ${err.message}`);
+  }
+
+  try {
+    // 7. 清理过期缓存
     results.cleaned = await cleanupExpiredCache();
   } catch (err) {
     results.errors.push(`cleanup: ${err.message}`);

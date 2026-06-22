@@ -1,12 +1,17 @@
 <script setup>
 /* 新励成招聘管理系统 V2.0 — 数据分析 */
 
-import { ref, onMounted, computed, watch, nextTick } from 'vue';
+import { ref, onMounted, computed, watch, nextTick, reactive } from 'vue';
 import { Chart, BarController, LineController, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend, Filler } from 'chart.js';
-import { getJobFunnel, getTrend, getDeptMonthly, getDemandMetrics, getRecruiterEfficiency } from '../services/funnel-report';
+import { getJobFunnel, getDeptMonthly, getDemandMetrics, getRecruiterEfficiency, getConversionRates, getDeptOnboardOverview, getSourceOnboardStats, getDemandVsOnboard } from '../services/funnel-report';
 import cloudbase from '../services/cloudbase';
 import { batchExportCSV } from '../services/batch-operations';
 import { useAuthStore } from '../stores/useAuthStore';
+import DateRangePicker from '../components/common/DateRangePicker.vue';
+import ConversionRatePanel from '../components/reports/ConversionRatePanel.vue';
+import DeptOnboardOverview from '../components/reports/DeptOnboardOverview.vue';
+import SourceOnboardBoard from '../components/reports/SourceOnboardBoard.vue';
+import DemandVsOnboardChart from '../components/reports/DemandVsOnboardChart.vue';
 
 // 注册 Chart.js 组件
 Chart.register(BarController, LineController, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend, Filler);
@@ -21,19 +26,28 @@ const selectedJobType = ref('');
 const filterOwnerId = ref('');
 
 const funnelData = ref(null);
-const trendData = ref(null);
 const deptData = ref(null);
 const demandData = ref(null);
 const efficiencyData = ref(null);
+const conversionRates = ref(null);
+const deptOnboardData = ref(null);
+const sourceStats = ref(null);
+const demandVsOnboardData = ref(null);
+const selectedDept = ref('');
 const loading = ref(false);
 const error = ref('');
 const recruiters = ref([]);
 
+// 时间段
+const dateRange = reactive({ start: new Date(), end: new Date() });
+const now2 = new Date();
+dateRange.start = new Date(now2.getFullYear(), now2.getMonth(), 1);
+dateRange.end = now2;
+function fmtDate(d) { return d instanceof Date ? d.toISOString().slice(0, 10) : ''; }
+
 // Chart 实例引用
 const funnelCanvas = ref(null);
-const trendCanvas = ref(null);
 let funnelChart = null;
-let trendChart = null;
 
 // ===== 计算属性 =====
 const selectedJobLabel = computed(() => {
@@ -63,26 +77,32 @@ async function loadAllData() {
 
   try {
     const filters = filterOwnerId.value ? { ownerId: filterOwnerId.value } : {};
-    const [funnel, trend, dept, demand, efficiency] = await Promise.all([
+    const timeParams = { startDate: fmtDate(dateRange.start), endDate: fmtDate(dateRange.end), ...filters };
+
+    const [funnel, dept, demand, efficiency, conv, deptOnboard, srcStats, dvo] = await Promise.all([
       getJobFunnel(selectedJobId.value || undefined, selectedJobType.value || undefined),
-      getTrend(6, selectedJobId.value || undefined),
       getDeptMonthly(new Date().getFullYear(), new Date().getMonth() + 1),
       getDemandMetrics(filters),
       getRecruiterEfficiency(filters),
+      getConversionRates(selectedJobId.value || undefined, timeParams),
+      getDeptOnboardOverview({ year: new Date().getFullYear(), month: new Date().getMonth() + 1, ...(selectedDept.value ? { department: selectedDept.value } : {}) }),
+      getSourceOnboardStats(timeParams),
+      getDemandVsOnboard(timeParams),
     ]);
 
     funnelData.value = funnel;
     demandData.value = demand;
     efficiencyData.value = efficiency;
-    trendData.value = trend;
     deptData.value = dept;
+    conversionRates.value = conv;
+    deptOnboardData.value = deptOnboard;
+    sourceStats.value = srcStats;
+    demandVsOnboardData.value = dvo;
     loading.value = false;
 
-    // 渲染图表（必须在 loading=false 之后，否则 canvas 元素尚未挂载）
     await nextTick();
-    await nextTick(); // 双 nextTick 确保 v-else 块中的 canvas 已渲染
+    await nextTick();
     renderFunnelChart();
-    renderTrendChart();
   } catch (err) {
     error.value = err.message || '数据加载失败';
     loading.value = false;
@@ -175,88 +195,6 @@ function renderFunnelChart() {
   });
 }
 
-// ===== 趋势图渲染 =====
-function renderTrendChart() {
-  if (!trendCanvas.value || !trendData.value) return;
-
-  if (trendChart) trendChart.destroy();
-
-  const months = trendData.value.data || [];
-  const monthLabels = months.map(m => m.month);
-
-  trendChart = new Chart(trendCanvas.value, {
-    type: 'line',
-    data: {
-      labels: monthLabels,
-      datasets: [
-        {
-          label: '总申请',
-          data: months.map(m => m.total),
-          borderColor: '#7BA8E0',
-          backgroundColor: 'rgba(123, 168, 224, 0.1)',
-          fill: true,
-          tension: 0.3,
-          pointRadius: 3,
-        },
-        {
-          label: '入职',
-          data: months.map(m => m.onboard),
-          borderColor: '#3DAF6E',
-          backgroundColor: 'rgba(61, 175, 110, 0.1)',
-          fill: true,
-          tension: 0.3,
-          pointRadius: 3,
-        },
-        {
-          label: 'Offer',
-          data: months.map(m => m.offerCount),
-          borderColor: '#F0B828',
-          backgroundColor: 'rgba(240, 184, 40, 0.08)',
-          fill: true,
-          tension: 0.3,
-          pointRadius: 2,
-          borderDash: [4, 2],
-        },
-        {
-          label: '淘汰',
-          data: months.map(m => m.rejected),
-          borderColor: '#EE5A5A',
-          borderDash: [4, 2],
-          tension: 0.3,
-          pointRadius: 2,
-        },
-      ],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      interaction: {
-        intersect: false,
-        mode: 'index',
-      },
-      plugins: {
-        title: {
-          display: true,
-          text: `${selectedJobLabel.value} — 月度趋势`,
-          font: { size: 14, weight: '600' },
-          color: '#4A4A4A',
-        },
-        legend: {
-          position: 'bottom',
-          labels: { boxWidth: 12, padding: 16, font: { size: 11 } },
-        },
-      },
-      scales: {
-        y: {
-          title: { display: true, text: '人数', color: '#999' },
-          ticks: { stepSize: 1 },
-          beginAtZero: true,
-        },
-      },
-    },
-  });
-}
-
 // ===== 导出 =====
 async function handleExportCSV() {
   if (!funnelData.value) return;
@@ -292,8 +230,12 @@ async function handleExportCSV() {
   URL.revokeObjectURL(url);
 }
 
-// ===== 监听岗位切换 =====
-watch(selectedJobId, () => {
+// ===== 监听筛选变化 =====
+watch([selectedJobId, dateRange], () => {
+  loadAllData();
+}, { deep: true });
+
+watch(selectedDept, () => {
   loadAllData();
 });
 
@@ -311,6 +253,8 @@ onMounted(async () => {
         <p class="page-desc">漏斗转化率、趋势图、报表导出</p>
       </div>
       <div class="header-actions">
+        <!-- 时间段 -->
+        <DateRangePicker v-model="dateRange" />
         <!-- 岗位筛选 -->
         <select v-model="selectedJobId" class="select-sm">
           <option value="">全部岗位</option>
@@ -367,11 +311,35 @@ onMounted(async () => {
           <canvas ref="funnelCanvas" height="300"></canvas>
         </div>
 
-        <!-- 趋势图 -->
-        <div class="card chart-card">
-          <canvas ref="trendCanvas" height="280"></canvas>
-        </div>
       </div>
+
+      <!-- Phase E: 转化率面板 -->
+      <ConversionRatePanel
+        v-if="conversionRates"
+        :rates="conversionRates.rates"
+        :overall-rate="conversionRates.overallRate"
+        style="margin-top: var(--spacing-lg);"
+      />
+
+      <!-- Phase E: 渠道入职看板 -->
+      <SourceOnboardBoard
+        v-if="sourceStats?.sources?.length"
+        :source-data="sourceStats.sources"
+      />
+
+      <!-- Phase E: 部门入职概览 -->
+      <DeptOnboardOverview
+        v-if="deptOnboardData"
+        v-model="selectedDept"
+        :dept-data="deptOnboardData"
+        :departments="deptOnboardData.departments"
+      />
+
+      <!-- Phase E: 月度需求vs入职 -->
+      <DemandVsOnboardChart
+        v-if="demandVsOnboardData?.months?.length"
+        :data="demandVsOnboardData"
+      />
 
       <!-- 月度部门报表 -->
       <div v-if="deptData?.jobs?.length > 0" class="section-header" style="margin-top: var(--spacing-2xl);">
@@ -514,7 +482,7 @@ onMounted(async () => {
 /* === 图表 === */
 .charts-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: var(--spacing-lg);
 }
 

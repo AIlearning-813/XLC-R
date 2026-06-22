@@ -225,6 +225,75 @@ async function removeCity(name) {
   }
 }
 
+// ===== 渠道来源管理 =====
+const newSource = ref('');
+const editingSource = ref(null);
+const editingSourceName = ref('');
+
+async function submitAddSource() {
+  const name = newSource.value.trim();
+  if (!name) return;
+  if (auth.isAdmin) {
+    config.addSource(name);
+    showMsg(`已添加渠道来源：${name}`);
+  } else {
+    try {
+      await pendingStore.submitChange({
+        type: 'config', action: 'update', entityType: 'recruitmentSource',
+        entityId: 'system', entityLabel: `添加渠道来源: ${name}`,
+        before: { recruitmentSources: config.recruitmentSources },
+        after: { recruitmentSources: [...config.recruitmentSources, name] },
+      });
+      showMsg(`已提交"添加渠道来源：${name}"，待管理员审批`);
+    } catch (e) { showMsg(`提交失败：${e.message}`, 'error'); }
+  }
+  newSource.value = '';
+}
+
+function startEditSource(name) {
+  editingSource.value = name;
+  editingSourceName.value = name;
+}
+
+async function submitEditSource() {
+  const newName = editingSourceName.value.trim();
+  if (!newName || newName === editingSource.value) { editingSource.value = null; return; }
+  if (auth.isAdmin) {
+    config.updateSource(editingSource.value, newName);
+    showMsg(`已修改渠道来源：${editingSource.value} → ${newName}`);
+  } else {
+    try {
+      const updated = config.recruitmentSources.map(s => s === editingSource.value ? newName : s);
+      await pendingStore.submitChange({
+        type: 'config', action: 'update', entityType: 'recruitmentSource',
+        entityId: 'system', entityLabel: `修改渠道来源: ${editingSource.value} → ${newName}`,
+        before: { recruitmentSources: config.recruitmentSources },
+        after: { recruitmentSources: updated },
+      });
+      showMsg(`已提交"修改渠道来源"，待管理员审批`);
+    } catch (e) { showMsg(`提交失败：${e.message}`, 'error'); }
+  }
+  editingSource.value = null;
+}
+
+async function removeSource(name) {
+  if (!confirm(`确定删除渠道来源「${name}」？\n\n注意：已有候选人填写的该渠道来源不受影响。`)) return;
+  if (auth.isAdmin) {
+    config.removeSource(name);
+    showMsg(`已删除渠道来源：${name}`);
+  } else {
+    try {
+      await pendingStore.submitChange({
+        type: 'config', action: 'update', entityType: 'recruitmentSource',
+        entityId: 'system', entityLabel: `删除渠道来源: ${name}`,
+        before: { recruitmentSources: config.recruitmentSources },
+        after: { recruitmentSources: config.recruitmentSources.filter(s => s !== name) },
+      });
+      showMsg(`已提交"删除渠道来源：${name}"，待管理员审批`);
+    } catch (e) { showMsg(`提交失败：${e.message}`, 'error'); }
+  }
+}
+
 // ===== 岗位类型管理 =====
 const newJobType = ref({ key: '', label: '', interviewRounds: 3, responsibilities: '', requirements: '' });
 const showJobTypeForm = ref(false);
@@ -377,6 +446,28 @@ async function onChangeThreshold(stageKey, days) {
         <span class="chip chip-add">
           <input v-model="newCity" class="chip-input" placeholder="新城市" @keyup.enter="submitAddCity" size="8" />
           <button class="chip-confirm" @click="submitAddCity">+</button>
+        </span>
+      </div>
+    </section>
+
+    <!-- 渠道来源管理 -->
+    <section class="config-section">
+      <h3 class="section-title">渠道来源</h3>
+      <p class="section-desc">招聘简历的来源渠道，新建简历录入时供专员选择</p>
+      <div class="chip-group">
+        <span v-for="source in config.recruitmentSources" :key="source" class="chip">
+          <template v-if="editingSource === source">
+            <input v-model="editingSourceName" class="chip-input" @keyup.enter="submitEditSource" @blur="submitEditSource" size="10" />
+          </template>
+          <template v-else>
+            {{ source }}
+            <button class="chip-edit" @click="startEditSource(source)" title="编辑">✎</button>
+            <button class="chip-remove" @click="removeSource(source)" title="删除">×</button>
+          </template>
+        </span>
+        <span class="chip chip-add">
+          <input v-model="newSource" class="chip-input" placeholder="新渠道" @keyup.enter="submitAddSource" size="10" />
+          <button class="chip-confirm" @click="submitAddSource">+</button>
         </span>
       </div>
     </section>

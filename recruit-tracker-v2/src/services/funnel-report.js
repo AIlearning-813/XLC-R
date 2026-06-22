@@ -8,6 +8,7 @@
  */
 
 import cloudbase from './cloudbase';
+import { ownerFilter } from './data-filter';
 
 const FUNCTION_NAME = 'report-aggregator';
 
@@ -35,8 +36,9 @@ async function callAggregator(type, params = {}) {
  * 获取 Dashboard 概览数据
  * 返回：活跃候选人、本月入职、待跟进、待解析、活跃岗位数、近30天入职
  */
-export async function getDashboardOverview() {
-  return callAggregator('overview');
+export async function getDashboardOverview(params = {}) {
+  const of = ownerFilter();
+  return callAggregator('overview', { ...params, ...(of ? { ownerId: of.ownerId } : {}) });
 }
 
 /**
@@ -84,6 +86,29 @@ export async function getOverviewWithFilters(filters = {}) {
   return callAggregator('overview', filters);
 }
 
+/** 获取转化率面板数据 */
+export async function getConversionRates(jobId, params = {}) {
+  const of = ownerFilter();
+  return callAggregator('conversion_rates', { jobId, ...params, ...(of ? { ownerId: of.ownerId } : {}) });
+}
+
+/** 获取部门入职概览（支持筛选） */
+export async function getDeptOnboardOverview(params = {}) {
+  return callAggregator('dept_onboard_overview', params);
+}
+
+/** 获取渠道入职看板数据 */
+export async function getSourceOnboardStats(params = {}) {
+  const of = ownerFilter();
+  return callAggregator('source_onboard_overview', { ...params, ...(of ? { ownerId: of.ownerId } : {}) });
+}
+
+/** 获取月度需求 vs 入职达成率 */
+export async function getDemandVsOnboard(params = {}) {
+  const of = ownerFilter();
+  return callAggregator('demand_vs_onboard', { ...params, ...(of ? { ownerId: of.ownerId } : {}) });
+}
+
 export default {
   getDashboardOverview,
   getJobFunnel,
@@ -92,4 +117,8 @@ export default {
   getDemandMetrics,
   getRecruiterEfficiency,
   getOverviewWithFilters,
+  getConversionRates,
+  getDeptOnboardOverview,
+  getSourceOnboardStats,
+  getDemandVsOnboard,
 };

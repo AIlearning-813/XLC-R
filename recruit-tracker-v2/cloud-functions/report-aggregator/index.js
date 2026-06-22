@@ -57,6 +57,11 @@ function cacheKey(type, params) {
   if (params.months) parts.push(`months:${params.months}`);
   if (params.year) parts.push(`y:${params.year}`);
   if (params.month) parts.push(`m:${params.month}`);
+  // Phase A4: 时间范围参数
+  if (params.startDate) parts.push(`start:${params.startDate}`);
+  if (params.endDate) parts.push(`end:${params.endDate}`);
+  if (params.department) parts.push(`dept:${params.department}`);
+  if (params.ownerId) parts.push(`owner:${params.ownerId}`);
   return parts.join(':');
 }
 
@@ -136,23 +141,31 @@ function daysAgo(n) {
 
 /**
  * 1. overview — Dashboard 统计卡片数据
+ * @param {Object} params - { startDate?, endDate?, ownerId? }
+ *   - 不传时间范围默认本月
  */
-async function aggregateOverview() {
-  const { start: monthStart, end: monthEnd } = currentMonthRange();
+async function aggregateOverview(params = {}) {
+  const rangeStart = params.startDate ? new Date(params.startDate) : currentMonthRange().start;
+  const rangeEnd = params.endDate ? new Date(params.endDate) : currentMonthRange().end;
   const staleThreshold = daysAgo(7);
+
+  // ownerId 过滤
+  const ownerFilter = params.ownerId ? { ownerId: params.ownerId } : {};
 
   // 并行查询
   const [activeRes, onboardRes, staleRes, pendingParseRes, jobRes, recentOnboardRes] = await Promise.all([
-    // 活跃候选人（status=active，未结束）
-    db.collection('Application').where({ status: 'active' }).count(),
-    // 本月入职
+    // 活跃候选人（status=active，未结束），按 ownerId 过滤
+    db.collection('Application').where({ status: 'active', ...ownerFilter }).count(),
+    // 周期内入职
     db.collection('Application').where({
+      ...ownerFilter,
       stage: 'onboard',
       status: 'active',
-      stageEnteredAt: _.and(_.gte(monthStart), _.lte(monthEnd)),
+      stageEnteredAt: _.and(_.gte(rangeStart), _.lte(rangeEnd)),
     }).count(),
     // 待跟进（活跃且当前阶段停留 >7 天）
     db.collection('Application').where({
+      ...ownerFilter,
       status: 'active',
       stageEnteredAt: _.lte(staleThreshold),
     }).count(),
@@ -160,11 +173,12 @@ async function aggregateOverview() {
     db.collection('ParseQueue').where({ status: 'pending' }).count(),
     // 活跃岗位数
     db.collection('Job').where({ status: 'active' }).count(),
-    // 近30天入职（用于趋势）
+    // 周期内入职（用于展示，同上）
     db.collection('Application').where({
+      ...ownerFilter,
       stage: 'onboard',
       status: 'active',
-      stageEnteredAt: _.gte(daysAgo(30)),
+      stageEnteredAt: _.gte(rangeStart),
     }).count(),
   ]);
 
@@ -175,6 +189,8 @@ async function aggregateOverview() {
     pendingParseCount: pendingParseRes?.total || 0,
     activeJobCount: jobRes?.total || 0,
     recent30dOnboardCount: recentOnboardRes?.total || 0,
+    rangeStart: rangeStart.toISOString(),
+    rangeEnd: rangeEnd.toISOString(),
     computedAt: new Date().toISOString(),
   };
 }
@@ -546,6 +562,292 @@ async function aggregateRecruiterEfficiency(params = {}) {
   return { recruiters: results, computedAt: new Date().toISOString() };
 }
 
+// ===== Phase A4: 转化率面板 =====
+
+async function aggregateConversionRates(params = {}) {
+  const filter = { isArchived: _.neq(true) };
+  if (params.jobId) filter.jobId = params.jobId;
+  if (params.ownerId) filter.ownerId = params.ownerId;
+
+  if (params.startDate || params.endDate) {
+    const createdFilters = [];
+    if (params.startDate) createdFilters.push(_.gte(new Date(params.startDate)));
+    if (params.endDate) createdFilters.push(_.lte(new Date(params.endDate)));
+    filter.createdAt = createdFilters.length === 1 ? createdFilters[0] : _.and(...createdFilters);
+  }
+
+  const allApps = [];
+  let hasMore = true, cursor = null;
+  while (hasMore) {
+    let query = db.collection('Application').where(filter).orderBy('_id', 'asc').limit(500);
+    if (cursor) query = query.where({ _id: _.gt(cursor) });
+    const { data } = await query.get();
+    if (!data || data.length === 0) { hasMore = false; break; }
+    allApps.push(...data);
+    if (data.length < 500) hasMore = false; else cursor = data[data.length - 1]._id;
+  }
+
+  const stageMap = {};
+  for (const app of allApps) {
+    if (app.status === 'active' && app.stage) {
+      stageMap[app.stage] = (stageMap[app.stage] || 0) + 1;
+    }
+  }
+
+  const ratePairs = [
+    { label: '有效简历率', numerator: 'valid_resume', denominator: 'resume' },
+    { label: '初试通过率', numerator: 'first_pass', denominator: 'first_interview' },
+    { label: '复试通过率', numerator: 'second_pass', denominator: 'second_interview' },
+    { label: '终试通过率', numerator: 'final_pass', denominator: 'final_interview' },
+    { label: 'Offer率', numerator: 'offer', denominator: 'final_pass' },
+    { label: '入职率', numerator: 'onboard', denominator: 'offer' },
+  ];
+
+  const rates = ratePairs.map(r => ({
+    label: r.label,
+    numerator: stageMap[r.numerator] || 0,
+    denominator: stageMap[r.denominator] || 0,
+    rate: stageMap[r.denominator] > 0
+      ? parseFloat(((stageMap[r.numerator] / stageMap[r.denominator]) * 100).toFixed(1))
+      : 0,
+  }));
+
+  const overallRate = (stageMap.resume || 0) > 0
+    ? parseFloat((((stageMap.onboard || 0) / stageMap.resume) * 100).toFixed(1))
+    : 0;
+
+  return { rates, overallRate, totalCount: allApps.length, computedAt: new Date().toISOString() };
+}
+
+// ===== Phase A4: 部门入职概览（支持筛选） =====
+
+async function aggregateDeptOnboardOverview(params = {}) {
+  const y = params.year || new Date().getFullYear();
+  const m = params.month || (new Date().getMonth() + 1);
+  const monthStart = new Date(y, m - 1, 1);
+  const monthEnd = new Date(y, m, 0, 23, 59, 59, 999);
+
+  const deptFilter = params.department ? { status: 'active', department: params.department } : { status: 'active' };
+  const { data: jobs } = await db.collection('Job').where(deptFilter).get();
+  if (!jobs || jobs.length === 0) {
+    return { year: y, month: m, departments: [], data: [], computedAt: new Date().toISOString() };
+  }
+
+  const jobIds = jobs.map(j => j._id);
+  const { data: apps } = await db.collection('Application')
+    .where({
+      jobId: _.in(jobIds),
+      stage: 'onboard',
+      status: 'active',
+      stageEnteredAt: _.and(_.gte(monthStart), _.lte(monthEnd)),
+      isArchived: _.neq(true),
+    })
+    .field({ jobId: true })
+    .get();
+
+  const deptMap = {};
+  for (const job of jobs) {
+    const dept = job.department || '未分配';
+    if (!deptMap[dept]) deptMap[dept] = { department: dept, jobCount: 0, onboardCount: 0 };
+    deptMap[dept].jobCount++;
+  }
+
+  for (const app of (apps || [])) {
+    const job = jobs.find(j => j._id === app.jobId);
+    const dept = job?.department || '未分配';
+    if (deptMap[dept]) deptMap[dept].onboardCount++;
+  }
+
+  const data = Object.values(deptMap).sort((a, b) => b.onboardCount - a.onboardCount);
+  const departments = data.map(d => d.department);
+
+  return { year: y, month: m, departments, data, computedAt: new Date().toISOString() };
+}
+
+// ===== Phase A4: 渠道入职看板 =====
+
+async function aggregateSourceOnboard(params = {}) {
+  const rangeStart = params.startDate ? new Date(params.startDate) : daysAgo(90);
+  const rangeEnd = params.endDate ? new Date(params.endDate) : new Date();
+
+  const onboardFilter = {
+    stage: 'onboard',
+    status: 'active',
+    stageEnteredAt: _.and(_.gte(rangeStart), _.lte(rangeEnd)),
+    isArchived: _.neq(true),
+  };
+  if (params.ownerId) onboardFilter.ownerId = params.ownerId;
+
+  const allOnboardApps = [];
+  let hasMore = true, cursor = null;
+  while (hasMore) {
+    let query = db.collection('Application').where(onboardFilter).orderBy('_id', 'asc').limit(500);
+    if (cursor) query = query.where({ _id: _.gt(cursor) });
+    const { data } = await query.get();
+    if (!data || data.length === 0) { hasMore = false; break; }
+    allOnboardApps.push(...data);
+    if (data.length < 500) hasMore = false; else cursor = data[data.length - 1]._id;
+  }
+
+  const sourceMap = {};
+  for (const app of allOnboardApps) {
+    const src = app.source || '未标注';
+    if (!sourceMap[src]) sourceMap[src] = { source: src, onboardCount: 0, totalCount: 0 };
+    sourceMap[src].onboardCount++;
+  }
+
+  const totalFilter = { isArchived: _.neq(true) };
+  if (params.ownerId) totalFilter.ownerId = params.ownerId;
+
+  const allTotalApps = [];
+  let hasMore2 = true, cursor2 = null;
+  while (hasMore2) {
+    let query = db.collection('Application').where(totalFilter).orderBy('_id', 'asc').limit(500);
+    if (cursor2) query = query.where({ _id: _.gt(cursor2) });
+    const { data } = await query.get();
+    if (!data || data.length === 0) { hasMore2 = false; break; }
+    allTotalApps.push(...data);
+    if (data.length < 500) hasMore2 = false; else cursor2 = data[data.length - 1]._id;
+  }
+
+  for (const app of allTotalApps) {
+    const src = app.source || '未标注';
+    if (!sourceMap[src]) sourceMap[src] = { source: src, onboardCount: 0, totalCount: 0 };
+    sourceMap[src].totalCount++;
+  }
+
+  const sources = Object.values(sourceMap).map(s => ({
+    ...s,
+    rate: s.totalCount > 0 ? parseFloat(((s.onboardCount / s.totalCount) * 100).toFixed(1)) : 0,
+  })).sort((a, b) => b.onboardCount - a.onboardCount);
+
+  return { sources, rangeStart: rangeStart.toISOString(), rangeEnd: rangeEnd.toISOString(), computedAt: new Date().toISOString() };
+}
+
+// ===== Phase A4: 月度需求 vs 入职 =====
+
+async function aggregateDemandVsOnboard(params = {}) {
+  const numMonths = params.months || 12;
+
+  const monthKeys = [];
+  const now = new Date();
+  for (let i = numMonths - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    monthKeys.push({
+      key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
+      start: new Date(d.getFullYear(), d.getMonth(), 1),
+      end: new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999),
+    });
+  }
+
+  const demandFilter = { status: _.neq('deleted') };
+  if (params.ownerId) demandFilter.ownerId = params.ownerId;
+  const { data: demands } = await db.collection('RecruitmentDemand').where(demandFilter).get();
+
+  const onboardFilter = { stage: 'onboard', status: 'active', isArchived: _.neq(true) };
+  if (params.ownerId) onboardFilter.ownerId = params.ownerId;
+  const { data: onboardApps } = await db.collection('Application')
+    .field({ stageEnteredAt: true })
+    .where(onboardFilter).get();
+
+  const months = monthKeys.map(mk => {
+    const monthDemands = (demands || []).filter(d => {
+      const s = new Date(d.submittedAt || d.createdAt);
+      return s >= mk.start && s <= mk.end;
+    });
+    const demandCount = monthDemands.length;
+    const headcount = monthDemands.reduce((s, d) => s + (d.headcount || 0), 0);
+
+    const monthOnboards = (onboardApps || []).filter(a => {
+      const d = new Date(a.stageEnteredAt);
+      return d >= mk.start && d <= mk.end;
+    });
+    const onboarded = monthOnboards.length;
+    const achievementRate = headcount > 0 ? parseFloat(((onboarded / headcount) * 100).toFixed(1)) : 0;
+
+    return { month: mk.key, demandCount, headcount, onboarded, achievementRate };
+  });
+
+  return { months, computedAt: new Date().toISOString() };
+}
+
+// ===== Phase A4: 需求跟踪看板 =====
+
+async function aggregateDemandTracking(params = {}) {
+  const filter = { status: 'recruiting' };
+  if (params.ownerId) filter.ownerId = params.ownerId;
+
+  const { data: demands } = await db.collection('RecruitmentDemand')
+    .where(filter).orderBy('submittedAt', 'desc').limit(100).get();
+  if (!demands || demands.length === 0) {
+    return { demands: [], alerts: { overdueCount: 0, nearDeadlineCount: 0, highGapCount: 0 }, computedAt: new Date().toISOString() };
+  }
+
+  const jobIds = [...new Set(demands.map(d => d.linkedJobId).filter(Boolean))];
+  const jobsMap = {};
+  if (jobIds.length > 0) {
+    const { data: jobs } = await db.collection('Job').where({ _id: _.in(jobIds) }).get();
+    for (const j of (jobs || [])) jobsMap[j._id] = j;
+  }
+
+  const appStats = {};
+  if (jobIds.length > 0) {
+    const { data: apps } = await db.collection('Application')
+      .where({ jobId: _.in(jobIds), isArchived: _.neq(true) })
+      .field({ jobId: true, stage: true, status: true })
+      .get();
+    for (const a of (apps || [])) {
+      if (!appStats[a.jobId]) appStats[a.jobId] = { total: 0, onboard: 0 };
+      appStats[a.jobId].total++;
+      if (a.stage === 'onboard' && a.status === 'active') appStats[a.jobId].onboard++;
+    }
+  }
+
+  const nowDate = new Date();
+  const demandResults = demands.map(d => {
+    const job = jobsMap[d.linkedJobId];
+    const stats = appStats[d.linkedJobId] || { total: 0, onboard: 0 };
+    const headcount = d.headcount || 1;
+    const onboarded = stats.onboard;
+    const gap = Math.max(0, headcount - onboarded);
+    const completionRate = headcount > 0 ? Math.round(onboarded / headcount * 100) : 0;
+
+    let deadline = null;
+    let remainingDays = null;
+    if (d.recruitmentCycle && d.submittedAt) {
+      const submittedDate = new Date(d.submittedAt);
+      const cycleDays = parseInt(d.recruitmentCycle) || 30;
+      deadline = new Date(submittedDate.getTime() + cycleDays * 86400000);
+      remainingDays = Math.ceil((deadline.getTime() - nowDate.getTime()) / 86400000);
+    }
+
+    return {
+      id: d._id,
+      title: d.title || '未命名需求',
+      department: d.department?.displayName || d.department?.level1 || '',
+      headcount,
+      onboarded,
+      gap,
+      completionRate,
+      deadline: deadline ? deadline.toISOString() : null,
+      remainingDays,
+      isOverdue: remainingDays !== null && remainingDays < 0,
+      isNearDeadline: remainingDays !== null && remainingDays >= 0 && remainingDays <= 7,
+      jobTitle: job?.title || '',
+      appCount: stats.total,
+      status: d.status,
+    };
+  });
+
+  const alerts = {
+    overdueCount: demandResults.filter(d => d.isOverdue).length,
+    nearDeadlineCount: demandResults.filter(d => d.isNearDeadline).length,
+    highGapCount: demandResults.filter(d => d.completionRate < 30 && !d.isOverdue).length,
+  };
+
+  return { demands: demandResults, alerts, computedAt: new Date().toISOString() };
+}
+
 exports.main = async (event, context) => {
   const { type, params = {} } = event;
 
@@ -565,7 +867,7 @@ exports.main = async (event, context) => {
     // 根据类型执行聚合
     switch (type) {
       case 'overview':
-        result = await aggregateOverview();
+        result = await aggregateOverview(params);
         break;
 
       case 'job_funnel':
@@ -588,10 +890,30 @@ exports.main = async (event, context) => {
         result = await aggregateRecruiterEfficiency(params);
         break;
 
+      case 'conversion_rates':
+        result = await aggregateConversionRates(params);
+        break;
+
+      case 'dept_onboard_overview':
+        result = await aggregateDeptOnboardOverview(params);
+        break;
+
+      case 'source_onboard_overview':
+        result = await aggregateSourceOnboard(params);
+        break;
+
+      case 'demand_vs_onboard':
+        result = await aggregateDemandVsOnboard(params);
+        break;
+
+      case 'demand_tracking':
+        result = await aggregateDemandTracking(params);
+        break;
+
       default:
         return {
           success: false,
-          error: `不支持的聚合类型: ${type}，支持的类型: overview, job_funnel, trend, dept_monthly, demand_metrics, recruiter_efficiency`,
+          error: `不支持的聚合类型: ${type}，支持的类型: overview, job_funnel, trend, dept_monthly, demand_metrics, recruiter_efficiency, conversion_rates, dept_onboard_overview, source_onboard_overview, demand_vs_onboard, demand_tracking`,
         };
     }
 

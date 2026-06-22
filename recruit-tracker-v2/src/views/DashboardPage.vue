@@ -1,12 +1,18 @@
 <script setup>
 /* 新励成招聘管理系统 V2.0 — 工作台 */
 
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, computed, reactive, watch } from 'vue';
 import { useAuthStore } from '../stores/useAuthStore';
 import { useNotificationStore } from '../stores/useNotificationStore';
-import { getDashboardOverview } from '../services/funnel-report';
+import { getDashboardOverview, getDemandVsOnboard } from '../services/funnel-report';
+import { getDemandTracking, getDemandAlerts } from '../services/demand-report';
+import { ownerFilter } from '../services/data-filter';
 import cloudbase from '../services/cloudbase';
 import NotificationCard from '../components/dashboard/NotificationCard.vue';
+import DateRangePicker from '../components/common/DateRangePicker.vue';
+import PeriodMetricsCards from '../components/dashboard/PeriodMetricsCards.vue';
+import DemandOverviewCards from '../components/dashboard/DemandOverviewCards.vue';
+import DemandAlertBoard from '../components/dashboard/DemandAlertBoard.vue';
 
 const auth = useAuthStore();
 const notify = useNotificationStore();
@@ -32,11 +38,79 @@ const showSystemPanel = ref(false);
 const duplicateGroups = ref([]);
 const duplicateLoading = ref(false);
 
+// ===== Phase E: 时间段选择 + 增强数据 =====
+const dateRange = reactive({ start: new Date(), end: new Date() });
+// 默认本月
+const now = new Date();
+dateRange.start = new Date(now.getFullYear(), now.getMonth(), 1);
+dateRange.end = now;
+
+const periodMetrics = ref({ demandCount: 0, onboardCount: 0, offerPending: 0, alreadyOnboarded: 0 });
+const demandOverview = ref({ recruiting: 0, overdue: 0, gap: 0, completionRate: 0 });
+const demandAlerts = ref([]);
+const metricsLoading = ref(false);
+
+function fmtDate(d) { return d instanceof Date ? d.toISOString().slice(0, 10) : ''; }
+
+async function loadPeriodData() {
+  metricsLoading.value = true;
+  try {
+    const of = ownerFilter();
+    const params = { startDate: fmtDate(dateRange.start), endDate: fmtDate(dateRange.end) };
+    if (of) params.ownerId = of.ownerId;
+
+    // 并行加载
+    const [overviewData, trackingData, dvoData] = await Promise.all([
+      getDashboardOverview(params),
+      getDemandTracking(params),
+      getDemandVsOnboard({ ...params, months: 1 }),
+    ]);
+
+    // 周期指标
+    periodMetrics.value = {
+      demandCount: overviewData?.activeJobCount || 0,
+      onboardCount: overviewData?.monthlyOnboardCount || 0,
+      offerPending: 0, // 需要额外查询
+      alreadyOnboarded: overviewData?.recent30dOnboardCount || 0,
+      rangeLabel: `${fmtDate(dateRange.start)} ~ ${fmtDate(dateRange.end)}`,
+    };
+
+    // 需求概览
+    if (trackingData) {
+      const demands = trackingData.demands || [];
+      demandOverview.value = {
+        recruiting: demands.filter(d => d.status === 'recruiting').length,
+        overdue: trackingData.alerts?.overdueCount || 0,
+        gap: demands.reduce((s, d) => s + (d.gap || 0), 0),
+        completionRate: demands.length > 0
+          ? Math.round(demands.reduce((s, d) => s + (d.completionRate || 0), 0) / demands.length)
+          : 0,
+      };
+    }
+
+    // 预警数据
+    if (trackingData) {
+      demandAlerts.value = getDemandAlerts(trackingData).map(d => ({
+        ...d,
+        severity: d.isOverdue ? 'overdue' : d.isNearDeadline ? 'nearDeadline' : 'highGap',
+      }));
+    }
+  } catch (err) {
+    console.warn('[Dashboard] 周期数据加载失败:', err.message);
+  } finally {
+    metricsLoading.value = false;
+  }
+}
+
+// 时间段切换时重新加载
+watch(dateRange, () => { loadPeriodData(); }, { deep: true });
+
 async function loadOverview() {
   overviewLoading.value = true;
   overviewError.value = '';
   try {
-    const data = await getDashboardOverview();
+    const params = { startDate: fmtDate(dateRange.start), endDate: fmtDate(dateRange.end) };
+    const data = await getDashboardOverview(params);
     if (data) {
       overview.value = data;
     } else {
@@ -148,6 +222,7 @@ function formatTime(dateStr) {
 
 onMounted(async () => {
   await loadOverview();
+  loadPeriodData();
 
   if (auth.currentUser?.uid) {
     notify.fetchNotifications(auth.currentUser.uid);
@@ -235,6 +310,23 @@ onMounted(async () => {
         <div class="stat-hint">解析队列</div>
       </div>
     </div>
+
+    <!-- Phase E: 时间段选择器 + 周期数据 -->
+    <div class="section-header" style="margin-top: var(--spacing-2xl);">
+      <h3>招聘数据周期</h3>
+    </div>
+    <DateRangePicker v-model="dateRange" />
+
+    <!-- 周期指标卡片 -->
+    <div v-if="!metricsLoading" style="margin-top: var(--spacing-lg);">
+      <PeriodMetricsCards :metrics="periodMetrics" />
+    </div>
+
+    <!-- 需求概览 -->
+    <DemandOverviewCards :stats="demandOverview" style="margin-bottom: var(--spacing-xl);" />
+
+    <!-- 预警观察板 -->
+    <DemandAlertBoard :alerts="demandAlerts" />
 
     <!-- 快捷入口 -->
     <div class="section-header">
