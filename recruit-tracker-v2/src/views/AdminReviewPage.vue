@@ -12,17 +12,19 @@ import { useAuthStore } from '../stores/useAuthStore';
 const store = usePendingChangeStore();
 const auth = useAuthStore();
 
-// 筛选状态
-const statusFilter = ref('pending'); // 'all' | 'pending' | 'approved' | 'rejected'
-
-// 详情展开
+const statusFilter = ref('pending');
 const expandedId = ref(null);
-
-// 驳回弹窗
 const rejectDialog = ref({ visible: false, changeId: null, comment: '' });
-
-// 操作中
 const actingId = ref(null);
+
+// Toast 反馈
+const toastMsg = ref('');
+const toastType = ref('success');
+function showToast(msg, type = 'success') {
+  toastMsg.value = msg;
+  toastType.value = type;
+  setTimeout(() => { toastMsg.value = ''; }, 3000);
+}
 
 onMounted(() => {
   loadChanges();
@@ -32,9 +34,9 @@ async function loadChanges() {
   await store.fetchAll(statusFilter.value === 'all' ? null : statusFilter.value);
 }
 
-function onFilterChange(status) {
+async function onFilterChange(status) {
   statusFilter.value = status;
-  loadChanges();
+  await loadChanges();
 }
 
 function toggleExpand(id) {
@@ -45,8 +47,11 @@ async function handleApprove(id) {
   actingId.value = id;
   try {
     await store.review(id, 'approved', '');
+    showToast('已通过该变更申请');
+    await loadChanges();
   } catch (err) {
-    console.error('[AdminReview] 审批失败:', err.message);
+    console.error('[AdminReview] 审批失败:', err);
+    showToast(`操作失败：${err.message}`, 'error');
   }
   actingId.value = null;
 }
@@ -57,21 +62,23 @@ function openRejectDialog(id) {
 
 async function handleReject() {
   const id = rejectDialog.value.changeId;
+  if (!id) return;
   actingId.value = id;
   try {
     await store.review(id, 'rejected', rejectDialog.value.comment);
     rejectDialog.value = { visible: false, changeId: null, comment: '' };
+    showToast('已驳回该变更申请');
+    await loadChanges();
   } catch (err) {
-    console.error('[AdminReview] 驳回失败:', err.message);
+    console.error('[AdminReview] 驳回失败:', err);
+    showToast(`操作失败：${err.message}`, 'error');
   }
   actingId.value = null;
 }
 
-// 筛选后的变更列表
 const filteredChanges = computed(() => store.pendingChanges);
 
-// 格式化
-function typeIcon(type) { return type === 'job' ? '📋' : '⚙️'; }
+function typeIcon(type) { return type === 'job' ? '' : ''; }
 function typeLabel(type) { return type === 'job' ? '岗位' : '系统配置'; }
 function actionLabel(action) { return { create: '新建', update: '修改', delete: '删除' }[action] || action; }
 function statusLabel(status) { return { pending: '待审批', approved: '已通过', rejected: '已驳回' }[status] || status; }
@@ -83,7 +90,6 @@ function fmtDate(d) {
   return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
-// 获取展示的变化字段
 function getChangedFields(change) {
   if (!change.before || !change.after) return [];
   const fields = [];
@@ -115,6 +121,13 @@ function fmtVal(v) {
 
 <template>
   <div class="admin-review-page">
+    <!-- Toast -->
+    <transition name="fade">
+      <div v-if="toastMsg" class="toast" :class="toastType === 'error' ? 'toast-error' : 'toast-success'">
+        {{ toastMsg }}
+      </div>
+    </transition>
+
     <div class="page-header">
       <h2 class="page-title">变更审核</h2>
       <p class="page-desc">审核专员提交的岗位和系统配置变更申请</p>
@@ -171,7 +184,6 @@ function fmtVal(v) {
 
         <!-- 展开详情 -->
         <div v-if="expandedId === change._id" class="change-detail">
-          <!-- Diff 对比 -->
           <div v-if="getChangedFields(change).length > 0" class="diff-panel">
             <div class="diff-header-row">
               <span class="diff-label-h">字段</span>
@@ -244,6 +256,24 @@ function fmtVal(v) {
 .page-header { margin-bottom: var(--spacing-lg); }
 .page-title { font-size: var(--font-size-2xl); font-weight: 700; color: var(--gray-800); }
 .page-desc { font-size: var(--font-size-base); color: var(--gray-400); margin-top: 2px; }
+
+/* Toast */
+.toast {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 9999;
+  padding: 12px 20px;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  box-shadow: var(--shadow-lg);
+  max-width: 400px;
+}
+.toast-success { background: #e8f5e9; color: #2e7d32; border: 1px solid #a5d6a7; }
+.toast-error { background: #fce4ec; color: #c62828; border: 1px solid #ef9a9a; }
+.fade-enter-active, .fade-leave-active { transition: opacity 0.3s; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
 
 /* 筛选 */
 .filter-bar {

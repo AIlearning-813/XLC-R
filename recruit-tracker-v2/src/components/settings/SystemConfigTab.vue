@@ -15,28 +15,40 @@ const config = useConfigStore();
 const auth = useAuthStore();
 const pendingStore = usePendingChangeStore();
 
-// 加载配置
 onMounted(() => {
   config.loadConfig();
 });
+
+// ===== Toast 反馈 =====
+const submitMsg = ref('');
+const submitMsgType = ref('success'); // 'success' | 'error'
+function showMsg(msg, type = 'success') {
+  submitMsg.value = msg;
+  submitMsgType.value = type;
+  setTimeout(() => { submitMsg.value = ''; }, 3000);
+}
 
 // ===== 部门管理 =====
 const newDept = ref('');
 const editingDept = ref(null);
 const editingDeptName = ref('');
 
-function submitAddDept() {
+async function submitAddDept() {
   const name = newDept.value.trim();
   if (!name) return;
   if (auth.isAdmin) {
     config.addDepartment(name);
+    showMsg(`已添加部门：${name}`);
   } else {
-    pendingStore.submitChange({
-      type: 'config', action: 'update', entityType: 'department',
-      entityId: 'system', entityLabel: `添加部门: ${name}`,
-      before: { departments: config.departments },
-      after: { departments: [...config.departments, name] },
-    });
+    try {
+      await pendingStore.submitChange({
+        type: 'config', action: 'update', entityType: 'department',
+        entityId: 'system', entityLabel: `添加部门: ${name}`,
+        before: { departments: config.departments },
+        after: { departments: [...config.departments, name] },
+      });
+      showMsg(`已提交"添加部门：${name}"，待管理员审批`);
+    } catch (e) { showMsg(`提交失败：${e.message}`, 'error'); }
   }
   newDept.value = '';
 }
@@ -46,64 +58,82 @@ function startEditDept(name) {
   editingDeptName.value = name;
 }
 
-function submitEditDept() {
+async function submitEditDept() {
   const newName = editingDeptName.value.trim();
   if (!newName || newName === editingDept.value) { editingDept.value = null; return; }
   if (auth.isAdmin) {
     config.updateDepartment(editingDept.value, newName);
+    showMsg(`已修改部门：${editingDept.value} → ${newName}`);
   } else {
-    pendingStore.submitChange({
-      type: 'config', action: 'update', entityType: 'department',
-      entityId: 'system', entityLabel: `修改部门: ${editingDept.value} → ${newName}`,
-      before: { departments: config.departments },
-      after: { departments: config.departments.map(d => d === editingDept.value ? newName : d) },
-    });
+    try {
+      await pendingStore.submitChange({
+        type: 'config', action: 'update', entityType: 'department',
+        entityId: 'system', entityLabel: `修改部门: ${editingDept.value} → ${newName}`,
+        before: { departments: config.departments },
+        after: { departments: config.departments.map(d => d === editingDept.value ? newName : d) },
+      });
+      showMsg(`已提交"修改部门"，待管理员审批`);
+    } catch (e) { showMsg(`提交失败：${e.message}`, 'error'); }
   }
   editingDept.value = null;
 }
 
-function removeDept(name) {
+async function removeDept(name) {
+  if (!confirm(`确定删除部门「${name}」？`)) return;
   if (auth.isAdmin) {
     config.removeDepartment(name);
+    showMsg(`已删除部门：${name}`);
   } else {
-    pendingStore.submitChange({
-      type: 'config', action: 'update', entityType: 'department',
-      entityId: 'system', entityLabel: `删除部门: ${name}`,
-      before: { departments: config.departments },
-      after: { departments: config.departments.filter(d => d !== name) },
-    });
+    try {
+      await pendingStore.submitChange({
+        type: 'config', action: 'update', entityType: 'department',
+        entityId: 'system', entityLabel: `删除部门: ${name}`,
+        before: { departments: config.departments },
+        after: { departments: config.departments.filter(d => d !== name) },
+      });
+      showMsg(`已提交"删除部门：${name}"，待管理员审批`);
+    } catch (e) { showMsg(`提交失败：${e.message}`, 'error'); }
   }
 }
 
 // ===== 城市管理 =====
 const newCity = ref('');
 
-function submitAddCity() {
+async function submitAddCity() {
   const name = newCity.value.trim();
   if (!name) return;
   if (auth.isAdmin) {
     config.addCity(name);
+    showMsg(`已添加城市：${name}`);
   } else {
-    pendingStore.submitChange({
-      type: 'config', action: 'update', entityType: 'city',
-      entityId: 'system', entityLabel: `添加城市: ${name}`,
-      before: { cities: config.cities },
-      after: { cities: [...config.cities, name] },
-    });
+    try {
+      await pendingStore.submitChange({
+        type: 'config', action: 'update', entityType: 'city',
+        entityId: 'system', entityLabel: `添加城市: ${name}`,
+        before: { cities: config.cities },
+        after: { cities: [...config.cities, name] },
+      });
+      showMsg(`已提交"添加城市：${name}"，待管理员审批`);
+    } catch (e) { showMsg(`提交失败：${e.message}`, 'error'); }
   }
   newCity.value = '';
 }
 
-function removeCity(name) {
+async function removeCity(name) {
+  if (!confirm(`确定删除城市「${name}」？`)) return;
   if (auth.isAdmin) {
     config.removeCity(name);
+    showMsg(`已删除城市：${name}`);
   } else {
-    pendingStore.submitChange({
-      type: 'config', action: 'update', entityType: 'city',
-      entityId: 'system', entityLabel: `删除城市: ${name}`,
-      before: { cities: config.cities },
-      after: { cities: config.cities.filter(c => c !== name) },
-    });
+    try {
+      await pendingStore.submitChange({
+        type: 'config', action: 'update', entityType: 'city',
+        entityId: 'system', entityLabel: `删除城市: ${name}`,
+        before: { cities: config.cities },
+        after: { cities: config.cities.filter(c => c !== name) },
+      });
+      showMsg(`已提交"删除城市：${name}"，待管理员审批`);
+    } catch (e) { showMsg(`提交失败：${e.message}`, 'error'); }
   }
 }
 
@@ -111,63 +141,79 @@ function removeCity(name) {
 const newJobType = ref({ key: '', label: '', interviewRounds: 3 });
 const showJobTypeForm = ref(false);
 
-function submitAddJobType() {
+async function submitAddJobType() {
   const { key, label, interviewRounds } = newJobType.value;
   if (!key || !label) return;
   const config_ = { label, interviewRounds: Number(interviewRounds) || 3 };
   if (auth.isAdmin) {
     config.addJobType(key, config_);
+    showMsg(`已添加岗位类型：${label}`);
   } else {
-    pendingStore.submitChange({
-      type: 'config', action: 'update', entityType: 'jobType',
-      entityId: 'system', entityLabel: `添加岗位类型: ${label}`,
-      before: { jobTypes: config.jobTypes },
-      after: { jobTypes: { ...config.jobTypes, [key]: config_ } },
-    });
+    try {
+      await pendingStore.submitChange({
+        type: 'config', action: 'update', entityType: 'jobType',
+        entityId: 'system', entityLabel: `添加岗位类型: ${label}`,
+        before: { jobTypes: config.jobTypes },
+        after: { jobTypes: { ...config.jobTypes, [key]: config_ } },
+      });
+      showMsg(`已提交"添加岗位类型：${label}"，待管理员审批`);
+    } catch (e) { showMsg(`提交失败：${e.message}`, 'error'); }
   }
   newJobType.value = { key: '', label: '', interviewRounds: 3 };
   showJobTypeForm.value = false;
 }
 
-function removeJobType(key) {
+async function removeJobType(key) {
   const label = config.jobTypes[key]?.label || key;
+  if (!confirm(`确定删除岗位类型「${label}」？`)) return;
   if (auth.isAdmin) {
     config.removeJobType(key);
+    showMsg(`已删除岗位类型：${label}`);
   } else {
-    const updated = { ...config.jobTypes };
-    delete updated[key];
-    pendingStore.submitChange({
-      type: 'config', action: 'update', entityType: 'jobType',
-      entityId: 'system', entityLabel: `删除岗位类型: ${label}`,
-      before: { jobTypes: config.jobTypes },
-      after: { jobTypes: updated },
-    });
+    try {
+      const updated = { ...config.jobTypes };
+      delete updated[key];
+      await pendingStore.submitChange({
+        type: 'config', action: 'update', entityType: 'jobType',
+        entityId: 'system', entityLabel: `删除岗位类型: ${label}`,
+        before: { jobTypes: config.jobTypes },
+        after: { jobTypes: updated },
+      });
+      showMsg(`已提交"删除岗位类型：${label}"，待管理员审批`);
+    } catch (e) { showMsg(`提交失败：${e.message}`, 'error'); }
   }
 }
 
 // ===== 告警阈值 =====
-function onChangeThreshold(stageKey, days) {
+async function onChangeThreshold(stageKey, days) {
   const val = Number(days);
   if (isNaN(val) || val < 1) return;
   if (auth.isAdmin) {
     config.updateAlertThreshold(stageKey, val);
+    showMsg(`已更新告警阈值`);
   } else {
-    pendingStore.submitChange({
-      type: 'config', action: 'update', entityType: 'alertThreshold',
-      entityId: 'system', entityLabel: `修改告警阈值: ${stageKey} → ${val}天`,
-      before: { alertThresholds: config.alertThresholds },
-      after: { alertThresholds: { ...config.alertThresholds, [stageKey]: val } },
-    });
+    try {
+      await pendingStore.submitChange({
+        type: 'config', action: 'update', entityType: 'alertThreshold',
+        entityId: 'system', entityLabel: `修改告警阈值: ${stageKey} → ${val}天`,
+        before: { alertThresholds: config.alertThresholds },
+        after: { alertThresholds: { ...config.alertThresholds, [stageKey]: val } },
+      });
+      showMsg(`已提交"修改告警阈值"，待管理员审批`);
+    } catch (e) { showMsg(`提交失败：${e.message}`, 'error'); }
   }
 }
-
-// 提交成功 Toast
-const submitMsg = ref('');
-function showMsg(msg) { submitMsg.value = msg; setTimeout(() => submitMsg.value = '', 2500); }
 </script>
 
 <template>
   <div class="system-config">
+    <!-- Toast 反馈 -->
+    <transition name="fade">
+      <div v-if="submitMsg" class="submit-toast" :class="submitMsgType === 'error' ? 'toast-error' : 'toast-success'">
+        {{ submitMsg }}
+      </div>
+    </transition>
+
     <!-- 部门管理 -->
     <section class="config-section">
       <h3 class="section-title">部门管理</h3>
@@ -257,8 +303,7 @@ function showMsg(msg) { submitMsg.value = msg; setTimeout(() => submitMsg.value 
       </div>
     </section>
 
-    <!-- Toast -->
-    <p v-if="submitMsg" class="submit-msg">{{ submitMsg }}</p>
+    <!-- 底部提示 -->
     <p v-if="!auth.isAdmin" class="hint-recruiter">⚠ 你的修改将提交给管理员审核后生效</p>
   </div>
 </template>
@@ -284,6 +329,24 @@ function showMsg(msg) { submitMsg.value = msg; setTimeout(() => submitMsg.value 
   color: var(--gray-400);
   margin: 0 0 var(--spacing-md);
 }
+
+/* Toast */
+.submit-toast {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 9999;
+  padding: 12px 20px;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  box-shadow: var(--shadow-lg);
+  max-width: 400px;
+}
+.toast-success { background: #e8f5e9; color: #2e7d32; border: 1px solid #a5d6a7; }
+.toast-error { background: #fce4ec; color: #c62828; border: 1px solid #ef9a9a; }
+.fade-enter-active, .fade-leave-active { transition: opacity 0.3s; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
 
 /* Chip 组 */
 .chip-group {
@@ -382,13 +445,8 @@ function showMsg(msg) { submitMsg.value = msg; setTimeout(() => submitMsg.value 
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.threshold-input {
-  width: 52px;
-}
-.threshold-unit {
-  font-size: var(--font-size-xs);
-  color: var(--gray-400);
-}
+.threshold-input { width: 52px; }
+.threshold-unit { font-size: var(--font-size-xs); color: var(--gray-400); }
 
 /* 通用 */
 .input-sm {
@@ -408,14 +466,6 @@ function showMsg(msg) { submitMsg.value = msg; setTimeout(() => submitMsg.value 
 }
 .btn-link:hover { text-decoration: underline; }
 
-.submit-msg {
-  margin-top: var(--spacing-sm);
-  padding: var(--spacing-xs) var(--spacing-sm);
-  background: var(--success-bg);
-  color: var(--success);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-sm);
-}
 .hint-recruiter {
   margin-top: var(--spacing-md);
   padding: var(--spacing-sm);
