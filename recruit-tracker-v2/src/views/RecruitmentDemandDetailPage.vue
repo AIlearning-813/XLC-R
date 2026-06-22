@@ -32,13 +32,9 @@ async function changeStatus(s) {
         <div class="detail-item"><label>录入日期</label><span>{{ demand.submittedAt ? new Date(demand.submittedAt).toLocaleDateString() : '—' }}</span></div>
         <div class="detail-item"><label>关联岗位</label><span>{{ demand.linkedJobId || '尚未创建' }}</span></div>
       </div>
-      <div class="detail-section">
-        <h3>岗位职责</h3>
-        <p>{{ demand.jobResponsibilities || '—' }}</p>
-      </div>
-      <div class="detail-section">
-        <h3>任职要求</h3>
-        <p>{{ demand.jobRequirements || '—' }}</p>
+      <div class="detail-section" v-if="demand.jobType">
+        <h3>岗位类型</h3>
+        <p>{{ demand.jobType }}</p>
       </div>
       <div class="detail-actions">
         <button v-if="auth.isAdmin && demand.status==='pending'" class="btn btn-success" @click="changeStatus('recruiting')">审批通过</button>

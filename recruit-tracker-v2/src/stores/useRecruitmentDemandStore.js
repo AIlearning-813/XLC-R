@@ -77,12 +77,19 @@ export const useRecruitmentDemandStore = defineStore('recruitmentDemand', () => 
     const result = await db.collection('RecruitmentDemand').add(normalized);
     const { useJobStore } = await import('./useJobStore');
     try {
+      // 从岗位类型配置读取职责和要求
+      const { useConfigStore } = await import('./useConfigStore');
+      const configStore = useConfigStore();
+      await configStore.loadConfig();
+      const jobTypeConfig = configStore.jobTypes[demandData.jobType] || {};
+
       const jobData = {
         title: normalized.title,
         department: normalized.department?.displayName || '',
         type: demandData.jobType || 'CC',
         headcount: normalized.headcount || 1,
-        requirements: normalized.jobRequirements || '',
+        requirements: jobTypeConfig.requirements || '',
+        responsibilities: jobTypeConfig.responsibilities || '',
         ownerId: normalized.ownerId,
         createdBy: normalized.ownerId,
         status: 'active',

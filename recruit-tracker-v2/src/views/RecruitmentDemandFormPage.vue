@@ -14,8 +14,7 @@ const auth = useAuthStore();
 
 const form = ref({
   title: '', department: {}, headcount: 1,
-  expectedArrivalDate: '', jobResponsibilities: '', jobRequirements: '',
-  priority: 'normal', jobType: 'CC',
+  expectedArrivalDate: '', priority: 'normal', jobType: 'CC',
 });
 const loading = ref(false); const error = ref('');
 
@@ -28,7 +27,9 @@ async function submitForm() {
   try {
     const result = await store.submit({
       ...form.value,
+      department: form.value.department,
       expectedArrivalDate: form.value.expectedArrivalDate ? new Date(form.value.expectedArrivalDate) : null,
+      createdBy: auth.currentUsername,
     });
     if (result?.pending) {
       alert('已提交审批，请等待管理员审核。');
@@ -63,20 +64,19 @@ async function submitForm() {
           <input v-model="form.expectedArrivalDate" type="date" class="form-input" />
         </div>
         <div class="form-group">
+          <label>岗位类型</label>
+          <select v-model="form.jobType" class="form-input">
+            <option v-for="(val, key) in config.jobTypes" :key="key" :value="key">{{ val.label || key }}</option>
+          </select>
+        </div>
+        <div class="form-group">
           <label>优先级</label>
           <select v-model="form.priority" class="form-input">
             <option value="normal">普通</option><option value="high">高</option><option value="urgent">紧急</option><option value="low">低</option>
           </select>
         </div>
       </div>
-      <div class="form-group">
-        <label>岗位职责</label>
-        <textarea v-model="form.jobResponsibilities" class="form-textarea" rows="4" placeholder="描述该岗位的主要职责..."></textarea>
-      </div>
-      <div class="form-group">
-        <label>任职要求</label>
-        <textarea v-model="form.jobRequirements" class="form-textarea" rows="4" placeholder="描述任职要求..."></textarea>
-      </div>
+      <!-- 岗位职责和任职要求由岗位类型自动带出，此处不录入 -->
       <div v-if="error" class="form-error">{{ error }}</div>
       <div class="form-actions">
         <button type="button" class="btn" @click="router.back()">取消</button>

@@ -216,7 +216,7 @@ export const useConfigStore = defineStore('config', () => {
   // ===== 岗位类型 CRUD =====
   async function addJobType(key, config) {
     if (!key || jobTypes.value[key]) return;
-    jobTypes.value[key] = config;
+    jobTypes.value[key] = { label: key, interviewRounds: 3, responsibilities: '', requirements: '', ...config };
     await saveToCloudBase();
   }
 
