@@ -3,6 +3,8 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import cloudbase from '../services/cloudbase';
+import { useAuthStore } from './useAuthStore';
+import { ownerFilter } from '../services/data-filter';
 import { versionedUpdate, initialVersion, isVersionConflict, conflictMessage } from '../services/optimistic-lock';
 import { canTransition, buildTransitionPayload, stageToFunnelKey } from '../services/pipeline-engine';
 
@@ -54,8 +56,10 @@ export const useApplicationStore = defineStore('application', () => {
     error.value = '';
 
     try {
+      const filter = ownerFilter();
+      const conditions = filter ? { candidateId, ...filter } : { candidateId };
       const result = await db.collection('Application')
-        .where({ candidateId })
+        .where(conditions)
         .orderBy('createdAt', 'desc')
         .get();
 
@@ -88,8 +92,10 @@ export const useApplicationStore = defineStore('application', () => {
     if (!db) return [];
 
     try {
+      const filter = ownerFilter();
+      const conditions = filter ? { jobId, ...filter } : { jobId };
       const result = await db.collection('Application')
-        .where({ jobId })
+        .where(conditions)
         .get();
       return result.data || [];
     } catch (err) {
@@ -123,8 +129,12 @@ export const useApplicationStore = defineStore('application', () => {
     const db = cloudbase.db();
     if (!db) throw new Error('数据库未初始化');
 
+    const auth = useAuthStore();
+
     const doc = {
       ...applicationData,
+      // Phase 1 数据隔离：自动注入 ownerId
+      ownerId: applicationData.ownerId || auth.currentUsername || 'system',
       stage: applicationData.stage || 'resume',
       stageEnteredAt: new Date(),
       status: applicationData.status || 'active',

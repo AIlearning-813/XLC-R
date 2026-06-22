@@ -66,8 +66,15 @@ export const useCandidateStore = defineStore('candidate', () => {
     const db = cloudbase.db();
     if (!db) throw new Error('数据库未初始化');
 
+    const auth = useAuthStore();
+
     // P1-3：附加 phoneHash / emailHash 用于去重
-    const dataWithHashes = await attachHashes(candidateData);
+    const dataWithHashes = await attachHashes({
+      ...candidateData,
+      // Phase 1 数据隔离：自动注入 ownerId（优先使用传入值）
+      ownerId: candidateData.ownerId || auth.currentUsername || 'system',
+      createdBy: candidateData.createdBy || auth.currentUsername || 'system',
+    });
 
     const result = await db.collection('Candidate').add({ ...dataWithHashes, _version: initialVersion() });
     const doc = { ...dataWithHashes, _id: result.id };
@@ -134,14 +141,21 @@ export const useCandidateStore = defineStore('candidate', () => {
     // P1-3：附加 phoneHash / emailHash 用于去重
     const candidateWithHashes = await attachHashes(candidate);
 
-    // 1. 创建 Candidate
-    const candidateResult = await db.collection('Candidate').add({ ...candidateWithHashes, _version: initialVersion() });
+    // 1. 创建 Candidate（Phase 1：注入 ownerId）
+    const auth = useAuthStore();
+    const candidateResult = await db.collection('Candidate').add({
+      ...candidateWithHashes,
+      ownerId: candidate.ownerId || auth.currentUsername || 'system',
+      createdBy: candidate.createdBy || auth.currentUsername || 'system',
+      _version: initialVersion(),
+    });
     const candidateId = candidateResult.id;
 
-    // 2. 创建 Application
+    // 2. 创建 Application（Phase 1：注入 ownerId）
     const applicationDoc = {
       ...application,
       candidateId,
+      ownerId: application.ownerId || auth.currentUsername || 'system',
       stage: application.stage || 'resume',
       stageEnteredAt: new Date(),
       status: application.status || 'active',

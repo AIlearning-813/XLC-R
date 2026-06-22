@@ -106,6 +106,7 @@ export const useJobStore = defineStore('job', () => {
         after: {
           ...normalized,
           status: 'active',
+          ownerId: jobData.ownerId || auth.currentUsername || 'system',
           createdBy: jobData.createdBy || auth.currentUsername || 'system',
         },
       });
@@ -116,6 +117,8 @@ export const useJobStore = defineStore('job', () => {
     const doc = {
       ...normalized,
       status: jobData.status || 'active',
+      ownerId: jobData.ownerId || auth.currentUsername || 'system',
+      createdBy: jobData.createdBy || auth.currentUsername || 'system',
       _version: initialVersion(),
       createdAt: new Date(),
       updatedAt: new Date(),

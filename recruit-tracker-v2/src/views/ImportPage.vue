@@ -295,7 +295,7 @@ async function startImport() {
         _version: 0,
         createdAt: new Date(),
         updatedAt: new Date(),
-        ownerId: auth.currentUser?.uid || 'system',
+        ownerId: auth.currentUsername || 'system',
       };
 
       const candResult = await db.collection('Candidate').add(candidateData);
@@ -311,7 +311,7 @@ async function startImport() {
           _version: 0,
           createdAt: new Date(),
           updatedAt: new Date(),
-          ownerId: auth.currentUser?.uid || 'system',
+          ownerId: auth.currentUsername || 'system',
         });
       }
 

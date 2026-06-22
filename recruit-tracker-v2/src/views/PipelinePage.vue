@@ -8,6 +8,7 @@ import { useApplicationStore } from '../stores/useApplicationStore';
 import { useAuthStore } from '../stores/useAuthStore';
 import cloudbase from '../services/cloudbase';
 import { FUNNEL_STAGES } from '../config/constants';
+import { ownerFilter } from '../services/data-filter';
 import { safeErrorMsg } from '../services/error-messages';
 import { isVersionConflict } from '../services/optimistic-lock';
 import { getInterviewRounds, getStagesForJob } from '../services/pipeline-engine';
@@ -105,13 +106,16 @@ async function loadUnassigned() {
   loadingUnassigned.value = true;
   try {
     const dbInstance = db();
+    const of = ownerFilter();
+    const unassignedFilter = {
+      jobId: '',
+      status: 'active',
+      isArchived: dbInstance.command.neq(true),
+      ...(of || {}),
+    };
     const { data: apps } = await dbInstance
       .collection('Application')
-      .where({
-        jobId: '',
-        status: 'active',
-        isArchived: dbInstance.command.neq(true),
-      })
+      .where(unassignedFilter)
       .orderBy('createdAt', 'desc')
       .limit(50)
       .get();
@@ -171,6 +175,9 @@ async function loadApplications() {
   try {
     const dbInstance = db();
 
+    // Phase 1 数据隔离
+    const of = ownerFilter();
+
     // 查活跃申请
     const { data: activeApps } = await dbInstance
       .collection('Application')
@@ -178,6 +185,7 @@ async function loadApplications() {
         jobId: selectedJobId.value,
         status: 'active',
         isArchived: dbInstance.command.neq(true),
+        ...(of || {}),
       })
       .orderBy('createdAt', 'desc')
       .get();
@@ -189,6 +197,7 @@ async function loadApplications() {
         jobId: selectedJobId.value,
         status: dbInstance.command.in(['rejected', 'withdrawn']),
         isArchived: dbInstance.command.neq(true),
+        ...(of || {}),
       })
       .orderBy('endedAt', 'desc')
       .limit(50)

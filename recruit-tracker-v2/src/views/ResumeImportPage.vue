@@ -227,7 +227,7 @@ async function onCreateCandidate(data) {
       fileId: fileId || '',
       fileName: files.value[0]?.name || '',
       fileStatus, // 🆕 追踪文件上传状态：'none' | 'uploaded' | 'failed'
-      createdBy: auth.currentUser?.uid || '',
+      createdBy: auth.currentUsername || '',
       createdAt: new Date(),
       updatedAt: new Date(),
     };
@@ -249,7 +249,7 @@ async function onCreateCandidate(data) {
         entrySource: 'manual',
       },
       source: candidateData.source || 'manual',
-      ownerId: auth.currentUser?.uid || '',
+      ownerId: auth.currentUsername || '',
       createdAt: new Date(),
       updatedAt: new Date(),
     };

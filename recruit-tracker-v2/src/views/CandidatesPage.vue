@@ -7,6 +7,7 @@ import { useJobStore } from '../stores/useJobStore';
 import { useApplicationStore } from '../stores/useApplicationStore';
 import { useCandidateStore } from '../stores/useCandidateStore';
 import { useAuthStore } from '../stores/useAuthStore';
+import { ownerFilter } from '../services/data-filter';
 import cloudbase from '../services/cloudbase';
 import { END_REASONS, FUNNEL_STAGES } from '../config/constants';
 import { safeErrorMsg } from '../services/error-messages';
@@ -110,6 +111,10 @@ async function loadData(filters = {}) {
 
     // 排除已归档数据
     conditions.isArchived = dbInstance.command.neq(true);
+
+    // Phase 1 数据隔离：专员只能看自己的候选人
+    const of = ownerFilter();
+    if (of) conditions.ownerId = of.ownerId;
 
     if (Object.keys(conditions).length > 0) {
       for (const [key, value] of Object.entries(conditions)) {
