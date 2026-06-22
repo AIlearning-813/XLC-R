@@ -73,21 +73,25 @@ function getIcon(name) {
 const menuItems = computed(() => {
   const items = [
     { path: '/dashboard', title: '工作台', icon: 'dashboard' },
+    { path: '/demands', title: '招聘需求', icon: 'demand' },
     { path: '/import/resume', title: '录入简历', icon: 'import' },
     { path: '/pipeline', title: '招聘看板', icon: 'pipeline' },
-    { path: '/candidates', title: '候选人', icon: 'candidates' },
     { path: '/reports', title: '数据分析', icon: 'reports' },
-    { path: '/demands', title: '招聘需求', icon: 'demand' },
-    { path: '/ai-chat', title: 'AI助手', icon: 'ai' },
-    { path: '/settings', title: '系统设置', icon: 'settings' },
   ];
 
+  // 管理员专属菜单项（插入中间位置）
   if (auth.isAdmin) {
     items.push(
       { path: '/admin-review', title: '变更审核', icon: 'review' },
       { path: '/import', title: '历史导入', icon: 'import' },
     );
   }
+
+  // 底部菜单项（所有角色可见）
+  items.push(
+    { path: '/settings', title: '系统设置', icon: 'settings' },
+    { path: '/ai-chat', title: 'AI助手', icon: 'ai' },
+  );
 
   return items;
 });

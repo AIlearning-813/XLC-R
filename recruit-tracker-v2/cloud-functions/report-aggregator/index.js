@@ -678,10 +678,14 @@ async function aggregateSourceOnboard(params = {}) {
   };
   if (params.ownerId) onboardFilter.ownerId = params.ownerId;
 
+  // 1. 查询入职的 Application（只需要 candidateId 字段）
   const allOnboardApps = [];
   let hasMore = true, cursor = null;
   while (hasMore) {
-    let query = db.collection('Application').where(onboardFilter).orderBy('_id', 'asc').limit(500);
+    let query = db.collection('Application')
+      .where(onboardFilter)
+      .field({ candidateId: true })
+      .orderBy('_id', 'asc').limit(500);
     if (cursor) query = query.where({ _id: _.gt(cursor) });
     const { data } = await query.get();
     if (!data || data.length === 0) { hasMore = false; break; }
@@ -689,20 +693,43 @@ async function aggregateSourceOnboard(params = {}) {
     if (data.length < 500) hasMore = false; else cursor = data[data.length - 1]._id;
   }
 
+  // 2. 批量查询 Candidate 获取 recruitmentSource（招聘渠道）
+  const candidateIds = [...new Set(allOnboardApps.map(a => a.candidateId).filter(Boolean))];
+  const candidateSourceMap = {}; // candidateId → recruitmentSource
+  if (candidateIds.length > 0) {
+    // 分批查询（CloudBase in 操作符最多支持 100 个值）
+    for (let i = 0; i < candidateIds.length; i += 100) {
+      const batch = candidateIds.slice(i, i + 100);
+      const { data: candidates } = await db.collection('Candidate')
+        .where({ _id: _.in(batch) })
+        .field({ recruitmentSource: true })
+        .get();
+      for (const c of (candidates || [])) {
+        candidateSourceMap[c._id] = c.recruitmentSource || '未标注';
+      }
+    }
+  }
+
+  // 3. 按 recruitmentSource 统计入职数
   const sourceMap = {};
   for (const app of allOnboardApps) {
-    const src = app.source || '未标注';
+    const src = candidateSourceMap[app.candidateId] || '未标注';
     if (!sourceMap[src]) sourceMap[src] = { source: src, onboardCount: 0, totalCount: 0 };
     sourceMap[src].onboardCount++;
   }
 
+  // 4. 查询全部 Application 总数（按候选人的 recruitmentSource 分组）
+  //    先获取所有 candidateId，再批量查询 Candidate
   const totalFilter = { isArchived: _.neq(true) };
   if (params.ownerId) totalFilter.ownerId = params.ownerId;
 
   const allTotalApps = [];
   let hasMore2 = true, cursor2 = null;
   while (hasMore2) {
-    let query = db.collection('Application').where(totalFilter).orderBy('_id', 'asc').limit(500);
+    let query = db.collection('Application')
+      .where(totalFilter)
+      .field({ candidateId: true })
+      .orderBy('_id', 'asc').limit(500);
     if (cursor2) query = query.where({ _id: _.gt(cursor2) });
     const { data } = await query.get();
     if (!data || data.length === 0) { hasMore2 = false; break; }
@@ -710,8 +737,24 @@ async function aggregateSourceOnboard(params = {}) {
     if (data.length < 500) hasMore2 = false; else cursor2 = data[data.length - 1]._id;
   }
 
+  // 补充查询尚未查到的 Candidate
+  const allCandidateIds = [...new Set(allTotalApps.map(a => a.candidateId).filter(Boolean))];
+  const missingIds = allCandidateIds.filter(id => !(id in candidateSourceMap));
+  if (missingIds.length > 0) {
+    for (let i = 0; i < missingIds.length; i += 100) {
+      const batch = missingIds.slice(i, i + 100);
+      const { data: candidates } = await db.collection('Candidate')
+        .where({ _id: _.in(batch) })
+        .field({ recruitmentSource: true })
+        .get();
+      for (const c of (candidates || [])) {
+        candidateSourceMap[c._id] = c.recruitmentSource || '未标注';
+      }
+    }
+  }
+
   for (const app of allTotalApps) {
-    const src = app.source || '未标注';
+    const src = candidateSourceMap[app.candidateId] || '未标注';
     if (!sourceMap[src]) sourceMap[src] = { source: src, onboardCount: 0, totalCount: 0 };
     sourceMap[src].totalCount++;
   }
