@@ -6,6 +6,7 @@ import cloudbase from '../services/cloudbase';
 import { attachHashes } from '../services/hash';
 import { versionedUpdate, initialVersion, isVersionConflict, conflictMessage } from '../services/optimistic-lock';
 import { syncToParsedData } from '../services/candidate-sync';
+import { useAuthStore } from './useAuthStore';
 
 export const useCandidateStore = defineStore('candidate', () => {
   // ===== 状态 =====
