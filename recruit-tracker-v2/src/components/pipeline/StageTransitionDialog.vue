@@ -276,6 +276,9 @@ watch(() => props.visible, (v) => {
   box-shadow: var(--shadow-lg);
   width: 460px;
   max-width: 90vw;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
 }
 
@@ -320,6 +323,8 @@ watch(() => props.visible, (v) => {
 /* === 内容 === */
 .dialog-body {
   padding: var(--spacing-lg);
+  overflow-y: auto;
+  flex: 1;
 }
 
 /* 流转信息 */

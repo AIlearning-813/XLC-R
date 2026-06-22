@@ -247,13 +247,13 @@ function getAvailableStages(row) {
                     <span>编辑信息</span>
                   </button>
 
-                  <!-- 分配岗位 -->
+                  <!-- 关联需求 -->
                   <button
                     class="dropdown-item"
-                    @click="handleAction('assignJob', row, $event)"
+                    @click="handleAction('assignDemand', row, $event)"
                   >
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
-                    <span>分配岗位</span>
+                    <span>关联需求</span>
                   </button>
 
                   <!-- 阶段推进（子菜单） -->
@@ -339,9 +339,9 @@ function getAvailableStages(row) {
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
             <span>编辑信息</span>
           </button>
-          <button class="dropdown-item" @click="handleContextAction('assignJob')">
+          <button class="dropdown-item" @click="handleContextAction('assignDemand')">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
-            <span>分配岗位</span>
+            <span>关联需求</span>
           </button>
           <div class="dropdown-divider"></div>
           <!-- 已结束：重新激活 -->
