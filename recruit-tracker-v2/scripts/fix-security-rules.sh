@@ -58,5 +58,8 @@ set_rule "CommunicationLog" '{"read":"auth.uid != null","write":"auth.uid != nul
 set_rule "ParseCorrectionBank" '{"read":"auth.uid != null","write":"auth.uid != null"}'
 set_rule "ProcessingLock" '{"read":"auth.uid != null","write":"auth.uid != null"}'
 
+# Phase 5: 招聘需求
+set_rule "RecruitmentDemand" '{"read":"auth.uid != null","write":"auth.uid != null"}'
+
 echo ""
-echo "✅ 安全规则已修复（去掉 get() 跨集合依赖，补齐 4 个缺失集合）"
+echo "✅ 安全规则已修复（去掉 get() 跨集合依赖，补齐 RecruitmentDemand）"

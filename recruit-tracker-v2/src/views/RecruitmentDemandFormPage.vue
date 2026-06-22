@@ -14,7 +14,7 @@ const auth = useAuthStore();
 
 const form = ref({
   title: '', department: {}, headcount: 1,
-  expectedArrivalDate: '', priority: 'normal', jobType: 'CC',
+  expectedArrivalDate: '', recruitmentCycle: '', priority: 'normal', jobType: 'CC',
 });
 const loading = ref(false); const error = ref('');
 
@@ -68,6 +68,10 @@ async function submitForm() {
           <select v-model="form.jobType" class="form-input">
             <option v-for="(val, key) in config.jobTypes" :key="key" :value="key">{{ val.label || key }}</option>
           </select>
+        </div>
+        <div class="form-group">
+          <label>招聘周期</label>
+          <input v-model="form.recruitmentCycle" class="form-input" style="width:120px" placeholder="如：30天" />
         </div>
         <div class="form-group">
           <label>优先级</label>

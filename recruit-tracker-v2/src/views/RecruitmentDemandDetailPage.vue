@@ -27,6 +27,7 @@ async function changeStatus(s) {
         <div class="detail-item"><label>部门</label><span>{{ demand.department?.displayName || '—' }}</span></div>
         <div class="detail-item"><label>招聘人数</label><span>{{ demand.headcount }}</span></div>
         <div class="detail-item"><label>到岗时间</label><span>{{ demand.expectedArrivalDate ? new Date(demand.expectedArrivalDate).toLocaleDateString() : '—' }}</span></div>
+        <div class="detail-item"><label>招聘周期</label><span>{{ demand.recruitmentCycle || '—' }}</span></div>
         <div class="detail-item"><label>优先级</label><span>{{ demand.priority || '普通' }}</span></div>
         <div class="detail-item"><label>录入人</label><span>{{ demand.ownerId || '—' }}</span></div>
         <div class="detail-item"><label>录入日期</label><span>{{ demand.submittedAt ? new Date(demand.submittedAt).toLocaleDateString() : '—' }}</span></div>
