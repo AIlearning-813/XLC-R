@@ -71,8 +71,8 @@ async function removeNode(node) {
 <template>
   <div class="dept-tree-editor">
     <div v-if="msg" class="toast">{{ msg }}</div>
-    <div v-if="!config.departments?.length" class="empty">暂无部门数据，请初始化</div>
-    <template v-for="node in config.departments" :key="node.id">
+    <div v-if="!config.departmentTree?.length" class="empty">暂无部门数据，请初始化</div>
+    <template v-for="node in config.departmentTree" :key="node.id">
       <DeptNode
         :node="node" :depth="0" :expanded="expanded" :editingId="editingId"
         :editName="editName" :newChildParentId="newChildParentId" :newChildName="newChildName"

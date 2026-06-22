@@ -1,0 +1,9 @@
+{
+  "name": "init-department-tree",
+  "version": "1.0.0",
+  "description": "One-time function to initialize department tree from employee roster",
+  "main": "index.js",
+  "dependencies": {
+    "@cloudbase/node-sdk": "^2.0.0"
+  }
+}
