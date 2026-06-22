@@ -17,6 +17,37 @@ export const useAuthStore = defineStore('auth', () => {
   const isLoggedIn = computed(() => !!currentUser.value && !!currentUsername.value);
   const isAdmin = computed(() => userRole.value === 'admin');
 
+  // ===== 持久化 key =====
+  const STORAGE_KEY = 'xlc_auth_session';
+
+  /** 从 localStorage 恢复登录态 */
+  function restoreSession() {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const session = JSON.parse(saved);
+        if (session.username && session.role) {
+          userRole.value = session.role;
+          userName.value = session.name || session.username;
+          currentUsername.value = session.username;
+          return true;
+        }
+      }
+    } catch (e) { /* ignore */ }
+    return false;
+  }
+
+  /** 保存登录态到 localStorage */
+  function saveSession() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        username: currentUsername.value,
+        role: userRole.value,
+        name: userName.value,
+      }));
+    } catch (e) { /* ignore */ }
+  }
+
   // ===== 初始化 =====
 
   /** 初始化 CloudBase 匿名登录（提供 SDK 上下文，真正的身份验证走 auth-proxy） */
@@ -39,6 +70,12 @@ export const useAuthStore = defineStore('auth', () => {
       } else {
         currentUser.value = loginResp.user;
       }
+
+      // 尝试从 localStorage 恢复用户身份（避免刷新后需要重新登录）
+      if (loginResp || currentUser.value) {
+        restoreSession();
+      }
+
       return true;
     } catch (err) {
       console.error('CloudBase 初始化失败:', err);
@@ -75,6 +112,7 @@ export const useAuthStore = defineStore('auth', () => {
       userRole.value = role;
       userName.value = name;
       currentUsername.value = returnedUsername;
+      saveSession();  // 🆕 持久化登录态，刷新不丢
       loginState.value = 'idle';
       return true;
     } catch (err) {
@@ -100,6 +138,7 @@ export const useAuthStore = defineStore('auth', () => {
     userName.value = '';
     currentUsername.value = '';
     loginState.value = 'idle';
+    localStorage.removeItem(STORAGE_KEY);  // 🆕 清除持久化登录态
   }
 
   // ===== 账号管理（仅管理员） =====
