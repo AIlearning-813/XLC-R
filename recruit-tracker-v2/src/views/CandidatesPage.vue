@@ -129,10 +129,9 @@ async function loadData(filters = {}) {
     if (of) conditions.ownerId = of.ownerId;
 
     console.log('[loadData] 查询条件:', JSON.stringify(conditions), 'activeTab:', activeTab.value, 'filters:', JSON.stringify(filters));
+    // 一次性传入所有条件，不用链式 .where()（链式调用可能被 CloudBase SDK 忽略）
     if (Object.keys(conditions).length > 0) {
-      for (const [key, value] of Object.entries(conditions)) {
-        query = query.where({ [key]: value });
-      }
+      query = query.where(conditions);
     }
 
     if (filters.dateFrom) {
