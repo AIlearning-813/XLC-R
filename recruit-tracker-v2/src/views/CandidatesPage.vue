@@ -246,6 +246,30 @@ function handleAction({ action, row }) {
     case 'reactivate':
       openReactivateDialog(row);
       break;
+    case 'deleteResume':
+      deleteCandidate(row);
+      break;
+  }
+}
+
+// ===== 删除简历 =====
+
+async function deleteCandidate(row) {
+  const name = row.name || '未命名';
+  if (!confirm(`确定要删除「${name}」的简历吗？\n\n删除后将提交至管理员审批，审批通过后简历将不再出现在任何列表中。`)) return;
+
+  try {
+    showMsg.value = '';
+    const result = await candidateStore.softDelete(row._id || row.candidateId);
+    if (result?.pending) {
+      showMsg.value = '已提交删除审批，请等待管理员审核';
+    } else {
+      showMsg.value = '简历已删除';
+      loadData(currentFilters.value);
+    }
+    setTimeout(() => { showMsg.value = ''; }, 3000);
+  } catch (err) {
+    showMsg.value = `删除失败：${safeErrorMsg(err)}`;
   }
 }
 

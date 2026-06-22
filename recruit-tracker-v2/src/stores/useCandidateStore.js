@@ -201,6 +201,63 @@ export const useCandidateStore = defineStore('candidate', () => {
     return { candidateId };
   }
 
+  /**
+   * 软删除候选人
+   * Admin：直接标记 status:'deleted'
+   * Recruiter：提交 PendingChanges 审批
+   */
+  async function softDelete(id) {
+    const db = cloudbase.db();
+    if (!db) throw new Error('数据库未初始化');
+
+    const current = candidates.value.find(c => c._id === id)
+      || (currentCandidate.value?._id === id ? currentCandidate.value : null);
+    if (!current) throw new Error('候选人不存在');
+
+    const auth = useAuthStore();
+
+    // Recruiter：走审批流程
+    if (!auth.isAdmin) {
+      const { usePendingChangeStore } = await import('./usePendingChangeStore');
+      const pendingStore = usePendingChangeStore();
+      const result = await pendingStore.submitChange({
+        type: 'candidate',
+        action: 'delete',
+        entityType: 'candidate',
+        entityId: id,
+        entityLabel: current.name || id,
+        before: { status: current.status || 'active' },
+        after: {
+          status: 'deleted',
+          deletedBy: auth.currentUsername || 'system',
+          deletedAt: new Date(),
+          previousStatus: current.status || 'active',
+        },
+      });
+      return { pending: true, changeId: result.id };
+    }
+
+    // Admin：直接软删除
+    const updateData = {
+      status: 'deleted',
+      deletedBy: auth.currentUsername || 'admin',
+      deletedAt: new Date(),
+      previousStatus: current.status || 'active',
+      updatedAt: new Date(),
+    };
+
+    await db.collection('Candidate').doc(id).update(updateData);
+
+    // 更新本地缓存
+    const idx = candidates.value.findIndex(c => c._id === id);
+    if (idx !== -1) {
+      candidates.value[idx] = { ...candidates.value[idx], ...updateData };
+    }
+    if (currentCandidate.value?._id === id) {
+      currentCandidate.value = { ...currentCandidate.value, ...updateData };
+    }
+  }
+
   return {
     // state
     candidates,
@@ -214,6 +271,7 @@ export const useCandidateStore = defineStore('candidate', () => {
     add,
     update,
     createWithApplication,
+    softDelete,
     // 乐观锁工具
     isVersionConflict,
     conflictMessage,

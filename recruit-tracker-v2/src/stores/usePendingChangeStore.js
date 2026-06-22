@@ -241,6 +241,20 @@ export const usePendingChangeStore = defineStore('pendingChange', () => {
           break;
         }
 
+        case 'candidate': {
+          if (change.action === 'delete' && change.entityId) {
+            // Phase 3：软删除候选人
+            await db.collection('Candidate').doc(change.entityId).update({
+              status: 'deleted',
+              deletedBy: change.after?.deletedBy || 'system',
+              deletedAt: new Date(),
+              previousStatus: change.before?.status || 'active',
+              updatedAt: new Date(),
+            });
+          }
+          break;
+        }
+
         default:
           console.warn(`[usePendingChangeStore] 未知变更类型: ${change.type}`);
       }

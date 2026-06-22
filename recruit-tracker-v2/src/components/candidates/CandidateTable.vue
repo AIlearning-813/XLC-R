@@ -308,6 +308,16 @@ function getAvailableStages(row) {
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
                       <span>放弃</span>
                     </button>
+
+                    <div class="dropdown-divider"></div>
+                    <!-- 删除简历 -->
+                    <button
+                      class="dropdown-item item-danger"
+                      @click="handleAction('deleteResume', row, $event)"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                      <span>删除简历</span>
+                    </button>
                   </template>
                 </div>
               </Transition>
