@@ -285,6 +285,16 @@ export const useCandidateStore = defineStore('candidate', () => {
         );
         await Promise.allSettled(batchUpdate);
         console.log('[softDelete] Application批量更新完成');
+
+        // 验证：回读确认更新生效
+        for (const app of apps) {
+          try {
+            const { data: check } = await db.collection('Application').doc(app._id).get();
+            console.log('[softDelete] 回读验证 Application:', app._id, 'status:', check?.[0]?.status);
+          } catch (e) {
+            console.warn('[softDelete] 回读验证失败:', app._id, e.message);
+          }
+        }
       }
     } catch (e) {
       console.warn('[useCandidateStore] 关联Application更新失败:', e.message);
