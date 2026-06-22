@@ -38,6 +38,25 @@ exports.main = async () => {
       await db.collection('Config').add({ _id: 'system', ...doc, createdAt: new Date() });
     }
 
+    // 同时确保 RecruitmentDemand 集合存在（客户端 SDK 无法自动创建集合）
+    // 注意：不能先 query 再 add（集合不存在时 query 也报错），直接 add 即可触发自动创建
+    try {
+      await db.collection('RecruitmentDemand').add({
+        _id: '_init_placeholder_',
+        title: '__系统初始化__',
+        status: 'deleted',
+        ownerId: 'system',
+        submittedAt: new Date(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    } catch (e) {
+      // 如 _id 重复说明集合已存在，忽略；其他错误抛出
+      if (!e.message?.includes('duplicate') && !e.message?.includes('E11000')) {
+        console.warn('[init-department-tree] 创建RecruitmentDemand集合失败:', e.message);
+      }
+    }
+
     return {
       success: true,
       message: '部门树初始化成功',
