@@ -7,6 +7,7 @@ import { attachHashes } from '../services/hash';
 import { versionedUpdate, initialVersion, isVersionConflict, conflictMessage } from '../services/optimistic-lock';
 import { syncToParsedData } from '../services/candidate-sync';
 import { useAuthStore } from './useAuthStore';
+import { ownerFilter } from '../services/data-filter';
 
 export const useCandidateStore = defineStore('candidate', () => {
   // ===== 状态 =====
@@ -268,12 +269,13 @@ export const useCandidateStore = defineStore('candidate', () => {
     console.log('[softDelete] Candidate更新成功');
 
     // 同时将关联的 Application 标记为 withdrawn，否则列表刷新后候选人会重新出现
+    // 不限制 status，确保所有关联 Application 都被处理
     try {
       const { data: apps } = await db.collection('Application')
-        .where({ candidateId: id, status: 'active' })
+        .where({ candidateId: id })
         .limit(100)
         .get();
-      console.log('[softDelete] 找到活跃Application:', apps?.length || 0, '条');
+      console.log('[softDelete] 找到关联Application:', apps?.length || 0, '条', apps?.map(a => ({ _id: a._id, status: a.status })));
       if (apps && apps.length > 0) {
         const batchUpdate = apps.map(app =>
           db.collection('Application').doc(app._id).update({

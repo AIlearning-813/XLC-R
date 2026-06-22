@@ -346,7 +346,7 @@ async function deleteCandidate(row) {
   try {
     // row._id 是 Application ID，row.candidateId 才是 Candidate ID
     const candidateId = row.candidateId || row._id;
-    console.log('[deleteCandidate] 删除目标:', { candidateId, rowId: row._id, appId: row.appId, name, isAdmin });
+    console.log('[deleteCandidate] row详情:', JSON.stringify({ _id: row._id, candidateId: row.candidateId, appId: row.appId, name, isAdmin }));
     const result = await candidateStore.softDelete(candidateId, { skipApproval: isAdmin });
     console.log('[deleteCandidate] softDelete 结果:', result);
     if (result?.pending) {
