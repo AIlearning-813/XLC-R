@@ -76,6 +76,7 @@ const menuItems = computed(() => {
     { path: '/demands', title: '招聘需求', icon: 'demand' },
     { path: '/import/resume', title: '录入简历', icon: 'import' },
     { path: '/pipeline', title: '招聘看板', icon: 'pipeline' },
+    { path: '/candidates', title: '候选人', icon: 'candidates' },
     { path: '/reports', title: '数据分析', icon: 'reports' },
   ];
 
