@@ -350,8 +350,10 @@ async function deleteCandidate(row) {
     if (result?.pending) {
       toast.success('已提交删除审批，请等待管理员审核');
     } else {
+      // 先从本地列表移除（避免 DB 读写延迟导致刷新后仍出现）
+      rows.value = rows.value.filter(r => r.candidateId !== candidateId);
+      totalCount.value = Math.max(0, totalCount.value - 1);
       toast.success('简历已删除');
-      loadData(currentFilters.value);
     }
   } catch (err) {
     toast.error(`删除失败：${safeErrorMsg(err)}`);
