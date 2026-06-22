@@ -42,13 +42,13 @@ const routes = [
     path: '/settings',
     name: 'Settings',
     component: () => import('../views/SettingsPage.vue'),
-    meta: { title: '系统设置', icon: 'settings', requireAdmin: true },
+    meta: { title: '系统设置', icon: 'settings' },
   },
   {
     path: '/settings/email',
     name: 'EmailConfig',
     component: () => import('../views/EmailConfigPage.vue'),
-    meta: { title: '邮箱配置', requireAdmin: true },
+    meta: { title: '邮箱配置' },
   },
   {
     path: '/import/resume',

@@ -33,13 +33,13 @@ const menuItems = computed(() => {
     { path: '/candidates', title: '候选人', icon: 'candidates' },
     { path: '/reports', title: '数据分析', icon: 'reports' },
     { path: '/ai-chat', title: 'AI助手', icon: 'ai' },
+    { path: '/settings', title: '系统设置', icon: 'settings' },
   ];
 
   if (auth.isAdmin) {
     items.push(
       { path: '/admin-review', title: '变更审核', icon: 'review' },
       { path: '/import', title: '历史导入', icon: 'import' },
-      { path: '/settings', title: '系统设置', icon: 'settings' },
     );
   }
 
