@@ -3,25 +3,31 @@
 
 import { ref, onMounted, computed, watch, nextTick } from 'vue';
 import { Chart, BarController, LineController, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend, Filler } from 'chart.js';
-import { getJobFunnel, getTrend, getDeptMonthly } from '../services/funnel-report';
+import { getJobFunnel, getTrend, getDeptMonthly, getDemandMetrics, getRecruiterEfficiency } from '../services/funnel-report';
 import cloudbase from '../services/cloudbase';
 import { batchExportCSV } from '../services/batch-operations';
+import { useAuthStore } from '../stores/useAuthStore';
 
 // 注册 Chart.js 组件
 Chart.register(BarController, LineController, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend, Filler);
 
 const db = cloudbase.db();
+const auth = useAuthStore();
 
 // ===== 状态 =====
 const activeJobs = ref([]);
 const selectedJobId = ref('');
 const selectedJobType = ref('');
+const filterOwnerId = ref('');
 
 const funnelData = ref(null);
 const trendData = ref(null);
 const deptData = ref(null);
+const demandData = ref(null);
+const efficiencyData = ref(null);
 const loading = ref(false);
 const error = ref('');
+const recruiters = ref([]);
 
 // Chart 实例引用
 const funnelCanvas = ref(null);
@@ -44,6 +50,11 @@ async function loadJobs() {
   } catch (err) {
     console.warn('[Reports] 岗位列表加载失败:', err.message);
   }
+  // 加载专员列表（Phase 6）
+  try {
+    const { data } = await db.collection('Users').where({ role: 'recruiter' }).field({ username: true, name: true }).limit(50).get();
+    recruiters.value = data || [];
+  } catch (_) {}
 }
 
 async function loadAllData() {
@@ -51,13 +62,18 @@ async function loadAllData() {
   error.value = '';
 
   try {
-    const [funnel, trend, dept] = await Promise.all([
+    const filters = filterOwnerId.value ? { ownerId: filterOwnerId.value } : {};
+    const [funnel, trend, dept, demand, efficiency] = await Promise.all([
       getJobFunnel(selectedJobId.value || undefined, selectedJobType.value || undefined),
       getTrend(6, selectedJobId.value || undefined),
       getDeptMonthly(new Date().getFullYear(), new Date().getMonth() + 1),
+      getDemandMetrics(filters),
+      getRecruiterEfficiency(filters),
     ]);
 
     funnelData.value = funnel;
+    demandData.value = demand;
+    efficiencyData.value = efficiency;
     trendData.value = trend;
     deptData.value = dept;
     loading.value = false;
@@ -302,6 +318,12 @@ onMounted(async () => {
             {{ job.title || job.name }}
           </option>
         </select>
+        <!-- 专员筛选 -->
+        <select v-if="auth.isAdmin" v-model="filterOwnerId" class="select-sm" @change="loadAllData">
+          <option value="">全部专员</option>
+          <option v-for="r in recruiters" :key="r.username" :value="r.username">{{ r.name || r.username }}</option>
+        </select>
+        <button class="btn btn-sm" @click="loadAllData">刷新</button>
         <button class="btn btn-sm" @click="handleExportCSV" :disabled="!funnelData">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
@@ -414,6 +436,38 @@ onMounted(async () => {
         </div>
       </div>
     </template>
+
+    <!-- 招聘需求指标（Phase 6） -->
+    <div v-if="demandData" class="report-card">
+      <h3 class="card-title">📋 招聘需求概况</h3>
+      <div class="stat-cards">
+        <div class="stat-card"><span class="stat-num">{{ demandData.totalDemands }}</span><span class="stat-label">需求总数</span></div>
+        <div class="stat-card"><span class="stat-num">{{ demandData.pendingDemands }}</span><span class="stat-label">待审批</span></div>
+        <div class="stat-card"><span class="stat-num">{{ demandData.recruitingDemands }}</span><span class="stat-label">招聘中</span></div>
+        <div class="stat-card"><span class="stat-num">{{ demandData.completedDemands }}</span><span class="stat-label">已完成</span></div>
+        <div class="stat-card"><span class="stat-num">{{ demandData.avgApprovalHours }}h</span><span class="stat-label">平均审批周期</span></div>
+      </div>
+    </div>
+
+    <!-- 招聘专员效能（Phase 6） -->
+    <div v-if="efficiencyData?.recruiters?.length" class="report-card">
+      <h3 class="card-title">👥 招聘专员效能</h3>
+      <table class="eff-table">
+        <thead><tr>
+          <th>专员</th><th>简历处理</th><th>面试中</th><th>Offer</th><th>已入职</th><th>在招岗位</th>
+        </tr></thead>
+        <tbody>
+          <tr v-for="r in efficiencyData.recruiters" :key="r.ownerId">
+            <td><strong>{{ r.name }}</strong></td>
+            <td>{{ r.resumeProcessed }}</td>
+            <td>{{ r.interviews }}</td>
+            <td>{{ r.offers }}</td>
+            <td>{{ r.onboarded }}</td>
+            <td>{{ r.activeJobs }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 </template>
 
@@ -601,4 +655,14 @@ onMounted(async () => {
     grid-template-columns: 1fr;
   }
 }
+/* Phase 6: 需求指标 + 专员效能 */
+.report-card { background: #fff; border: 1px solid var(--gray-100); border-radius: var(--radius-md); padding: var(--spacing-lg); margin-bottom: var(--spacing-lg); }
+.card-title { margin: 0 0 var(--spacing-md); font-size: var(--font-size-lg); }
+.stat-cards { display: flex; gap: var(--spacing-md); flex-wrap: wrap; }
+.stat-card { flex: 1; min-width: 120px; text-align: center; padding: var(--spacing-md); background: var(--gray-25); border-radius: var(--radius-sm); }
+.stat-num { display: block; font-size: 28px; font-weight: 700; color: var(--primary); }
+.stat-label { display: block; font-size: var(--font-size-xs); color: var(--gray-500); margin-top: 4px; }
+.eff-table { width: 100%; border-collapse: collapse; font-size: var(--font-size-sm); }
+.eff-table th { text-align: left; padding: 8px; border-bottom: 2px solid var(--gray-100); color: var(--gray-500); }
+.eff-table td { padding: 8px; border-bottom: 1px solid var(--gray-50); }
 </style>

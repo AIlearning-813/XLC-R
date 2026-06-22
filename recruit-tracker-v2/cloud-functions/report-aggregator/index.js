@@ -471,6 +471,81 @@ async function aggregateDeptMonthly(year, month) {
 
 // ========== 主入口 ==========
 
+// ===== Phase 6: 招聘需求指标 =====
+
+async function aggregateDemandMetrics(params = {}) {
+  const filter = {};
+  if (params.ownerId) filter.ownerId = params.ownerId;
+
+  const [totalRes, pendingRes, recruitingRes, completedRes] = await Promise.all([
+    db.collection('RecruitmentDemand').where({ ...filter, status: _.neq('deleted') }).count(),
+    db.collection('RecruitmentDemand').where({ ...filter, status: 'pending' }).count(),
+    db.collection('RecruitmentDemand').where({ ...filter, status: 'recruiting' }).count(),
+    db.collection('RecruitmentDemand').where({ ...filter, status: 'completed' }).count(),
+  ]);
+
+  // 平均审批周期（从 submittedAt 到审批通过的时间）
+  let avgApprovalHours = 0;
+  try {
+    const { data: completed } = await db.collection('RecruitmentDemand')
+      .where({ ...filter, status: _.in(['recruiting', 'completed', 'closed']) })
+      .field({ submittedAt: true, updatedAt: true }).limit(100).get();
+    if (completed?.length) {
+      const totalMs = completed.reduce((s, d) => s + (new Date(d.updatedAt) - new Date(d.submittedAt)), 0);
+      avgApprovalHours = Math.round(totalMs / completed.length / 3600000);
+    }
+  } catch (_) {}
+
+  return {
+    totalDemands: totalRes?.total || 0,
+    pendingDemands: pendingRes?.total || 0,
+    recruitingDemands: recruitingRes?.total || 0,
+    completedDemands: completedRes?.total || 0,
+    avgApprovalHours,
+    computedAt: new Date().toISOString(),
+  };
+}
+
+// ===== Phase 6: 招聘专员效能 =====
+
+async function aggregateRecruiterEfficiency(params = {}) {
+  const { ownerId } = params;
+
+  // 获取所有招聘专员
+  let users = [];
+  try {
+    const { data } = await db.collection('Users').where({ role: 'recruiter' }).field({ username: true, name: true }).get();
+    users = data || [];
+  } catch (_) { users = []; }
+
+  if (ownerId) users = users.filter(u => u.username === ownerId);
+
+  const results = [];
+  for (const user of users) {
+    const uFilter = { ownerId: user.username, isArchived: _.neq(true) };
+
+    const [resumeRes, interviewRes, offerRes, onboardRes, activeJobRes] = await Promise.all([
+      db.collection('Application').where({ ...uFilter, stage: 'resume' }).count(),
+      db.collection('Application').where({ ...uFilter, stage: _.in(['first_interview', 'second_interview', 'final_interview']) }).count(),
+      db.collection('Application').where({ ...uFilter, stage: 'offer' }).count(),
+      db.collection('Application').where({ ...uFilter, stage: 'onboard', status: 'active' }).count(),
+      db.collection('Job').where({ ownerId: user.username, status: 'active' }).count(),
+    ]);
+
+    results.push({
+      ownerId: user.username,
+      name: user.name || user.username,
+      resumeProcessed: resumeRes?.total || 0,
+      interviews: interviewRes?.total || 0,
+      offers: offerRes?.total || 0,
+      onboarded: onboardRes?.total || 0,
+      activeJobs: activeJobRes?.total || 0,
+    });
+  }
+
+  return { recruiters: results, computedAt: new Date().toISOString() };
+}
+
 exports.main = async (event, context) => {
   const { type, params = {} } = event;
 
@@ -505,10 +580,18 @@ exports.main = async (event, context) => {
         result = await aggregateDeptMonthly(params.year, params.month);
         break;
 
+      case 'demand_metrics':
+        result = await aggregateDemandMetrics(params);
+        break;
+
+      case 'recruiter_efficiency':
+        result = await aggregateRecruiterEfficiency(params);
+        break;
+
       default:
         return {
           success: false,
-          error: `不支持的聚合类型: ${type}，支持的类型: overview, job_funnel, trend, dept_monthly`,
+          error: `不支持的聚合类型: ${type}，支持的类型: overview, job_funnel, trend, dept_monthly, demand_metrics, recruiter_efficiency`,
         };
     }
 

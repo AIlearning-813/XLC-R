@@ -69,9 +69,27 @@ export async function getDeptMonthly(year, month) {
   return callAggregator('dept_monthly', { year, month });
 }
 
+// ===== Phase 6: 招聘需求指标 + 专员效能 =====
+
+export async function getDemandMetrics(filters = {}) {
+  return callAggregator('demand_metrics', filters);
+}
+
+export async function getRecruiterEfficiency(filters = {}) {
+  return callAggregator('recruiter_efficiency', filters);
+}
+
+/** 给现有函数增加 filters 支持 */
+export async function getOverviewWithFilters(filters = {}) {
+  return callAggregator('overview', filters);
+}
+
 export default {
   getDashboardOverview,
   getJobFunnel,
   getTrend,
   getDeptMonthly,
+  getDemandMetrics,
+  getRecruiterEfficiency,
+  getOverviewWithFilters,
 };
