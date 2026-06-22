@@ -15,6 +15,8 @@ import CompanyInfoTab from '../components/settings/CompanyInfoTab.vue';
 import KnowledgeBaseTab from '../components/settings/KnowledgeBaseTab.vue';
 import InsightsTab from '../components/settings/InsightsTab.vue';
 import SystemConfigTab from '../components/settings/SystemConfigTab.vue';
+import DepartmentManageTab from '../components/settings/DepartmentManageTab.vue';
+import JobTypeManageTab from '../components/settings/JobTypeManageTab.vue';
 
 const activeTab = ref('email');
 
@@ -23,6 +25,8 @@ const tabs = [
   { key: 'company', label: '公司信息', icon: '🏢' },
   { key: 'knowledge', label: '知识库', icon: '📚' },
   { key: 'insights', label: '历史洞察', icon: '📊' },
+  { key: 'dept', label: '部门管理', icon: '🏗️' },
+  { key: 'jobtype', label: '岗位配置', icon: '💼' },
   { key: 'system', label: '系统配置', icon: '⚙️' },
 ];
 </script>
@@ -54,6 +58,8 @@ const tabs = [
       <CompanyInfoTab v-else-if="activeTab === 'company'" />
       <KnowledgeBaseTab v-else-if="activeTab === 'knowledge'" />
       <InsightsTab v-else-if="activeTab === 'insights'" />
+      <DepartmentManageTab v-else-if="activeTab === 'dept'" />
+      <JobTypeManageTab v-else-if="activeTab === 'jobtype'" />
       <SystemConfigTab v-else-if="activeTab === 'system'" />
     </div>
   </div>
