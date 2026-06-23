@@ -1,0 +1,162 @@
+{
+  "envId": "xlc-recruit-d1gmbx8gybc8a3565",
+  "version": "2.0",
+  "framework": {
+    "name": "recruit-tracker-v2",
+    "plugins": {
+      "client": {
+        "use": "@cloudbase/framework-plugin-website",
+        "inputs": {
+          "outputPath": "dist",
+          "cloudPath": "/"
+        }
+      }
+    }
+  },
+  "functionRoot": "cloud-functions",
+  "functions": [
+    {
+      "name": "db-backup",
+      "timeout": 300,
+      "memorySize": 512,
+      "runtime": "Nodejs20.19",
+      "triggers": [
+        {
+          "name": "daily-backup",
+          "type": "timer",
+          "config": "0 3 * * *"
+        }
+      ]
+    },
+    {
+      "name": "health-monitor",
+      "timeout": 60,
+      "memorySize": 256,
+      "runtime": "Nodejs20.19",
+      "triggers": [
+        {
+          "name": "health-check",
+          "type": "timer",
+          "config": "0 * * * *"
+        }
+      ]
+    },
+    {
+      "name": "resume-parser-proxy",
+      "timeout": 30,
+      "memorySize": 256,
+      "runtime": "Nodejs20.19",
+      "comment": "DEEPSEEK_API_KEY 由 CloudBase 控制台管理，不要在部署配置中设置"
+    },
+    {
+      "name": "parse-queue-processor",
+      "timeout": 180,
+      "memorySize": 512,
+      "runtime": "Nodejs20.19",
+      "triggers": [
+        {
+          "name": "parse-queue-trigger",
+          "type": "timer",
+          "config": "*/10 * * * *"
+        }
+      ]
+    },
+    {
+      "name": "email-scanner",
+      "timeout": 300,
+      "memorySize": 1024,
+      "runtime": "Nodejs20.19",
+      "triggers": [
+        {
+          "name": "email-scan-trigger",
+          "type": "timer",
+          "config": "*/30 * * * *"
+        }
+      ],
+      "comment": "MASTER_SECRET/SALT_PEPPER/DEDUP_HMAC_KEY 已部署到云函数环境变量，在 CloudBase 控制台管理"
+    },
+    {
+      "name": "write-audit-log",
+      "timeout": 10,
+      "memorySize": 128,
+      "runtime": "Nodejs20.19"
+    },
+    {
+      "name": "auth-proxy",
+      "timeout": 30,
+      "memorySize": 256,
+      "runtime": "Nodejs20.19",
+      "comment": "用户认证代理 — 登录验证 + 账号管理（添加/删除/重置密码）"
+    },
+    {
+      "name": "get-file-url",
+      "timeout": 30,
+      "memorySize": 256,
+      "runtime": "Nodejs20.19",
+      "comment": "云存储文件下载代理（管理员权限），返回 base64 供前端预览"
+    },
+    {
+      "name": "archive-old-applications",
+      "timeout": 300,
+      "memorySize": 512,
+      "runtime": "Nodejs20.19",
+      "triggers": [
+        {
+          "name": "annual-archive",
+          "type": "timer",
+          "config": "0 3 1 1 *"
+        }
+      ],
+      "comment": "年度归档：入职>6月 + 结束>12月的申请标记为 isArchived"
+    },
+    {
+      "name": "report-aggregator",
+      "timeout": 30,
+      "memorySize": 512,
+      "runtime": "Nodejs20.19",
+      "comment": "报表聚合：overview/job_funnel/trend/dept_monthly 四种维度 + ReportCache 缓存"
+    },
+    {
+      "name": "rag-assistant-proxy",
+      "timeout": 30,
+      "memorySize": 256,
+      "runtime": "Nodejs20.19",
+      "comment": "RAG 检索增强生成代理 — 招聘 AI 助手核心云函数，DEEPSEEK_API_KEY 由 CloudBase 控制台管理"
+    },
+    {
+      "name": "web-search-agent",
+      "timeout": 60,
+      "memorySize": 256,
+      "runtime": "Nodejs20.19",
+      "comment": "AI 网络搜索代理 — 搜集公司信息写入知识库草稿，DEEPSEEK_API_KEY 由 CloudBase 控制台管理"
+    },
+    {
+      "name": "history-insight-generator",
+      "timeout": 120,
+      "memorySize": 512,
+      "runtime": "Nodejs20.19",
+      "comment": "历史洞察生成器 — 分析历史数据生成招聘洞察，DEEPSEEK_API_KEY 由 CloudBase 控制台管理"
+    },
+    {
+      "name": "report-cache-warmer",
+      "timeout": 120,
+      "memorySize": 512,
+      "runtime": "Nodejs20.19",
+      "triggers": [
+        {
+          "name": "daily-cache-warm",
+          "type": "timer",
+          "config": "0 2 * * *"
+        }
+      ],
+      "comment": "每日凌晨2:00预热报表缓存 + 清理7天前过期缓存"
+    },
+    {
+      "name": "init-department-tree",
+      "timeout": 30,
+      "memorySize": 256,
+      "runtime": "Nodejs20.19",
+      "comment": "一次性云函数：从员工花名册初始化四级部门树到 Config 集合"
+    }
+  ]
+}

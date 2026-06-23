@@ -100,6 +100,11 @@ exports.main = async (event, context) => {
     return handleDiagnose(event);
   }
 
+  // ---- P0-1 密钥轮换（一次性迁移）----
+  if (action === 'rotateKeys') {
+    return handleRotateKeys(event);
+  }
+
   // ---- 扫描邮件 ----
   if (action === 'scan') {
     // 检查关键模块
@@ -335,6 +340,87 @@ async function handleDiagnose(event) {
     recentSenders,
     recruitmentDomains: ['@zhipin.com', '@kanzhun.com', '@zhaopin.com.cn', '@liepin.com', '@xlczg.com'],
   };
+}
+
+// ===== 密钥轮换迁移（P0-1，一次性操作）=====
+
+async function handleRotateKeys(event) {
+  const crypto = modules.crypto;
+  if (!crypto) {
+    return { success: false, message: 'crypto 模块未加载' };
+  }
+
+  const oldMasterSecret = process.env.OLD_MASTER_SECRET;
+  const oldPepper = process.env.OLD_SALT_PEPPER;
+
+  if (!oldMasterSecret || !oldPepper) {
+    return { success: false, message: 'OLD_MASTER_SECRET/OLD_SALT_PEPPER 未配置，无需迁移' };
+  }
+
+  try {
+    const { data: configs } = await db.collection('EmailConfig').limit(1000).get();
+    if (!configs || configs.length === 0) {
+      return { success: true, message: '没有 EmailConfig 记录，无需迁移', migrated: 0, skipped: 0, failed: 0 };
+    }
+
+    let migrated = 0, skipped = 0, failed = 0;
+    const failures = [];
+
+    for (const config of configs) {
+      try {
+        if (!config.imapPassword) { skipped++; continue; }
+        if (config.imapPassword.startsWith('PLAINTEXT:')) { skipped++; continue; }
+
+        // 尝试用旧密钥解密
+        let plaintext;
+        try {
+          // 使用 crypto 模块的内部解密能力（这里手动调用旧密钥解密）
+          const packageBuffer = Buffer.from(config.imapPassword, 'base64');
+          const SALT_LENGTH = 16, IV_LENGTH = 12, AUTH_TAG_LENGTH = 16;
+          if (packageBuffer.length < SALT_LENGTH + IV_LENGTH + AUTH_TAG_LENGTH) {
+            skipped++; continue;
+          }
+          const salt = packageBuffer.subarray(0, SALT_LENGTH);
+          const iv = packageBuffer.subarray(SALT_LENGTH, SALT_LENGTH + IV_LENGTH);
+          const encryptedData = packageBuffer.subarray(SALT_LENGTH + IV_LENGTH);
+          const ciphertext = encryptedData.subarray(0, encryptedData.length - AUTH_TAG_LENGTH);
+          const authTag = encryptedData.subarray(encryptedData.length - AUTH_TAG_LENGTH);
+
+          const nodeCrypto = require('crypto');
+          const oldKey = nodeCrypto.pbkdf2Sync(oldMasterSecret + oldPepper, salt, 100000, 32, 'sha256');
+          const decipher = nodeCrypto.createDecipheriv('aes-256-gcm', oldKey, iv);
+          decipher.setAuthTag(authTag);
+          plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf-8');
+        } catch {
+          // 可能已经用新密钥加密过
+          skipped++;
+          continue;
+        }
+
+        // 用新密钥重新加密
+        const newEncrypted = crypto.encrypt(plaintext);
+        await db.collection('EmailConfig').doc(config._id).update({
+          imapPassword: newEncrypted,
+          updatedAt: new Date(),
+        });
+        migrated++;
+        console.log(`[rotateKeys] ✅ ${config.email} 迁移成功`);
+      } catch (err) {
+        failed++;
+        failures.push({ email: config.email, error: err.message });
+        console.error(`[rotateKeys] ❌ ${config.email} 失败:`, err.message);
+      }
+    }
+
+    return {
+      success: true,
+      message: `密钥轮换完成：迁移 ${migrated}，跳过 ${skipped}，失败 ${failed}`,
+      migrated, skipped, failed,
+      failures: failures.length > 0 ? failures : undefined,
+    };
+  } catch (err) {
+    return { success: false, message: `密钥轮换异常：${err.message}` };
+  }
 }
 
 // ===== 核心逻辑 =====
