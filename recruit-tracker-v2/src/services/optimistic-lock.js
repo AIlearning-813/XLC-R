@@ -12,6 +12,7 @@
  */
 
 import cloudbase from './cloudbase';
+import { getNow } from './server-time';
 
 /** 最大重试次数 */
 const MAX_RETRIES = 3;
@@ -121,7 +122,7 @@ export async function versionedUpdate(collectionName, docId, expectedVersion, up
       await db.collection(collectionName).doc(docId).update({
         ...updateData,
         _version: newVersion,
-        updatedAt: new Date(),
+        updatedAt: getNow(),  // P0-5：使用校准后的服务器时间
       });
 
       // 4. 更新成功后二次验证：重新读取确认版本号正确递增

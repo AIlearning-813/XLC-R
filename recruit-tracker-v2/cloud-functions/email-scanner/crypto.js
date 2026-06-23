@@ -12,6 +12,7 @@
  *   - MASTER_SECRET 和 SALT_PEPPER 来自云函数环境变量（process.env）
  *   - 每次加密使用随机 Salt（16字节），确保相同明文产生不同密文
  *   - 存储格式：base64(salt(16B) + iv(12B) + ciphertext + authTag(16B))
+ *   - 🆕 P0-1 密钥轮换：加密始终用新密钥，解密先试新密钥再试旧密钥（过渡期）
  */
 
 const crypto = require('crypto');
@@ -87,7 +88,10 @@ function encrypt(plaintext) {
 }
 
 /**
- * 解密从浏览器端加密存储的密码（兼容旧数据）
+ * 解密存储的加密密码（P0-1：支持密钥轮换过渡期）
+ *
+ * 解密策略：新密钥优先 → 旧密钥回退 → 都失败才抛错
+ * 过渡期结束后（所有数据已迁移），可移除旧密钥回退逻辑。
  *
  * @param {string} storedPackage - Base64 编码的加密包
  * @returns {string} 解密后的明文密码
@@ -98,7 +102,7 @@ function decrypt(storedPackage) {
     throw new Error('加密数据不能为空');
   }
 
-  // 兼容旧数据：如果以 PLAINTEXT: 开头，说明是新上传的明文（由 email-config.js 标记）
+  // 兼容旧数据：如果以 PLAINTEXT: 开头，说明是新上传的明文
   if (storedPackage.startsWith('PLAINTEXT:')) {
     return storedPackage.slice('PLAINTEXT:'.length);
   }
@@ -115,28 +119,42 @@ function decrypt(storedPackage) {
 
   const salt = packageBuffer.subarray(0, SALT_LENGTH);
   const iv = packageBuffer.subarray(SALT_LENGTH, SALT_LENGTH + IV_LENGTH);
-  // ciphertext + authTag：AES-GCM 将 authTag 附加在密文末尾
   const encryptedData = packageBuffer.subarray(SALT_LENGTH + IV_LENGTH);
-
-  // 分离 ciphertext 和 authTag（最后 16 字节）
   const ciphertext = encryptedData.subarray(0, encryptedData.length - AUTH_TAG_LENGTH);
   const authTag = encryptedData.subarray(encryptedData.length - AUTH_TAG_LENGTH);
 
-  // 派生密钥
-  const key = deriveKey(masterSecret, salt, pepper);
-
-  // 解密
-  try {
+  /**
+   * 尝试用指定密钥解密
+   */
+  function tryDecrypt(secret, pep) {
+    const key = deriveKey(secret, salt, pep);
     const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
     decipher.setAuthTag(authTag);
-    const decrypted = Buffer.concat([
-      decipher.update(ciphertext),
-      decipher.final(),
-    ]);
-    return decrypted.toString('utf-8');
-  } catch (err) {
-    throw new Error(`密码解密失败：${err.message}`);
+    return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf-8');
   }
+
+  // 🆕 P0-1 密钥轮换：新密钥优先
+  try {
+    return tryDecrypt(masterSecret, pepper);
+  } catch {
+    // 新密钥解密失败，尝试旧密钥（过渡期）
+  }
+
+  // 回退：尝试旧密钥
+  const oldMasterSecret = process.env.OLD_MASTER_SECRET;
+  const oldSaltPepper = process.env.OLD_SALT_PEPPER;
+
+  if (oldMasterSecret && oldSaltPepper) {
+    try {
+      const plaintext = tryDecrypt(oldMasterSecret, oldSaltPepper);
+      console.log('[crypto] ⚠️ 使用旧密钥解密成功，建议运行密钥轮换迁移脚本');
+      return plaintext;
+    } catch {
+      // 旧密钥也失败，继续抛出错误
+    }
+  }
+
+  throw new Error('密码解密失败：密钥不匹配，请检查 MASTER_SECRET/SALT_PEPPER 环境变量，或运行密钥轮换迁移脚本');
 }
 
 module.exports = { encrypt, decrypt };

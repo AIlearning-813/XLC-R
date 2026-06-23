@@ -15,10 +15,17 @@
 const cloudbase = require('@cloudbase/node-sdk');
 const crypto = require('crypto');
 
-// P1-3：计算 phone/email 的 SHA-256 哈希（用于去重比对）
+// P0-2 修复：升级为 HMAC-SHA256，使用专用 HMAC 密钥防止彩虹表攻击
+// 旧 SHA-256 无盐哈希可被彩虹表快速反查（手机号 ~10^11、邮箱常见模式有限）
+// HMAC-SHA256(key, value) 即使攻击者知道 value，没有 key 也无法计算哈希
 function computeHash(value) {
   if (!value || typeof value !== 'string') return '';
-  return crypto.createHash('sha256').update(value.trim().toLowerCase()).digest('hex');
+  const hmacKey = process.env.DEDUP_HMAC_KEY || process.env.MASTER_SECRET || '';
+  if (!hmacKey) {
+    console.warn('[parse-queue-processor] ⚠️ DEDUP_HMAC_KEY 未配置，回退到 SHA-256（不安全）');
+    return crypto.createHash('sha256').update(value.trim().toLowerCase()).digest('hex');
+  }
+  return crypto.createHmac('sha256', hmacKey).update(value.trim().toLowerCase()).digest('hex');
 }
 
 // format-router 可能因依赖问题加载失败，用 try-catch 保护

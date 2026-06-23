@@ -9,6 +9,7 @@
 
 import cloudbase from './cloudbase';
 import { ownerFilter } from './data-filter';
+import { fetchWithFallback } from './offline-cache';
 
 const FUNCTION_NAME = 'report-aggregator';
 
@@ -34,12 +35,26 @@ async function callAggregator(type, params = {}) {
 }
 
 /**
- * 获取 Dashboard 概览数据
+ * 获取 Dashboard 概览数据（P0-4：带离线兜底）
  * 返回：活跃候选人、本月入职、待跟进、待解析、活跃岗位数、近30天入职
+ *
+ * CloudBase 不可用时 → 返回上次成功的缓存数据（不超过 24 小时）
  */
 export async function getDashboardOverview(params = {}) {
   const of = ownerFilter();
-  return callAggregator('overview', { ...params, ...(of ? { ownerId: of.ownerId } : {}) });
+  const cacheParams = { ...params, ...(of ? { ownerId: of.ownerId } : {}) };
+
+  return fetchWithFallback(
+    'dashboard_overview',
+    () => callAggregator('overview', cacheParams),
+    {
+      ttlMs: 30 * 60 * 1000,      // 缓存 30 分钟
+      maxAgeMs: 24 * 60 * 60 * 1000, // 离线时最多用 24 小时前的缓存
+      onCacheHit: (cached) => {
+        console.log('[funnel-report] ⚠️ 使用离线缓存的 Dashboard 数据');
+      },
+    }
+  );
 }
 
 /**

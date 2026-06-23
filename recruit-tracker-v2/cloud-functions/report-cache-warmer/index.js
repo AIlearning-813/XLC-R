@@ -62,8 +62,30 @@ function daysAgo(n) {
 }
 
 // ========== 缓存写入 ==========
+
+/**
+ * P0-3 修复：写入前检查数据有效性，防止空数据覆盖有效缓存
+ * @returns {boolean} 是否成功写入
+ */
 async function warmCache(key, result) {
   try {
+    // P0-3：空数据保护 — 不写入无意义的数据覆盖有效缓存
+    if (!result) {
+      console.log(`[cache-warmer] ⏭️  跳过 ${key}：结果为空`);
+      return false;
+    }
+    // 检查是否为"空存根"（如 { rates: [], ... }）
+    const isEmptyStub = (
+      (result.rates && result.rates.length === 0 && result.totalCount === 0 && !result._hasData) ||
+      (result.months && result.months.length === 0 && !result._hasData) ||
+      (result.sources && result.sources.length === 0 && !result._hasData) ||
+      (result.jobs && result.jobs.length === 0 && !result._hasData)
+    );
+    if (isEmptyStub) {
+      console.log(`[cache-warmer] ⏭️  跳过 ${key}：数据为空存根，不覆盖有效缓存`);
+      return false;
+    }
+
     const now = new Date();
     const expiresAt = new Date(now.getTime() + WARM_CACHE_TTL * 1000);
     await db.collection('ReportCache').where({ cacheKey: key }).remove();
@@ -211,6 +233,135 @@ async function warmDeptMonthly(year, month) {
   return { year, month, jobs: jobResults, computedAt: new Date().toISOString() };
 }
 
+/**
+ * P0-3 修复：预热 conversion_rates（全岗位阶段间转化率）
+ * 与 report-aggregator 的 conversion_rates 逻辑一致
+ */
+async function warmConversionRates() {
+  const { data: activeJobs } = await db.collection('Job').where({ status: 'active' }).get();
+  if (!activeJobs || activeJobs.length === 0) {
+    return { rates: [], overallRate: 0, totalCount: 0, computedAt: new Date().toISOString(), _hasData: false };
+  }
+
+  const stageCounts = {};
+  let totalApplications = 0;
+  const stages = ['resume', 'valid_resume', 'invite', 'invite_confirmed', 'first_interview',
+    'first_pass', 'final_interview', 'final_pass', 'offer', 'onboard'];
+
+  for (const stage of stages) stageCounts[stage] = 0;
+
+  for (const job of activeJobs) {
+    for (const stage of stages) {
+      const { total } = await db.collection('Application')
+        .where({ jobId: job._id, stage, status: 'active', isArchived: _.neq(true) })
+        .count();
+      stageCounts[stage] += total || 0;
+    }
+    const { total } = await db.collection('Application')
+      .where({ jobId: job._id, status: 'active', isArchived: _.neq(true) })
+      .count();
+    totalApplications += total || 0;
+  }
+
+  const rates = [];
+  for (let i = 1; i < stages.length; i++) {
+    const prev = stageCounts[stages[i - 1]];
+    const curr = stageCounts[stages[i]];
+    rates.push({
+      from: stages[i - 1],
+      to: stages[i],
+      fromCount: prev,
+      toCount: curr,
+      rate: prev > 0 ? parseFloat(((curr / prev) * 100).toFixed(1)) : 0,
+    });
+  }
+
+  const overallRate = stageCounts['resume'] > 0
+    ? parseFloat(((stageCounts['onboard'] / stageCounts['resume']) * 100).toFixed(1)) : 0;
+
+  return {
+    rates,
+    overallRate,
+    totalCount: totalApplications,
+    computedAt: new Date().toISOString(),
+    _hasData: totalApplications > 0,
+  };
+}
+
+/**
+ * P0-3 修复：预热 demand_vs_onboard（月度需求 vs 入职对比）
+ */
+async function warmDemandVsOnboard() {
+  const now = new Date();
+  const months = [];
+  // 回溯 6 个月
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const monthStart = new Date(d.getFullYear(), d.getMonth(), 1);
+    const monthEnd = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999);
+    const label = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+
+    const { data: jobs } = await db.collection('Job')
+      .where({ status: 'active', createdAt: _.lte(monthEnd) })
+      .get();
+
+    let totalDemand = 0;
+    let totalOnboard = 0;
+    if (jobs && jobs.length > 0) {
+      totalDemand = jobs.reduce((sum, j) => sum + (j.headcount || 1), 0);
+      const { total } = await db.collection('Application').where({
+        stage: 'onboard', status: 'active', isArchived: _.neq(true),
+        'funnel.onboardAt': _.and(_.gte(monthStart), _.lte(monthEnd)),
+      }).count();
+      totalOnboard = total || 0;
+    }
+
+    months.push({ month: label, demand: totalDemand, onboard: totalOnboard, rate: totalDemand > 0 ? parseFloat(((totalOnboard / totalDemand) * 100).toFixed(1)) : 0 });
+  }
+
+  return {
+    months,
+    computedAt: new Date().toISOString(),
+    _hasData: months.some(m => m.demand > 0),
+  };
+}
+
+/**
+ * P0-3 修复：预热 source_onboard_overview（按来源渠道统计入职）
+ */
+async function warmSourceOnboard() {
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  const { data: onboardApps } = await db.collection('Application')
+    .where({
+      stage: 'onboard', status: 'active', isArchived: _.neq(true),
+      'funnel.onboardAt': _.gte(monthStart),
+    })
+    .limit(500)
+    .get();
+
+  if (!onboardApps || onboardApps.length === 0) {
+    return { sources: [], computedAt: new Date().toISOString(), _hasData: false };
+  }
+
+  const sourceMap = {};
+  for (const app of onboardApps) {
+    const source = app.source || app.resumeSource || '未知渠道';
+    if (!sourceMap[source]) sourceMap[source] = { source, count: 0 };
+    sourceMap[source].count++;
+  }
+
+  const sources = Object.values(sourceMap).sort((a, b) => b.count - a.count);
+
+  return {
+    sources,
+    totalOnboard: onboardApps.length,
+    computedAt: new Date().toISOString(),
+    _hasData: sources.length > 0,
+  };
+}
+
 async function cleanupExpiredCache() {
   try {
     const cutoff = daysAgo(7);
@@ -285,38 +436,42 @@ exports.main = async (event, context) => {
   }
 
   try {
-    // 4. 预热 conversion_rates（全部岗位）
+    // 4. 预热 conversion_rates（全岗位阶段间转化率）— P0-3 修复：计算实际数据
     const convKey = 'conversion_rates';
-    // 简化：不做完整的聚合，只预热空的
-    const convData = { rates: [], overallRate: 0, totalCount: 0, computedAt: new Date().toISOString() };
+    const convData = await warmConversionRates();
     if (await warmCache(convKey, convData)) {
       results.conversionRates = true;
       console.log('[cache-warmer] conversion_rates 预热完成');
+    } else {
+      console.log('[cache-warmer] conversion_rates 跳过（数据不足）');
     }
   } catch (err) {
     results.errors.push(`conversion_rates: ${err.message}`);
   }
 
   try {
-    // 5. 预热 demand_vs_onboard（当月）
-    const now = new Date();
-    const dvoKey = `demand_vs_onboard`;
-    const dvoData = { months: [], computedAt: new Date().toISOString() };
+    // 5. 预热 demand_vs_onboard（近6个月）— P0-3 修复：计算实际数据
+    const dvoKey = 'demand_vs_onboard';
+    const dvoData = await warmDemandVsOnboard();
     if (await warmCache(dvoKey, dvoData)) {
       results.demandVsOnboard = true;
       console.log('[cache-warmer] demand_vs_onboard 预热完成');
+    } else {
+      console.log('[cache-warmer] demand_vs_onboard 跳过（数据不足）');
     }
   } catch (err) {
     results.errors.push(`demand_vs_onboard: ${err.message}`);
   }
 
   try {
-    // 6. 预热 source_onboard_overview（当月）
+    // 6. 预热 source_onboard_overview（当月按渠道统计入职）— P0-3 修复：计算实际数据
     const soKey = 'source_onboard_overview';
-    const soData = { sources: [], computedAt: new Date().toISOString() };
+    const soData = await warmSourceOnboard();
     if (await warmCache(soKey, soData)) {
       results.sourceOnboard = true;
       console.log('[cache-warmer] source_onboard_overview 预热完成');
+    } else {
+      console.log('[cache-warmer] source_onboard_overview 跳过（数据不足）');
     }
   } catch (err) {
     results.errors.push(`source_onboard_overview: ${err.message}`);

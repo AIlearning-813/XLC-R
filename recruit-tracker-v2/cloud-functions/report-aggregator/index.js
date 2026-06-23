@@ -967,6 +967,10 @@ exports.main = async (event, context) => {
         result = await aggregateDemandTracking(params);
         break;
 
+      // P0-5：返回服务器时间用于客户端时钟校准
+      case 'ping':
+        return { success: true, data: null, serverTime: new Date().toISOString(), fromCache: false };
+
       default:
         return {
           success: false,
