@@ -12,9 +12,11 @@ const FUNCTION_NAME = 'report-aggregator';
 
 async function callAggregator(type, params = {}) {
   try {
-    const result = await cloudbase.callFunction(FUNCTION_NAME, { type, params });
-    if (!result.success) {
-      console.warn(`[demand-report] ${type} 查询失败:`, result.error);
+    const response = await cloudbase.callFunction(FUNCTION_NAME, { type, params });
+    // CloudBase callFunction 返回 { result: <云函数返回值> }
+    const result = response?.result;
+    if (!result || !result.success) {
+      console.warn(`[demand-report] ${type} 查询失败:`, result?.error);
       return null;
     }
     return result.data;

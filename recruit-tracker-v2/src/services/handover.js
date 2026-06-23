@@ -77,7 +77,7 @@ export async function executeHandover(leavingOwnerId, newOwnerId, options = {}) 
   }
 
   // 2. 批量更新 ownerId
-  const errors = [];
+  let errors = [];
   let transferred = 0;
 
   const now = new Date();

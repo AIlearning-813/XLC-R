@@ -46,14 +46,24 @@ async function batchExecute(items, fn, onProgress) {
   for (let i = 0; i < items.length; i += MAX_BATCH_SIZE) {
     const batch = items.slice(i, i + MAX_BATCH_SIZE);
     const batchResults = await Promise.allSettled(
-      batch.map((item) => fn(item).catch((err) => ({ error: err, item })))
+      batch.map((item, batchIdx) =>
+        fn(item).catch((err) => {
+          // 将错误转换为带标记的返回值，方便统一处理
+          return { __error: true, error: err, item };
+        })
+      )
     );
 
-    for (const result of batchResults) {
+    for (let j = 0; j < batchResults.length; j++) {
+      const result = batchResults[j];
       if (result.status === 'fulfilled') {
-        results.push(result.value);
+        if (result.value?.__error) {
+          errors.push({ item: result.value.item, error: result.value.error });
+        } else {
+          results.push(result.value);
+        }
       } else {
-        errors.push({ item: batch[0], error: result.reason });
+        errors.push({ item: batch[j], error: result.reason });
       }
     }
 
