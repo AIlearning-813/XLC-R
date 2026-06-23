@@ -40,8 +40,8 @@ export const useEmailConfigStore = defineStore('emailConfig', () => {
     loading.value = true;
     error.value = '';
     try {
-      const uid = auth.currentUser?.uid;
-      configs.value = uid ? await getEmailConfigs(uid) : [];
+      const username = auth.currentUsername;
+      configs.value = username ? await getEmailConfigs(username) : [];
     } catch (err) {
       error.value = err.message || '获取邮箱配置失败';
       toast.error(error.value);

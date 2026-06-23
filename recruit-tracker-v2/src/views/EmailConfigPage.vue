@@ -34,7 +34,7 @@ const defaultForm = () => ({
   imapUser: '',
   imapPassword: '',
   enabled: true,
-  userId: auth.currentUser?.uid || '',
+  userId: auth.currentUsername || '',
 });
 
 const form = reactive(defaultForm());
