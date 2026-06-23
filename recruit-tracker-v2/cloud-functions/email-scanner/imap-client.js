@@ -298,12 +298,17 @@ async function fetchNewResumes(config) {
 async function testConnection(config) {
   const { ImapFlow } = require('imapflow');
 
-  // 解密密码
+  // 解密密码（兼容明文：来自前端 test/diagnose 的密码是明文，来自 DB 的是密文）
   let plainPassword;
   try {
     plainPassword = decrypt(config.imapPassword);
   } catch (err) {
-    return { success: false, message: `密码解密失败：${err.message}` };
+    // 解密失败，假定已是明文密码（test/diagnose 直接从浏览器传过来的）
+    if (config.imapPassword && config.imapPassword.length > 0) {
+      plainPassword = config.imapPassword;
+    } else {
+      return { success: false, message: `密码解密失败：${err.message}` };
+    }
   }
 
   const client = new ImapFlow({

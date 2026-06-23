@@ -20,7 +20,7 @@ const loadErrors = {};
 
 // crypto（内置 crypto，已验证 OK）
 try {
-  modules.crypto = require('../common/crypto');
+  modules.crypto = require('./crypto');
   console.log('[email-scanner] ✅ crypto 加载成功');
 } catch (e) {
   loadErrors.crypto = e.message;
@@ -29,7 +29,7 @@ try {
 
 // deduplicator（依赖 crypto + db）
 try {
-  modules.deduplicator = require('../common/deduplicator');
+  modules.deduplicator = require('./deduplicator');
   console.log('[email-scanner] ✅ deduplicator 加载成功');
 } catch (e) {
   loadErrors.deduplicator = e.message;
@@ -38,7 +38,7 @@ try {
 
 // format-router（依赖 pdfjs-dist, mammoth, adm-zip, rtf-parser）
 try {
-  modules.formatRouter = require('../common/format-router');
+  modules.formatRouter = require('./format-router');
   console.log('[email-scanner] ✅ format-router 加载成功');
 } catch (e) {
   loadErrors.formatRouter = e.message;
@@ -201,13 +201,12 @@ async function handleCreateConfig(event) {
   if (!config) return { success: false, message: '缺少配置数据' };
 
   try {
-    // 加密密码（如果已加密则跳过）
+    // 加密密码：前端永远传明文（通过 HTTPS），必须在云函数端加密后存储
     let encryptedPassword = config.imapPassword || '';
-    if (encryptedPassword && !encryptedPassword.startsWith('PLAINTEXT:')) {
-      // 已经是加密格式（base64），直接使用
-    } else if (encryptedPassword.startsWith('PLAINTEXT:')) {
-      // 明文标记，需要加密
-      const plaintext = encryptedPassword.slice('PLAINTEXT:'.length);
+    if (encryptedPassword) {
+      const plaintext = encryptedPassword.startsWith('PLAINTEXT:')
+        ? encryptedPassword.slice('PLAINTEXT:'.length)
+        : encryptedPassword;
       encryptedPassword = modules.crypto.encrypt(plaintext);
     }
 
@@ -242,13 +241,12 @@ async function handleUpdateConfig(event) {
   try {
     const updateData = { ...updates };
 
-    // 如果包含密码更新，在云函数端加密
+    // 如果包含密码更新，在云函数端加密（前端永远传明文）
     if (updateData.imapPassword) {
-      if (updateData.imapPassword.startsWith('PLAINTEXT:')) {
-        const plaintext = updateData.imapPassword.slice('PLAINTEXT:'.length);
-        updateData.imapPassword = modules.crypto.encrypt(plaintext);
-      }
-      // 否则已是加密格式，直接使用
+      const plaintext = updateData.imapPassword.startsWith('PLAINTEXT:')
+        ? updateData.imapPassword.slice('PLAINTEXT:'.length)
+        : updateData.imapPassword;
+      updateData.imapPassword = modules.crypto.encrypt(plaintext);
     }
 
     updateData.updatedAt = new Date();
@@ -291,8 +289,14 @@ async function handleDiagnose(event) {
   let recentSenders = [];
   try {
     const { ImapFlow } = require('imapflow');
-    const { decrypt } = require('../common/crypto');
-    const plainPassword = decrypt(config.imapPassword);
+    const { decrypt } = require('./crypto');
+    // 解密密码（兼容明文：来自前端 diagnose 的密码是明文）
+    let plainPassword;
+    try {
+      plainPassword = decrypt(config.imapPassword);
+    } catch {
+      plainPassword = config.imapPassword; // 已是明文
+    }
 
     const client = new ImapFlow({
       host: config.imapHost || 'imap.qq.com',
