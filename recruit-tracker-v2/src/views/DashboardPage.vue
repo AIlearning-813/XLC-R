@@ -7,6 +7,7 @@ import { useNotificationStore } from '../stores/useNotificationStore';
 import { getDashboardOverview, getDemandVsOnboard, getSystemStatus, getDuplicateCandidates } from '../services/funnel-report';
 import { getDemandTracking, getDemandAlerts } from '../services/demand-report';
 import { ownerFilter } from '../services/data-filter';
+import { formatDateISO } from '../services/format-utils';
 import NotificationCard from '../components/dashboard/NotificationCard.vue';
 import DateRangePicker from '../components/common/DateRangePicker.vue';
 import PeriodMetricsCards from '../components/dashboard/PeriodMetricsCards.vue';
@@ -48,7 +49,8 @@ const demandOverview = ref({ recruiting: 0, overdue: 0, gap: 0, completionRate: 
 const demandAlerts = ref([]);
 const metricsLoading = ref(false);
 
-function fmtDate(d) { return d instanceof Date ? d.toISOString().slice(0, 10) : ''; }
+// P1-10：使用共享格式化工具
+function fmtDate(d) { return formatDateISO(d); }
 
 async function loadPeriodData() {
   metricsLoading.value = true;

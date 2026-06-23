@@ -10,6 +10,7 @@ import { useAuthStore } from '../stores/useAuthStore';
 import cloudbase from '../services/cloudbase';
 import { getCommunications } from '../services/communication';
 import { safeErrorMsg } from '../services/error-messages';
+import { formatDateISO } from '../services/format-utils';
 import DOMPurify from 'dompurify';
 import { isVersionConflict } from '../services/optimistic-lock';
 import { useToast } from '../composables/useToast';
@@ -262,14 +263,7 @@ async function saveEdit() {
 }
 
 // ===== 工具方法 =====
-function formatDate(dateStr) {
-  if (!dateStr) return '—';
-  const d = new Date(dateStr);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
+// P1-10：formatDate 已替换为共享工具 formatDateISO
 
 function formatDateTime(dateStr) {
   if (!dateStr) return '—';
@@ -910,7 +904,7 @@ watch(candidateId, (newId) => {
               <span class="badge badge-info">{{ getStageLabel(app.stage) }}</span>
             </div>
             <span class="card-header-meta">
-              创建于 {{ formatDate(app.createdAt) }}
+              创建于 {{ formatDateISO(app.createdAt) }}
             </span>
           </div>
           <div class="card-body">
@@ -935,7 +929,7 @@ watch(candidateId, (newId) => {
                 <span
                   class="funnel-date"
                   v-if="app.funnel[getFunnelKey(stage.key)]"
-                >{{ formatDate(app.funnel[getFunnelKey(stage.key)]) }}</span>
+                >{{ formatDateISO(app.funnel[getFunnelKey(stage.key)]) }}</span>
               </div>
             </div>
 

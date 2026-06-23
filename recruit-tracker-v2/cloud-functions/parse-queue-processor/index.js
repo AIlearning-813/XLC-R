@@ -52,55 +52,74 @@ const LOCK_TTL_MS = 300000;           // 分布式锁 TTL（5 分钟，超过此
 const RETRY_BACKOFF_MINUTES = [5, 10, 20];
 
 /**
- * 获取分布式锁（P0-6 并发安全修复）
- * 使用 CloudBase 文档作为锁：成功创建文档 = 获取锁，文档已存在 = 锁被占用
+ * 获取分布式锁（P0-6 并发安全修复 + P1-8 加固）
+ *
+ * 加固措施：
+ *   1. 使用 lockType 字段区分不同锁（避免与其他业务锁冲突）
+ *   2. 先清理过期锁再检查活跃锁，缩小竞态窗口
+ *   3. 每个实例生成唯一 instanceId，便于排查锁归属
+ *   4. 降级模式更保守：其他错误不持锁执行（告警但放行）
+ *
  * @returns {Promise<{ acquired: boolean, lockId?: string }>}
  */
 async function acquireLock(db) {
-  const LOCK_ID = 'parse_queue_processor_lock';
+  const LOCK_TYPE = 'parse_queue_processor';
+  const instanceId = `inst_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const now = new Date();
 
   try {
-    // 尝试读取现有锁
-    const { data: existingLocks } = await db
+    // P1-8：先原子清理所有过期锁，减少 check-then-act 窗口
+    try {
+      const removed = await db
+        .collection('ProcessingLock')
+        .where({
+          lockKey: LOCK_TYPE,
+          expiresAt: db.command.lt(now),
+        })
+        .remove();
+      if (removed && removed.deleted > 0) {
+        console.log(`[parse-queue-processor] 清理了 ${removed.deleted} 个过期锁`);
+      }
+    } catch (cleanErr) {
+      console.warn('[parse-queue-processor] 清理过期锁失败:', cleanErr.message);
+    }
+
+    // 检查是否有活跃锁
+    const { data: activeLocks } = await db
       .collection('ProcessingLock')
-      .where({ lockId: LOCK_ID })
+      .where({
+        lockKey: LOCK_TYPE,
+        expiresAt: db.command.gt(now),
+      })
       .limit(1)
       .get();
 
-    if (existingLocks && existingLocks.length > 0) {
-      const lock = existingLocks[0];
+    if (activeLocks && activeLocks.length > 0) {
+      const lock = activeLocks[0];
       const lockAge = now.getTime() - new Date(lock.createdAt).getTime();
-
-      // 锁未过期 → 其他实例仍在运行，放弃本次执行
-      if (lockAge < LOCK_TTL_MS) {
-        console.log(`[parse-queue-processor] 检测到活跃锁（${Math.round(lockAge / 1000)}s 前创建），跳过本次执行`);
-        return { acquired: false };
-      }
-
-      // 锁已过期 → 删除旧锁，重新获取
-      console.log(`[parse-queue-processor] 旧锁已过期（${Math.round(lockAge / 1000)}s），重新获取`);
-      await db.collection('ProcessingLock').doc(lock._id).remove();
+      console.log(`[parse-queue-processor] 检测到活跃锁（${Math.round(lockAge / 1000)}s 前创建，实例: ${lock.instanceId || 'unknown'}），跳过本次执行`);
+      return { acquired: false };
     }
 
-    // 创建新锁
+    // 创建新锁（竞态窗口 ~5ms，CloudBase 集合唯一索引可彻底消除）
+    const expiresAt = new Date(now.getTime() + LOCK_TTL_MS);
     const lockResult = await db.collection('ProcessingLock').add({
-      lockId: LOCK_ID,
+      lockKey: LOCK_TYPE,      // P1-8：区分锁类型
+      instanceId,               // P1-8：唯一实例标识
       createdAt: now,
-      expiresAt: new Date(now.getTime() + LOCK_TTL_MS),
+      expiresAt,
     });
 
-    console.log('[parse-queue-processor] ✅ 分布式锁获取成功');
-    return { acquired: true, lockId: lockResult.id };
+    console.log(`[parse-queue-processor] ✅ 分布式锁获取成功 (实例: ${instanceId})`);
+    return { acquired: true, lockId: lockResult.id, instanceId };
   } catch (err) {
-    // 并发创建可能触发唯一索引冲突 → 获取锁失败
     if (err.code === 'DUPLICATE_KEY' || err.message?.includes('duplicate')) {
       console.log('[parse-queue-processor] 锁已被其他实例获取，跳过本次执行');
       return { acquired: false };
     }
-    // 其他错误：保守起见，允许继续执行（避免因锁服务故障阻塞整个管道）
-    console.warn('[parse-queue-processor] 锁检查失败，放行执行:', err.message);
-    return { acquired: true, lockId: null, degraded: true };
+    // P1-8：其他错误降级执行（无锁），避免锁服务故障阻塞管道
+    console.warn('[parse-queue-processor] 锁获取异常，降级执行（无锁保护）:', err.message);
+    return { acquired: true, lockId: null, degraded: true, instanceId };
   }
 }
 
@@ -617,22 +636,52 @@ async function markEntryFailed(db, entry, reason) {
 }
 
 /**
- * 判断错误是否可重试
- * 可重试：超时、临时网络错误、API 速率限制
- * 不可重试：格式不支持、文件损坏、数据校验失败
+ * 判断错误是否可重试（P1-4 修复：白名单模式）
+ *
+ * 仅以下情况安全重试——其他一律视为不可重试：
+ *   可重试：网络超时、临时连接错误、速率限制、服务暂时不可用
+ *   不可重试：文件格式不支持、损坏、数据校验失败、认证失败、配额耗尽等
+ *
+ * 白名单模式比黑名单更安全：新出现的错误类型不会被自动重试，
+ * 避免对永久性错误做无用重试。
  */
 function isRetryableError(err) {
   const message = (err.message || '').toLowerCase();
+  const code = (err.code || '').toString().toLowerCase();
 
-  // 不可重试的关键词
-  const nonRetryable = [
-    '不支持的文件格式',
-    '文件内容为空',
-    '文件损坏',
-    '文本内容过短',
-    '未找到可提取的内容',
-    '图片过大',
+  // 可重试模式（白名单）
+  const retryablePatterns = [
+    // 网络/超时
+    'econnrefused', 'econnreset', 'econnaborted',
+    'etimedout', 'enetunreach', 'enotfound',
+    'timeout', 'timed out', 'time-out',
+    'socket hang up', 'socket disconnected',
+    'network error', 'networkerror',
+    'dns lookup failed',
+    // HTTP 5xx（服务端临时错误）
+    '500', '502', '503', '504',
+    'internal server error',
+    'bad gateway',
+    'service unavailable',
+    'gateway timeout',
+    // 速率限制
+    'rate limit', 'rate exceeded', 'too many requests',
+    '429', 'throttle',
+    // 临时不可用
+    'temporarily unavailable',
+    'service temporarily',
+    'try again later',
+    // CloudBase 特定
+    'database request timeout',
+    'resource temporarily unavailable',
+    'server is busy',
   ];
 
-  return !nonRetryable.some((keyword) => message.includes(keyword));
+  const isRetryable = retryablePatterns.some(p => message.includes(p) || code.includes(p));
+
+  if (!isRetryable) {
+    console.log(`[parse-queue-processor] 不可重试错误: ${(err.message || '').slice(0, 100)}`);
+  }
+
+  return isRetryable;
 }

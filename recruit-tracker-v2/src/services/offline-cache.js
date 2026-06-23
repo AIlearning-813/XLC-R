@@ -3,26 +3,71 @@
  *
  * P0-4 修复：当 CloudBase 不可用时，从 localStorage 缓存读取数据保证基本可用。
  *
+ * P1-9 修复：添加用户隔离机制——
+ *   - 缓存 key 包含当前用户标识（username），确保不同用户的缓存互不可见
+ *   - 用户切换/登出时自动清除旧用户的缓存
+ *   - 防止浏览器共享导致的数据泄露（共享设备场景）
+ *
  * 设计原则：
  *   - CloudBase = 唯一数据源，localStorage = 只读缓存 + 离线兜底
  *   - 读：CloudBase 优先 → 成功后写入 localStorage 缓存 → 失败时读缓存
  *   - 写：始终通过 CloudBase（离线时写入本地队列，待恢复后同步）
  *   - TTL 机制：缓存过期后仍可使用（stale-while-revalidate），但标记为过期
  *
- * 缓存粒度：按 store 和数据类型分组存储
+ * 缓存粒度：按用户 + store + 数据类型分组存储
  */
 
 const CACHE_PREFIX = 'xlc_cache_';
 const DEFAULT_TTL_MS = 30 * 60 * 1000; // 默认 30 分钟
 
 /**
- * 生成缓存 key
+ * P1-9：获取当前用户标识（用于缓存隔离）
+ * 优先从 auth store 获取，回退到 localStorage 中的登录态
+ * @returns {string} 用户标识，未登录返回 '_anon'
+ */
+function getCurrentUserKey() {
+  try {
+    // 尝试从 auth store 获取（运行时）
+    const sessionRaw = localStorage.getItem('xlc_auth_session');
+    if (sessionRaw) {
+      const session = JSON.parse(sessionRaw);
+      // P1-5 新格式
+      if (session.u) return session.u;
+      // 旧格式兼容
+      if (session.username) return session.username;
+    }
+  } catch { /* ignore */ }
+  return '_anon';
+}
+
+/**
+ * P1-9：记录当前活跃用户（用于清除旧用户缓存时识别）
+ */
+let _activeUserKey = null;
+
+/**
+ * P1-9：设置当前活跃用户（登录/切换用户时调用）
+ * 如果用户变化，自动清除旧用户的缓存
+ * @param {string} username
+ */
+export function setActiveUser(username) {
+  const newKey = username || '_anon';
+  if (_activeUserKey && _activeUserKey !== newKey) {
+    console.log(`[offline-cache] 用户切换: ${_activeUserKey} → ${newKey}，清除旧用户缓存`);
+    clearAllCache();
+  }
+  _activeUserKey = newKey;
+}
+
+/**
+ * 生成缓存 key（P1-9：含用户标识，隔离不同用户数据）
  * @param {string} namespace - 命名空间（如 'jobs', 'candidates', 'overview'）
  * @param {string} [id] - 可选的标识符
  * @returns {string}
  */
 function cacheKey(namespace, id) {
-  return CACHE_PREFIX + namespace + (id ? '_' + id : '');
+  const userKey = _activeUserKey || getCurrentUserKey();
+  return CACHE_PREFIX + userKey + '_' + namespace + (id ? '_' + id : '');
 }
 
 /**
@@ -111,17 +156,42 @@ export function clearCache(namespace, id) {
 }
 
 /**
- * 清除所有离线缓存
+ * 清除所有离线缓存（P1-9：仅清除当前用户的缓存）
  */
 export function clearAllCache() {
   try {
+    const userKey = _activeUserKey || getCurrentUserKey();
+    const userPrefix = CACHE_PREFIX + userKey + '_';
     const keys = Object.keys(localStorage);
+    let count = 0;
+    for (const key of keys) {
+      if (key.startsWith(userPrefix)) {
+        localStorage.removeItem(key);
+        count++;
+      }
+    }
+    if (count > 0) {
+      console.log(`[offline-cache] 清除了 ${count} 条缓存 (用户: ${userKey})`);
+    }
+  } catch { /* 静默处理 */ }
+}
+
+/**
+ * P1-9：清除所有用户的缓存（切换用户或登出时调用）
+ */
+export function clearAllUsersCache() {
+  try {
+    const keys = Object.keys(localStorage);
+    let count = 0;
     for (const key of keys) {
       if (key.startsWith(CACHE_PREFIX)) {
         localStorage.removeItem(key);
+        count++;
       }
     }
-    console.log('[offline-cache] 所有缓存已清除');
+    if (count > 0) {
+      console.log(`[offline-cache] 清除了全部 ${count} 条跨用户缓存`);
+    }
   } catch { /* 静默处理 */ }
 }
 
@@ -213,6 +283,8 @@ export default {
   getCacheMeta,
   clearCache,
   clearAllCache,
+  clearAllUsersCache,
+  setActiveUser,
   enqueueOfflineWrite,
   drainOfflineQueue,
   fetchWithFallback,

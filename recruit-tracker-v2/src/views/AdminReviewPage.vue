@@ -8,6 +8,7 @@
 import { ref, onMounted, computed } from 'vue';
 import { usePendingChangeStore } from '../stores/usePendingChangeStore';
 import { useAuthStore } from '../stores/useAuthStore';
+import { formatDateShort } from '../services/format-utils';
 
 const store = usePendingChangeStore();
 const auth = useAuthStore();
@@ -83,12 +84,8 @@ function typeLabel(type) { return type === 'job' ? '岗位' : '系统配置'; }
 function actionLabel(action) { return { create: '新建', update: '修改', delete: '删除' }[action] || action; }
 function statusLabel(status) { return { pending: '待审批', approved: '已通过', rejected: '已驳回' }[status] || status; }
 function statusClass(status) { return `badge-${status}`; }
-function fmtDate(d) {
-  if (!d) return '';
-  const date = typeof d === 'string' ? new Date(d) : d;
-  if (isNaN(date.getTime())) return '';
-  return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-}
+// P1-10：使用共享格式化工具
+function fmtDate(d) { return formatDateShort(d, ''); }
 
 function getChangedFields(change) {
   if (!change.before || !change.after) return [];

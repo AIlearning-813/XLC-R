@@ -123,9 +123,13 @@ export const useCandidateStore = defineStore('candidate', () => {
   /**
    * 事务性创建候选人（含 Application + AuditLog + ParseCorrectionBank）
    *
+   * P1-7 修复：添加失败回滚机制——
+   *   如果 Application 创建失败，自动删除已创建的 Candidate，
+   *   确保不会产生孤儿候选人记录。
+   *
    * 将 ResumeImportPage 中散落的 5 步操作收敛为一个 Store 方法：
    *   1. 创建 Candidate
-   *   2. 创建 Application
+   *   2. 创建 Application（失败则回滚步骤1）
    *   3. 记录 ParseCorrectionBank
    *   4. 写入 AuditLog
    *
@@ -143,64 +147,89 @@ export const useCandidateStore = defineStore('candidate', () => {
     // P1-3：附加 phoneHash / emailHash 用于去重
     const candidateWithHashes = await attachHashes(candidate);
 
-    // 1. 创建 Candidate（Phase 1：注入 ownerId）
-    const auth = useAuthStore();
-    const candidateResult = await db.collection('Candidate').add({
-      ...candidateWithHashes,
-      ownerId: candidate.ownerId || auth.currentUsername || 'system',
-      createdBy: candidate.createdBy || auth.currentUsername || 'system',
-      _version: initialVersion(),
-    });
-    const candidateId = candidateResult.id;
+    let candidateId = null;
 
-    // 2. 创建 Application（Phase 1：注入 ownerId）
-    const applicationDoc = {
-      ...application,
-      candidateId,
-      ownerId: application.ownerId || auth.currentUsername || 'system',
-      stage: application.stage || 'resume',
-      stageEnteredAt: new Date(),
-      status: application.status || 'active',
-      funnel: {
-        resumeAt: new Date(),
-        ...(application.funnel || {}),
-      },
-      funnelMeta: {
-        entrySource: 'manual',
-        ...(application.funnelMeta || {}),
-      },
-      _version: initialVersion(),
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-    await db.collection('Application').add(applicationDoc);
+    try {
+      // 1. 创建 Candidate（Phase 1：注入 ownerId）
+      const auth = useAuthStore();
+      const candidateResult = await db.collection('Candidate').add({
+        ...candidateWithHashes,
+        ownerId: candidate.ownerId || auth.currentUsername || 'system',
+        createdBy: candidate.createdBy || auth.currentUsername || 'system',
+        _version: initialVersion(),
+      });
+      candidateId = candidateResult.id;
 
-    // 3. 记录 ParseCorrectionBank（如有修正）
-    if (corrections && corrections.length > 0) {
+      // 2. 创建 Application（Phase 1：注入 ownerId）
+      const applicationDoc = {
+        ...application,
+        candidateId,
+        ownerId: application.ownerId || auth.currentUsername || 'system',
+        stage: application.stage || 'resume',
+        stageEnteredAt: new Date(),
+        status: application.status || 'active',
+        funnel: {
+          resumeAt: new Date(),
+          ...(application.funnel || {}),
+        },
+        funnelMeta: {
+          entrySource: 'manual',
+          ...(application.funnelMeta || {}),
+        },
+        _version: initialVersion(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
       try {
-        await recordCorrections(db, candidateId, corrections);
-      } catch (err) {
-        console.warn('[useCandidateStore] 修正案例库更新失败:', err.message);
-        // 不阻塞主流程
+        await db.collection('Application').add(applicationDoc);
+      } catch (appErr) {
+        // P1-7 回滚：Application 创建失败 → 删除已创建的 Candidate
+        console.error('[useCandidateStore] Application 创建失败，回滚删除 Candidate:', appErr.message);
+        try {
+          await db.collection('Candidate').doc(candidateId).remove();
+          console.log('[useCandidateStore] ✅ 已回滚删除 Candidate:', candidateId);
+        } catch (rollbackErr) {
+          console.error('[useCandidateStore] ⚠️ 回滚删除 Candidate 失败（需手动清理）:', rollbackErr.message);
+        }
+        throw new Error(`创建岗位申请失败：${appErr.message}`);
       }
-    }
 
-    // 4. 写入 AuditLog
-    if (audit) {
-      try {
-        await cloudbase.callFunction('write-audit-log', audit);
-      } catch (err) {
-        console.warn('[useCandidateStore] AuditLog 写入失败:', err.message);
-        // 不阻塞主流程
+      // 3. 记录 ParseCorrectionBank（如有修正）
+      if (corrections && corrections.length > 0) {
+        try {
+          await recordCorrections(db, candidateId, corrections);
+        } catch (err) {
+          console.warn('[useCandidateStore] 修正案例库更新失败:', err.message);
+          // 不阻塞主流程（ParseCorrectionBank 失败不影响核心数据完整性）
+        }
       }
+
+      // 4. 写入 AuditLog
+      if (audit) {
+        try {
+          await cloudbase.callFunction('write-audit-log', audit);
+        } catch (err) {
+          console.warn('[useCandidateStore] AuditLog 写入失败:', err.message);
+          // 不阻塞主流程
+        }
+      }
+
+      // 更新本地缓存
+      const candidateDoc = { ...candidateWithHashes, _id: candidateId };
+      candidates.value.unshift(candidateDoc);
+      currentCandidate.value = candidateDoc;
+
+      return { candidateId };
+    } catch (err) {
+      // 如果 Candidate 创建本身就失败了，不需要回滚
+      if (!candidateId) {
+        throw err;
+      }
+      // 其他异常（如网络中断）：Candidate 可能已创建但 Application 状态未知
+      // 不做自动清理，由人工或定时任务处理
+      throw err;
     }
-
-    // 更新本地缓存
-    const candidateDoc = { ...candidateWithHashes, _id: candidateId };
-    candidates.value.unshift(candidateDoc);
-    currentCandidate.value = candidateDoc;
-
-    return { candidateId };
   }
 
   /**

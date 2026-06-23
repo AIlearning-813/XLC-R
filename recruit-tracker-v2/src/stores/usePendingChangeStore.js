@@ -130,6 +130,10 @@ export const usePendingChangeStore = defineStore('pendingChange', () => {
   // ===== 管理员操作：审批 =====
 
   /**
+   * P1-3 修复：先执行变更，再更新审批状态——
+   *   旧顺序：标记 approved → 执行变更（执行失败会导致"已通过但未生效"）
+   *   新顺序：执行变更 → 标记 approved（执行失败则保持 pending，可重试）
+   *
    * @param {string} id - PendingChanges 文档 ID
    * @param {'approved'|'rejected'} decision
    * @param {string} comment - 审批意见
@@ -147,7 +151,12 @@ export const usePendingChangeStore = defineStore('pendingChange', () => {
 
     const now = new Date();
 
-    // 更新 PendingChanges 状态
+    // P1-3：如果通过 → 先执行实际变更，成功后再更新审批状态
+    if (decision === 'approved') {
+      await executeChange(change);
+    }
+
+    // 更新 PendingChanges 状态（仅当 executeChange 成功后才会执行到这里）
     await db.collection('PendingChanges').doc(id).update({
       status: decision,
       reviewedBy: auth.currentUsername || '',
@@ -155,11 +164,6 @@ export const usePendingChangeStore = defineStore('pendingChange', () => {
       reviewedAt: now,
       reviewComment: comment,
     });
-
-    // 如果通过：执行实际变更
-    if (decision === 'approved') {
-      await executeChange(change);
-    }
 
     // 更新本地缓存
     const idx = pendingChanges.value.findIndex(c => c._id === id);

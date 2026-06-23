@@ -3,6 +3,7 @@
 
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { FUNNEL_STAGES } from '../../config/constants';
+import { formatRelativeTime } from '../../services/format-utils';
 
 const props = defineProps({
   candidates: { type: Array, default: () => [] },
@@ -100,19 +101,9 @@ function getStageLabel(stage) {
   return stageLabelMap.value[stage] || stage || '未知';
 }
 
+// P1-10：使用共享格式化工具 formatRelativeTime
 function formatDate(dateStr) {
-  if (!dateStr) return '';
-  const d = new Date(dateStr);
-  const now = new Date();
-  const diff = now - d;
-
-  if (diff < 60000) return '刚刚';
-  if (diff < 3600000) return `${Math.floor(diff / 60000)} 分钟前`;
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)} 小时前`;
-
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${month}-${day}`;
+  return formatRelativeTime(dateStr, '');
 }
 
 function sourceLabel(source) {

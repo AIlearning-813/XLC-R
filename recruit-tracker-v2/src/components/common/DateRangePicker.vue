@@ -6,6 +6,7 @@
  */
 
 import { ref, computed, watch } from 'vue';
+import { formatDateISO } from '../../services/format-utils';
 
 const props = defineProps({
   modelValue: { type: Object, default: () => ({ start: new Date(), end: new Date() }) },
@@ -16,7 +17,8 @@ const emit = defineEmits(['update:modelValue']);
 // ===== 辅助函数 =====
 function today() { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }
 function daysAgo(n) { const d = today(); d.setDate(d.getDate() - n); return d; }
-function fmtDate(d) { return d instanceof Date ? d.toISOString().slice(0, 10) : ''; }
+// P1-10：使用共享格式化工具
+function fmtDate(d) { return formatDateISO(d); }
 function parseDate(s) { if (!s) return null; const d = new Date(s + 'T00:00:00'); return isNaN(d.getTime()) ? null : d; }
 function startOfWeek() { const d = today(); const day = d.getDay(); const diff = d.getDate() - day + (day === 0 ? -6 : 1); d.setDate(diff); return d; }
 function startOfMonth() { const d = today(); d.setDate(1); return d; }

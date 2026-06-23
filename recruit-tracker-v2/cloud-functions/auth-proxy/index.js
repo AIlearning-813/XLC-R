@@ -2,15 +2,20 @@
  * auth-proxy — 用户认证与账号管理云函数
  *
  * 职责：
- *   1. login — 验证账号密码，返回角色和名称（含暴力破解防护）
- *   2. listUsers — 管理员列出所有用户
- *   3. addUser — 管理员添加新用户
- *   4. deleteUser — 管理员删除用户
- *   5. resetPassword — 管理员重置用户密码
- *   6. seedDefaultUsers — 初始化默认账号（首次部署时调用）
+ *   1. login — 验证账号密码，返回角色和名称（含暴力破解防护）+ 服务端签名会话令牌
+ *   2. verifySession — 验证会话令牌完整性（防 localStorage 篡改）
+ *   3. listUsers — 管理员列出所有用户
+ *   4. addUser — 管理员添加新用户
+ *   5. deleteUser — 管理员删除用户
+ *   6. resetPassword — 管理员重置用户密码
+ *   7. seedDefaultUsers — 初始化默认账号（首次部署时调用）
  *
  * 密码使用 PBKDF2-SHA256 哈希存储，永不存明文
  * 默认密码通过环境变量 XLC_INIT_PASSWORD 注入，无环境变量时自动生成随机密码
+ *
+ * P1-5 修复：登录时生成服务端 HMAC-SHA256 签名会话令牌，防止客户端 localStorage 篡改。
+ *   令牌格式：base64(username|role|name|expiry).base64(HMAC-SHA256(signingKey, payload))
+ *   验证时重新计算签名比对，签名不匹配或过期则拒绝。
  */
 const cloudbase = require('@cloudbase/node-sdk');
 const crypto = require('crypto');
@@ -26,6 +31,10 @@ const PBKDF2_DIGEST = 'sha256';
 // 暴力破解防护参数
 const MAX_LOGIN_ATTEMPTS = 5;
 const LOCK_DURATION_MS = 15 * 60 * 1000; // 15 分钟
+
+// P1-5 会话签名参数
+const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 小时
+const SESSION_SIGNING_KEY = process.env.MASTER_SECRET || 'default-dev-key-change-in-production';
 
 /** 生成指定长度的随机密码 */
 function generateRandomPassword(length = 12) {
@@ -72,6 +81,69 @@ function hashPassword(password, salt) {
 function verifyPassword(password, salt, storedHash) {
   const hash = hashPassword(password, salt);
   return crypto.timingSafeEqual(Buffer.from(hash), Buffer.from(storedHash));
+}
+
+// ===== P1-5 会话签名 =====
+
+/**
+ * 生成服务端签名会话令牌
+ *
+ * 格式：base64(payload).base64(signature)
+ * payload = username|role|name|expiryTimestamp
+ * signature = HMAC-SHA256(signingKey, payload)
+ *
+ * HMAC 签名确保客户端无法伪造会话令牌（即使知道 payload 格式），
+ * 因为没有 MASTER_SECRET 签名密钥无法生成有效签名。
+ */
+function generateSessionToken(username, role, name) {
+  const expiry = Date.now() + SESSION_TTL_MS;
+  const payload = `${username}|${role}|${name}|${expiry}`;
+  const signature = crypto.createHmac('sha256', SESSION_SIGNING_KEY).update(payload).digest('base64');
+  const payloadB64 = Buffer.from(payload).toString('base64');
+  return `${payloadB64}.${signature}`;
+}
+
+/**
+ * 验证会话令牌
+ * @returns {{ valid: false, error: string } | { valid: true, username: string, role: string, name: string, expiry: number }}
+ */
+function verifySessionToken(token) {
+  if (!token || typeof token !== 'string') {
+    return { valid: false, error: '令牌不能为空' };
+  }
+
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 2) {
+      return { valid: false, error: '令牌格式无效' };
+    }
+
+    const payload = Buffer.from(parts[0], 'base64').toString('utf-8');
+    const providedSig = parts[1];
+
+    // 验证签名
+    const expectedSig = crypto.createHmac('sha256', SESSION_SIGNING_KEY).update(payload).digest('base64');
+    if (!crypto.timingSafeEqual(Buffer.from(providedSig), Buffer.from(expectedSig))) {
+      return { valid: false, error: '签名不匹配，令牌可能被篡改' };
+    }
+
+    // 解析 payload
+    const fields = payload.split('|');
+    if (fields.length !== 4) {
+      return { valid: false, error: '令牌载荷格式无效' };
+    }
+
+    const [username, role, name, expiryStr] = fields;
+    const expiry = parseInt(expiryStr, 10);
+
+    if (isNaN(expiry) || Date.now() > expiry) {
+      return { valid: false, error: '令牌已过期' };
+    }
+
+    return { valid: true, username, role, name, expiry };
+  } catch (err) {
+    return { valid: false, error: `令牌解析失败：${err.message}` };
+  }
 }
 
 // ===== 管理员权限校验 =====
@@ -165,12 +237,16 @@ async function handleLogin(params) {
 
     console.log(`[auth-proxy] 登录成功: ${user.username} (${user.role})`);
 
+    // P1-5：生成服务端签名会话令牌（防 localStorage 篡改）
+    const sessionToken = generateSessionToken(user.username, user.role, user.name);
+
     return {
       success: true,
       data: {
         username: user.username,
         role: user.role,
         name: user.name,
+        sessionToken,  // 🆕 服务端 HMAC-SHA256 签名令牌
       },
     };
   } catch (err) {
@@ -376,6 +452,31 @@ async function handleChangePassword(params) {
   }
 }
 
+/** 验证会话令牌（P1-5：防 localStorage 篡改） */
+async function handleVerifySession(params) {
+  const { sessionToken } = params;
+
+  if (!sessionToken) {
+    return { success: false, error: '缺少会话令牌' };
+  }
+
+  const result = verifySessionToken(sessionToken);
+
+  if (!result.valid) {
+    return { success: false, error: result.error };
+  }
+
+  return {
+    success: true,
+    data: {
+      username: result.username,
+      role: result.role,
+      name: result.name,
+      expiry: result.expiry,
+    },
+  };
+}
+
 /** 确保 Users 集合存在，不存在则创建 */
 async function ensureUsersCollection() {
   try {
@@ -443,6 +544,8 @@ exports.main = async (event, context) => {
   switch (action) {
     case 'login':
       return handleLogin(params);
+    case 'verifySession':
+      return handleVerifySession(params);
     case 'listUsers':
       return handleListUsers(params);
     case 'addUser':

@@ -7,6 +7,7 @@ import { getJobFunnel, getDeptMonthly, getDemandMetrics, getRecruiterEfficiency,
 import { batchExportCSV } from '../services/batch-operations';
 import { useAuthStore } from '../stores/useAuthStore';
 import { useJobStore } from '../stores/useJobStore';
+import { formatDateISO } from '../services/format-utils';
 import DateRangePicker from '../components/common/DateRangePicker.vue';
 import ConversionRatePanel from '../components/reports/ConversionRatePanel.vue';
 import DeptOnboardOverview from '../components/reports/DeptOnboardOverview.vue';
@@ -43,7 +44,8 @@ const dateRange = reactive({ start: new Date(), end: new Date() });
 const now2 = new Date();
 dateRange.start = new Date(now2.getFullYear(), now2.getMonth(), 1);
 dateRange.end = now2;
-function fmtDate(d) { return d instanceof Date ? d.toISOString().slice(0, 10) : ''; }
+// P1-10：使用共享格式化工具
+function fmtDate(d) { return formatDateISO(d); }
 
 // Chart 实例引用
 const funnelCanvas = ref(null);

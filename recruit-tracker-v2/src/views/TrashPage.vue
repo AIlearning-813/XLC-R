@@ -7,6 +7,7 @@ import { useCandidateStore } from '../stores/useCandidateStore';
 import { useAuthStore } from '../stores/useAuthStore';
 import { safeErrorMsg } from '../services/error-messages';
 import { useToast } from '../composables/useToast';
+import { formatDateTime } from '../services/format-utils';
 
 const router = useRouter();
 const store = useCandidateStore();
@@ -50,10 +51,7 @@ async function handlePermanentDelete(row) {
   }
 }
 
-function formatDate(dateStr) {
-  if (!dateStr) return '—';
-  try { return new Date(dateStr).toLocaleString('zh-CN'); } catch { return dateStr; }
-}
+// P1-10：使用共享格式化工具，消除重复实现
 </script>
 
 <template>
@@ -89,7 +87,7 @@ function formatDate(dateStr) {
           <td>{{ row.phone || '—' }}</td>
           <td>{{ row.email || '—' }}</td>
           <td>{{ row.expectedPosition || '—' }}</td>
-          <td>{{ formatDate(row.deletedAt) }}</td>
+          <td>{{ formatDateTime(row.deletedAt) }}</td>
           <td>{{ row.deletedBy || '—' }}</td>
           <td>
             <button class="btn btn-xs btn-success" @click="handleRestore(row)">恢复</button>
