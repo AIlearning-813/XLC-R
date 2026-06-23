@@ -3,6 +3,7 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import cloudbase from '../services/cloudbase';
+import { captureError } from '../services/error-capture';
 import { useAuthStore } from './useAuthStore';
 import { ownerFilter } from '../services/data-filter';
 import { versionedUpdate, initialVersion, isVersionConflict, conflictMessage } from '../services/optimistic-lock';
@@ -251,6 +252,7 @@ export const useApplicationStore = defineStore('application', () => {
       });
     } catch (err) {
       console.warn('[useApplicationStore] 审计日志写入失败:', err.message);
+      captureError('application_store', '审计日志写入失败', { message: err.message, context: 'move_stage' });
     }
 
     // 更新本地缓存（注意：payload 中的 funnel/history 已是 command 对象，需用纯数据覆盖）
@@ -317,6 +319,7 @@ export const useApplicationStore = defineStore('application', () => {
       });
     } catch (err) {
       console.warn('[useApplicationStore] 审计日志写入失败:', err.message);
+      captureError('application_store', '审计日志写入失败', { message: err.message, context: 'end_application' });
     }
 
     // 更新本地缓存

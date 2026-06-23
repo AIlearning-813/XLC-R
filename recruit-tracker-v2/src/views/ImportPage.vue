@@ -10,6 +10,7 @@
  */
 import { ref, computed } from 'vue';
 import cloudbase from '../services/cloudbase';
+import { captureError } from '../services/error-capture';
 import { useAuthStore } from '../stores/useAuthStore';
 import { COLUMN_MAPPING_PRESETS } from '../config/constants';
 
@@ -336,7 +337,7 @@ async function startImport() {
       detail: { success, skipped, failed, total: allRows.length },
       operator: auth.currentUser?.uid || 'system',
     });
-  } catch (e) { /* 忽略 */ }
+  } catch (e) { captureError('import_page', '历史导入审计日志写入失败', { message: e.message, context: 'history_import' }); }
 }
 </script>
 

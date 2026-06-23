@@ -3,6 +3,7 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import cloudbase from '../services/cloudbase';
+import { captureError } from '../services/error-capture';
 import { versionedUpdate, initialVersion, isVersionConflict, conflictMessage } from '../services/optimistic-lock';
 import { normalizeJobData, validateJobData } from '../config/constants';
 import { useAuthStore } from './useAuthStore';
@@ -137,7 +138,7 @@ export const useJobStore = defineStore('job', () => {
         detail: { title: jobData.title || jobData.name, type: jobData.type, department: jobData.department },
         operator: jobData.createdBy || 'system',
       });
-    } catch (e) { console.warn('[useJobStore] 审计日志写入失败:', e.message); }
+    } catch (e) { console.warn('[useJobStore] 审计日志写入失败:', e.message); captureError('job_store', '审计日志写入失败', { message: e.message, context: 'add' }); }
 
     return newJob;
   }
@@ -253,7 +254,7 @@ export const useJobStore = defineStore('job', () => {
         detail: { title: current.title || current.name, type: current.type },
         operator: 'system',
       });
-    } catch (e) { console.warn('[useJobStore] 审计日志写入失败:', e.message); }
+    } catch (e) { console.warn('[useJobStore] 审计日志写入失败:', e.message); captureError('job_store', '审计日志写入失败', { message: e.message, context: 'remove' }); }
 
     // 更新本地缓存
     const idx = jobs.value.findIndex(j => j._id === id);

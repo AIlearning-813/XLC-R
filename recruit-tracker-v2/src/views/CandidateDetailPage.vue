@@ -8,6 +8,7 @@ import { useApplicationStore } from '../stores/useApplicationStore';
 import { useJobStore } from '../stores/useJobStore';
 import { useAuthStore } from '../stores/useAuthStore';
 import cloudbase from '../services/cloudbase';
+import { captureError } from '../services/error-capture';
 import { getCommunications } from '../services/communication';
 import { safeErrorMsg } from '../services/error-messages';
 import { formatDateISO } from '../services/format-utils';
@@ -238,7 +239,7 @@ async function saveEdit() {
         detail: { updatedFields: Object.keys(editForm.value) },
         operator: auth.userName,
       });
-    } catch { /* 审计日志失败不影响 */ }
+    } catch (e) { captureError('candidate_detail', '候选人更新审计日志写入失败', { message: e.message, context: 'update_candidate' }); }
 
     // 刷新
     candidate.value = await candidateStore.fetchById(candidateId.value);

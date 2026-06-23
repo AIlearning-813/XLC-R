@@ -11,6 +11,7 @@ import { ownerFilter } from '../services/data-filter';
 import cloudbase from '../services/cloudbase';
 import { END_REASONS, FUNNEL_STAGES } from '../config/constants';
 import { safeErrorMsg } from '../services/error-messages';
+import { captureError } from '../services/error-capture';
 import { isVersionConflict } from '../services/optimistic-lock';
 import { getAvailableTargets } from '../services/pipeline-engine';
 import { useToast } from '../composables/useToast';
@@ -412,7 +413,7 @@ async function confirmReactivate() {
         },
         operator: auth.userName || 'system',
       });
-    } catch { /* ignore */ }
+    } catch (e) { captureError('candidates_page', '审计日志写入失败', { message: e.message, context: 'reactivate' }); }
 
     reactivateDialogVisible.value = false;
     reactivateTarget.value = null;
@@ -465,7 +466,7 @@ async function saveEdit() {
         detail: { updatedFields: Object.keys(editForm.value) },
         operator: auth.userName || 'system',
       });
-    } catch { /* ignore */ }
+    } catch (e) { captureError('candidates_page', '审计日志写入失败', { message: e.message, context: 'update_candidate' }); }
 
     editVisible.value = false;
     editTarget.value = null;
@@ -499,7 +500,7 @@ async function confirmAssignJob() {
         detail: { newJobId: assignJobId.value },
         operator: auth.userName || 'system',
       });
-    } catch { /* ignore */ }
+    } catch (e) { captureError('candidates_page', '审计日志写入失败', { message: e.message, context: 'assign_job' }); }
 
     assignJobVisible.value = false;
     assignTarget.value = null;
