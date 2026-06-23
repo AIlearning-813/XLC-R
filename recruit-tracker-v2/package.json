@@ -13,7 +13,11 @@
     "seed:force": "node scripts/seed-data.js --force",
     "deploy": "bash scripts/deploy.sh",
     "deploy:dev": "bash scripts/deploy.sh dev",
-    "smoke": "node scripts/smoke-test.cjs"
+    "smoke": "node scripts/smoke-test.cjs",
+    "test:e2e": "npx playwright test",
+    "test:e2e:ui": "npx playwright test --ui",
+    "test:e2e:headed": "npx playwright test --headed",
+    "test:e2e:debug": "npx playwright test --debug"
   },
   "dependencies": {
     "@cloudbase/js-sdk": "^3.4.6",
@@ -29,6 +33,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.0",
     "@vitejs/plugin-vue": "^6.0.6",
     "@vue/test-utils": "^2.4.11",
     "jsdom": "^29.1.1",

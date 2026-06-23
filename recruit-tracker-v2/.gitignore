@@ -25,3 +25,8 @@ yarn-error.log*
 
 # CloudBase
 cloudbaserc.json
+
+# E2E 测试产物
+test-results/
+e2e/reports/
+e2e/.playwright/
