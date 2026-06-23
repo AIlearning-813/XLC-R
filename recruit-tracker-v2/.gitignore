@@ -30,3 +30,7 @@ cloudbaserc.json
 test-results/
 e2e/reports/
 e2e/.playwright/
+
+# 临时脚本文件
+scripts/.tmp/
+scripts/fix-json.cjs
