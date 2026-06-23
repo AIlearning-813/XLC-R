@@ -255,10 +255,20 @@ export function checkPreconditions(targetStage, application = {}, job = null) {
     }
   }
 
-  // 入职阶段：检查是否已发 Offer
+  // P2-20：背景调查阶段 — 检查是否已发 Offer
+  if (targetStage === 'background_check') {
+    if (!application.funnel?.offerAt) {
+      missing.push('尚未发放 Offer');
+    }
+  }
+
+  // 入职阶段：检查是否已发 Offer 且完成背景调查
   if (targetStage === 'onboard') {
     if (!application.funnel?.offerAt) {
       missing.push('尚未发放 Offer');
+    }
+    if (!application.funnel?.backgroundCheckAt) {
+      missing.push('尚未完成背景调查');
     }
   }
 
@@ -288,6 +298,7 @@ export function stageToFunnelKey(stage) {
     final_interview: 'interview3At',
     final_pass: 'interview3PassAt',
     offer: 'offerAt',
+    background_check: 'backgroundCheckAt',
     onboard: 'onboardAt',
   };
   return map[stage] || null;

@@ -18,6 +18,7 @@ import CandidateFilter from '../components/candidates/CandidateFilter.vue';
 import CandidateTable from '../components/candidates/CandidateTable.vue';
 import StageTransitionDialog from '../components/pipeline/StageTransitionDialog.vue';
 import AssignDemandDialog from '../components/candidates/AssignDemandDialog.vue';
+import InputDialog from '../components/common/InputDialog.vue';
 
 const router = useRouter();
 const jobStore = useJobStore();
@@ -583,6 +584,13 @@ function handleTransitionCancel() {
 
 const batchActionOpen = ref(false);
 
+// P2-24：岗位名称输入弹窗（替代 prompt()）
+const jobNameDialog = ref({ visible: false, ids: [] });
+
+function onJobNameConfirm(jobName) {
+  if (jobName) batchAssignJobs(jobNameDialog.value.ids, jobName);
+}
+
 function batchAction(action) {
   const ids = [...selectedIds.value];
   if (ids.length === 0) return;
@@ -599,10 +607,9 @@ function batchAction(action) {
       break;
     }
     case 'batchAssignJob': {
-      // 打开批量分配岗位弹窗
+      // P2-24：使用弹窗替代 prompt() 输入岗位名称
       batchActionOpen.value = false;
-      const jobId = prompt('请输入要分配的岗位名称（将自动匹配）：');
-      if (jobId) batchAssignJobs(ids, jobId);
+      jobNameDialog.value = { visible: true, ids };
       break;
     }
     case 'selectAll':
@@ -893,6 +900,15 @@ onMounted(async () => {
       :candidate-name="assignDemandCandidateName"
       @assigned="onDemandAssigned"
       @close="assignDemandVisible = false"
+    />
+
+    <!-- P2-24：岗位名称输入弹窗（替代 prompt()） -->
+    <InputDialog
+      v-model:visible="jobNameDialog.visible"
+      title="批量分配岗位"
+      placeholder="请输入要分配的岗位名称（将自动匹配）"
+      confirmText="确认分配"
+      @confirm="onJobNameConfirm"
     />
 
     <!-- 重新激活弹窗 -->

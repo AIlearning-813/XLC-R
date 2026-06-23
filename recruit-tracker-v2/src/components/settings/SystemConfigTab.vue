@@ -11,6 +11,7 @@ import { useConfigStore } from '../../stores/useConfigStore';
 import { useAuthStore } from '../../stores/useAuthStore';
 import { usePendingChangeStore } from '../../stores/usePendingChangeStore';
 import { FUNNEL_STAGES } from '../../config/constants';
+import InputDialog from '../common/InputDialog.vue';
 
 const config = useConfigStore();
 const auth = useAuthStore();
@@ -83,8 +84,15 @@ async function handleDeleteUser(username) {
   }
 }
 
-async function handleResetPassword(username) {
-  const newPwd = prompt(`请输入「${username}」的新密码（至少8位）：`);
+// P2-24：密码弹窗状态（替代 prompt()）
+const pwdDialog = ref({ visible: false, username: '' });
+
+function openPwdDialog(username) {
+  pwdDialog.value = { visible: true, username };
+}
+
+async function handleResetPassword(newPwd) {
+  const username = pwdDialog.value.username;
   if (!newPwd) return;
   actingUserId.value = username;
   try {
@@ -283,7 +291,7 @@ async function onChangeThreshold(stageKey, days) {
             <span class="col-action">
               <button
                 class="btn-text"
-                @click="handleResetPassword(user.username)"
+                @click="openPwdDialog(user.username)"
                 :disabled="actingUserId === user.username"
                 title="重置密码"
               >&#128273;</button>
@@ -320,6 +328,17 @@ async function onChangeThreshold(stageKey, days) {
 
     <!-- 底部提示 -->
     <p v-if="!auth.isAdmin" class="hint-recruiter">⚠ 你的修改将提交给管理员审核后生效</p>
+
+    <!-- P2-24：密码输入弹窗（替代 prompt()） -->
+    <InputDialog
+      v-model:visible="pwdDialog.visible"
+      :title="`重置密码：${pwdDialog.username}`"
+      placeholder="请输入新密码（至少8位）"
+      type="password"
+      :minLength="8"
+      confirmText="确认重置"
+      @confirm="handleResetPassword"
+    />
   </div>
 </template>
 

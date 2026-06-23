@@ -1,6 +1,6 @@
 /* 新励成招聘管理系统 V2.0 — 业务常量 */
 
-// 管道阶段定义（12 步漏斗 + 1 可选 inviteConfirmed 节点）
+// P2-20：管道阶段定义（13 步漏斗 + 1 可选 inviteConfirmed 节点，含背景调查）
 export const FUNNEL_STAGES = [
   { key: 'resume', label: '简历', order: 0 },
   { key: 'valid_resume', label: '有效简历', order: 1 },
@@ -13,7 +13,8 @@ export const FUNNEL_STAGES = [
   { key: 'final_interview', label: '终试', order: 8 },
   { key: 'final_pass', label: '终试通过', order: 9 },
   { key: 'offer', label: 'Offer', order: 10 },
-  { key: 'onboard', label: '入职', order: 11 },
+  { key: 'background_check', label: '背景调查', order: 11 },
+  { key: 'onboard', label: '入职', order: 12 },
 ];
 
 // 岗位类型及面试轮次
@@ -58,6 +59,37 @@ export const RESUME_SOURCES = ['email', 'manual', 'import'];
 
 // 解析置信度
 export const PARSE_CONFIDENCE_LEVELS = ['high', 'medium', 'low'];
+
+// ===== P2-18：GDPR / 个保法合规常量 =====
+
+// 数据保留期限（天）
+export const DATA_RETENTION_DAYS_DEFAULT = 365; // 默认保留 1 年
+export const DATA_RETENTION_DAYS_MAX = 730;     // 最多保留 2 年
+
+// 同意状态
+export const CONSENT_STATUS = {
+  PENDING: 'pending',     // 待获取
+  GIVEN: 'given',         // 已同意
+  DECLINED: 'declined',   // 已拒绝
+  EXPIRED: 'expired',     // 已过期
+  WITHDRAWN: 'withdrawn', // 已撤回
+};
+
+// 数据处理目的
+export const DATA_PURPOSE = {
+  RECRUITMENT: 'recruitment',     // 招聘录用
+  CONTACT: 'contact',            // 联系沟通
+  RETENTION: 'retention',        // 人才库保留
+};
+
+// 删除请求状态
+export const DELETION_REQUEST_STATUS = {
+  NONE: 'none',           // 无请求
+  PENDING: 'pending',     // 待处理
+  PROCESSING: 'processing', // 处理中
+  COMPLETED: 'completed', // 已完成
+  REJECTED: 'rejected',   // 已拒绝
+};
 
 // ===== 阶段 2：简历录入常量 =====
 

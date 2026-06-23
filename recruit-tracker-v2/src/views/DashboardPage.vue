@@ -102,8 +102,8 @@ async function loadPeriodData() {
   }
 }
 
-// 时间段切换时重新加载
-watch(dateRange, () => { loadPeriodData(); }, { deep: true });
+// P2-26：deep watch + immediate 合并，避免 onMounted 中重复调用 loadPeriodData
+watch(dateRange, () => { loadPeriodData(); }, { deep: true, immediate: true });
 
 async function loadOverview() {
   overviewLoading.value = true;
@@ -199,7 +199,7 @@ function formatTime(dateStr) {
 
 onMounted(async () => {
   await loadOverview();
-  loadPeriodData();
+  // P2-26：loadPeriodData 已由 watch+immediate 处理，此处移除重复调用
 
   if (auth.currentUser?.uid) {
     notify.fetchNotifications(auth.currentUser.uid);

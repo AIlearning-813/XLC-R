@@ -11,13 +11,12 @@ import cloudbase from '../services/cloudbase';
 import { getCommunications } from '../services/communication';
 import { safeErrorMsg } from '../services/error-messages';
 import { formatDateISO } from '../services/format-utils';
-import DOMPurify from 'dompurify';
 import { isVersionConflict } from '../services/optimistic-lock';
 import { useToast } from '../composables/useToast';
 import { FUNNEL_STAGES, JOB_TYPES, END_REASONS } from '../config/constants';
 import CommunicationLog from '../components/candidates/CommunicationLog.vue';
 import AssignDemandDialog from '../components/candidates/AssignDemandDialog.vue';
-import mammoth from 'mammoth';
+import ResumePreview from '../components/candidates/ResumePreview.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -42,12 +41,8 @@ const editing = ref(false);
 const editForm = ref({});
 const saving = ref(false);
 
-// 原始简历文件预览
-const fileUrl = ref('');       // blob: URL，用于 iframe 预览（PDF）或 img（图片）
-const fileLoading = ref(false);
-const fileError = ref('');
-const filePreviewType = ref('');  // 'pdf' | 'docx' | 'image' | 'text' | 'unknown'
-const docxHtml = ref('');         // DOCX→HTML 渲染结果
+// P2-17：简历预览组件引用
+const resumePreviewRef = ref(null);
 
 // 🆕 关联招聘需求弹窗
 const assignDemandVisible = ref(false);
@@ -327,191 +322,10 @@ function onDemandAssigned() {
 // CloudBase 对无扩展名的邮件附件返回 octet-stream，需要魔数兜底
 
 // 魔数签名映射（文件头前几个字节的特征）
-const MAGIC_SIGNATURES = [
-  { bytes: [0x25, 0x50, 0x44, 0x46], mime: 'application/pdf', type: 'pdf' },
-  { bytes: [0x50, 0x4B, 0x03, 0x04], mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', type: 'docx', needsExtCheck: true },
-  { bytes: [0x89, 0x50, 0x4E, 0x47], mime: 'image/png', type: 'image' },
-  { bytes: [0xFF, 0xD8, 0xFF], mime: 'image/jpeg', type: 'image' },
-  { bytes: [0x47, 0x49, 0x46, 0x38], mime: 'image/gif', type: 'image' },
-  { bytes: [0x42, 0x4D], mime: 'image/bmp', type: 'image' },
-  { bytes: [0x52, 0x49, 0x46, 0x46], mime: 'image/webp', type: 'image', needsExtCheck: true },
-];
-
-function detectTypeByMagic(firstBytes) {
-  for (const sig of MAGIC_SIGNATURES) {
-    let match = true;
-    for (let i = 0; i < sig.bytes.length; i++) {
-      if (firstBytes[i] !== sig.bytes[i]) {
-        match = false;
-        break;
-      }
-    }
-    if (match) {
-      // ZIP 魔数 (PK\x03\x04) 用于 DOCX 但也匹配 ZIP/RAR 等。
-      // 如果 fileName 有扩展名，已在之前被 extMimeMap 匹配；
-      // 此处仅做兜底：无扩展名时且魔数为 ZIP → 假定为 DOCX（最常见）
-      if (sig.needsExtCheck && sig.type === 'docx') {
-        continue; // DOCX 需要由 fileName 后缀判断，魔数匹配 ZIP 不一定就是 DOCX
-      }
-      return sig;
-    }
-  }
-  return null;
-}
-
-const extMimeMap = {
-  pdf: 'application/pdf',
-  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  doc: 'application/msword',
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  gif: 'image/gif',
-  webp: 'image/webp',
-  bmp: 'image/bmp',
-  txt: 'text/plain',
-  html: 'text/html',
-  htm: 'text/html',
-  rtf: 'application/rtf',
-};
-
-function detectFileType(fileName, cloudContentType, firstBytes) {
-  const ext = (fileName || '').split('.').pop()?.toLowerCase();
-
-  // Layer 1：文件名扩展名查表
-  if (ext && extMimeMap[ext]) {
-    const mime = extMimeMap[ext];
-    return { mimeType: mime, ext, previewType: previewTypeFromMime(mime, ext) };
-  }
-
-  // Layer 2：云函数返回的非通用 MIME
-  const isGenericCloud = !cloudContentType
-    || cloudContentType === 'application/octet-stream'
-    || cloudContentType === 'binary/octet-stream';
-  if (!isGenericCloud) {
-    return { mimeType: cloudContentType, ext, previewType: previewTypeFromMime(cloudContentType, ext) };
-  }
-
-  // Layer 3：文件内容魔数检测（兜底）
-  if (firstBytes && firstBytes.length >= 4) {
-    const magic = detectTypeByMagic(firstBytes);
-    if (magic) {
-      return { mimeType: magic.mime, ext, previewType: magic.type };
-    }
-  }
-
-  return { mimeType: 'application/octet-stream', ext, previewType: 'unknown' };
-}
-
-function previewTypeFromMime(mimeType, ext) {
-  if (mimeType === 'application/pdf') return 'pdf';
-  if (ext === 'docx' || mimeType.includes('officedocument.wordprocessingml')) return 'docx';
-  if (mimeType.startsWith('image/')) return 'image';
-  if (mimeType.startsWith('text/')) return 'text';
-  return 'unknown';
-}
-
-// 获取云存储文件并生成预览
-// 云函数 get-file-url 用管理员身份下载文件 → 返回 base64
-// PDF → iframe Blob URL  /  DOCX → mammoth 转 HTML  /  图片 → img  /  其他 → 下载按钮
-async function loadFileUrl() {
-  if (!candidate.value?.fileId) return;
-  fileLoading.value = true;
-  fileError.value = '';
-  filePreviewType.value = '';
-  docxHtml.value = '';
-
-  try {
-    // 1. 通过云函数下载文件内容（管理员权限，返回 base64）
-    const result = await cloudbase.callFunction('get-file-url', {
-      fileId: candidate.value.fileId,
-      callerUsername: auth.currentUsername,
-    });
-    if (!result?.success) {
-      throw new Error(result?.error || '获取文件失败');
-    }
-
-    // 2. base64 → 二进制字符串（atob 返回每个字符代表一个字节的字符串）
-    const binaryStr = atob(result.data);
-    const bytes = new Uint8Array(binaryStr.length);
-    for (let i = 0; i < binaryStr.length; i++) {
-      bytes[i] = binaryStr.charCodeAt(i);
-    }
-
-    // 3. 提取前几个字节做魔数检测（兜底无扩展名文件）
-    const firstBytes = bytes.slice(0, 8);
-
-    // 4. 检测文件真实类型（三层：扩展名 → 云 MIME → 魔数）
-    const typeInfo = detectFileType(candidate.value.fileName, result.contentType, firstBytes);
-    filePreviewType.value = typeInfo.previewType;
-
-    // 4. 按文件类型生成预览
-    if (typeInfo.previewType === 'docx') {
-      // DOCX → mammoth 转 HTML（不经过 Blob URL，避免浏览器误判）
-      const docxResult = await mammoth.convertToHtml({ arrayBuffer: bytes.buffer });
-      // P0-2 修复：DOMPurify 消毒 mammoth 转换的 HTML，防止 XSS 注入
-      docxHtml.value = DOMPurify.sanitize(docxResult.value, {
-        ALLOWED_TAGS: ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'br', 'hr',
-          'ul', 'ol', 'li', 'table', 'thead', 'tbody', 'tr', 'th', 'td',
-          'strong', 'em', 'b', 'i', 'u', 's', 'span', 'div', 'img',
-          'a', 'blockquote', 'pre', 'code', 'sub', 'sup'],
-        ALLOWED_ATTR: ['src', 'alt', 'width', 'height', 'href', 'title', 'style', 'class', 'id'],
-      });
-      // 同时生成 Blob URL 用于下载（下载按钮需要）
-      if (fileUrl.value && fileUrl.value.startsWith('blob:')) {
-        URL.revokeObjectURL(fileUrl.value);
-      }
-      const blob = new Blob([bytes], { type: typeInfo.mimeType });
-      fileUrl.value = URL.createObjectURL(blob);
-    } else if (typeInfo.previewType === 'pdf' || typeInfo.previewType === 'image' || typeInfo.previewType === 'text') {
-      // PDF / 图片 / 文本 → Blob URL + iframe 或 img
-      if (fileUrl.value && fileUrl.value.startsWith('blob:')) {
-        URL.revokeObjectURL(fileUrl.value);
-      }
-      const blob = new Blob([bytes], { type: typeInfo.mimeType });
-      fileUrl.value = URL.createObjectURL(blob);
-    } else {
-      // 未知格式 → 只生成下载用 Blob URL，不尝试预览
-      if (fileUrl.value && fileUrl.value.startsWith('blob:')) {
-        URL.revokeObjectURL(fileUrl.value);
-      }
-      const blob = new Blob([bytes], { type: typeInfo.mimeType });
-      fileUrl.value = URL.createObjectURL(blob);
-      filePreviewType.value = 'unknown';
-    }
-  } catch (err) {
-    console.error('[CandidateDetail] 加载文件失败:', err);
-    fileError.value = err.message;
-  } finally {
-    fileLoading.value = false;
-  }
-}
-
-// 下载原始简历文件（用 Blob URL + download 属性确保文件名正确）
-function downloadResume() {
-  const doDownload = () => {
-    if (!fileUrl.value) return;
-    const a = document.createElement('a');
-    a.href = fileUrl.value;
-    a.download = candidate.value?.fileName || 'resume';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  };
-
-  if (fileUrl.value) {
-    doDownload();
-  } else {
-    loadFileUrl().then(() => {
-      if (fileUrl.value) doDownload();
-    });
-  }
-}
-
-// 切换到简历原文 Tab 时自动加载文件链接
+// P2-17：切换到简历原文 Tab 时自动触发预览加载
 watch(activeTab, (tab) => {
-  if (tab === 'resume' && candidate.value?.fileId && !fileUrl.value) {
-    loadFileUrl();
+  if (tab === 'resume' && candidate.value?.fileId) {
+    resumePreviewRef.value?.loadFileUrl();
   }
 });
 
@@ -780,110 +594,9 @@ watch(candidateId, (newId) => {
         </div>
       </div>
 
-      <!-- ===== Tab: 简历原文 ===== -->
+      <!-- ===== P2-17：简历原文 Tab（提取为独立组件） ===== -->
       <div v-if="activeTab === 'resume'" class="tab-content">
-        <div class="card">
-          <div class="card-header">
-            <span class="card-header-title">简历原文</span>
-            <div class="card-header-actions">
-              <button
-                v-if="candidate.fileId"
-                class="btn btn-sm btn-primary"
-                @click="downloadResume"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-                  <polyline points="7 10 12 15 17 10"/>
-                  <line x1="12" y1="15" x2="12" y2="3"/>
-                </svg>
-                下载原始简历
-              </button>
-              <span class="card-header-meta" v-if="candidate.fileName">
-                {{ candidate.fileName }}
-              </span>
-              <span class="card-header-meta" v-if="candidate.sourceEmailFrom">
-                来自：{{ candidate.sourceEmailFrom }}
-              </span>
-            </div>
-          </div>
-          <div class="card-body">
-            <!-- 原始文件预览 -->
-            <div v-if="candidate.fileId" class="resume-preview">
-              <!-- 加载中 -->
-              <div v-if="fileLoading" class="resume-preview-placeholder">
-                <span class="spinner"></span>
-                <span>加载文件中...</span>
-              </div>
-
-              <!-- PDF 预览 → iframe（浏览器内置 PDF 查看器） -->
-              <iframe
-                v-else-if="filePreviewType === 'pdf' && fileUrl"
-                :src="fileUrl"
-                class="resume-iframe"
-                frameborder="0"
-              ></iframe>
-
-              <!-- DOCX 预览 → mammoth 转 HTML -->
-              <div
-                v-else-if="filePreviewType === 'docx' && docxHtml"
-                class="resume-docx-preview"
-                v-html="docxHtml"
-              ></div>
-
-              <!-- 图片预览 -->
-              <div v-else-if="filePreviewType === 'image' && fileUrl" class="resume-image-preview">
-                <img :src="fileUrl" :alt="candidate.fileName || '简历图片'" class="resume-image" />
-              </div>
-
-              <!-- 文本预览 -->
-              <iframe
-                v-else-if="filePreviewType === 'text' && fileUrl"
-                :src="fileUrl"
-                class="resume-iframe resume-text-iframe"
-                frameborder="0"
-              ></iframe>
-
-              <!-- 未知格式 → 显示提示，引导下载 -->
-              <div v-else-if="filePreviewType === 'unknown' && fileUrl" class="resume-preview-placeholder">
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color: var(--gray-300);">
-                  <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
-                  <polyline points="14 2 14 8 20 8"/>
-                </svg>
-                <p style="font-weight: 600; color: var(--gray-500); margin: 0;">
-                  {{ candidate.fileName || '未知文件类型' }}
-                </p>
-                <p style="color: var(--gray-400); font-size: var(--font-size-sm); margin: 0;">
-                  此文件格式不支持在线预览，请下载后查看
-                </p>
-              </div>
-
-              <!-- 错误 -->
-              <div v-else-if="fileError" class="resume-preview-placeholder">
-                <p class="text-danger">{{ fileError }}</p>
-                <button class="btn btn-sm btn-secondary" @click="loadFileUrl">重新加载</button>
-              </div>
-
-              <!-- 初始状态：未加载 -->
-              <div v-else class="resume-preview-placeholder">
-                <span style="color: var(--gray-400);">点击下方「下载原始简历」按钮或刷新页面加载预览</span>
-              </div>
-            </div>
-
-            <!-- 提取文本（折叠，AI 解析用） -->
-            <details v-if="display.resumeRawText" class="resume-text-details">
-              <summary>📄 提取文本（AI 解析用）</summary>
-              <pre class="resume-raw">{{ display.resumeRawText }}</pre>
-            </details>
-
-            <!-- 什么都没有 -->
-            <div v-if="!candidate.fileId && !display.resumeRawText" class="empty-state" style="padding: var(--spacing-xl);">
-              <div class="empty-state-text">简历原文不可用</div>
-              <p class="text-muted" style="font-size: var(--font-size-xs);">
-                该候选人创建时未保留原始简历文件
-              </p>
-            </div>
-          </div>
-        </div>
+        <ResumePreview :candidate="candidate" ref="resumePreviewRef" />
       </div>
 
       <!-- ===== Tab: 申请记录 ===== -->
@@ -1224,135 +937,11 @@ function getFunnelKey(stage) {
   color: var(--success);
 }
 
-/* === 简历原文 === */
-.resume-raw {
-  font-family: "SF Mono", "Fira Code", monospace;
-  font-size: var(--font-size-sm);
-  color: var(--gray-600);
-  white-space: pre-wrap;
-  word-break: break-word;
-  line-height: 1.6;
-  margin: 0;
-  max-height: 400px;
-  overflow-y: auto;
-}
-
 /* 卡片头操作区 */
 .card-header-actions {
   display: flex;
   align-items: center;
   gap: var(--spacing-sm);
-}
-
-/* 简历文件预览 */
-.resume-preview {
-  border: 1px solid var(--gray-100);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-  margin-bottom: var(--spacing-md);
-}
-
-.resume-preview-placeholder {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--spacing-sm);
-  min-height: 200px;
-  background: var(--gray-50);
-  color: var(--gray-400);
-  font-size: var(--font-size-sm);
-}
-
-.resume-iframe {
-  width: 100%;
-  height: 700px;
-  border: none;
-  background: #fff;
-}
-
-.resume-text-iframe {
-  height: 400px;
-}
-
-/* DOCX → HTML 预览 */
-.resume-docx-preview {
-  padding: var(--spacing-lg) var(--spacing-xl);
-  max-height: 700px;
-  overflow-y: auto;
-  background: #fff;
-  font-size: var(--font-size-sm);
-  line-height: 1.8;
-  color: var(--gray-700);
-}
-
-.resume-docx-preview :deep(h1),
-.resume-docx-preview :deep(h2),
-.resume-docx-preview :deep(h3) {
-  color: var(--gray-800);
-  margin-top: var(--spacing-md);
-  margin-bottom: var(--spacing-sm);
-}
-
-.resume-docx-preview :deep(p) {
-  margin: var(--spacing-sm) 0;
-}
-
-.resume-docx-preview :deep(table) {
-  border-collapse: collapse;
-  width: 100%;
-  margin: var(--spacing-sm) 0;
-}
-
-.resume-docx-preview :deep(td),
-.resume-docx-preview :deep(th) {
-  border: 1px solid var(--gray-200);
-  padding: 6px 12px;
-  font-size: var(--font-size-xs);
-}
-
-/* 图片预览 */
-.resume-image-preview {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 300px;
-  background: var(--gray-50);
-  padding: var(--spacing-md);
-}
-
-.resume-image {
-  max-width: 100%;
-  max-height: 700px;
-  object-fit: contain;
-  border-radius: var(--radius-sm);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-}
-
-/* 提取文本折叠区 */
-.resume-text-details {
-  margin-top: var(--spacing-md);
-  border: 1px solid var(--gray-100);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-}
-
-.resume-text-details summary {
-  padding: var(--spacing-sm) var(--spacing-md);
-  background: var(--gray-50);
-  cursor: pointer;
-  font-size: var(--font-size-sm);
-  color: var(--gray-500);
-  user-select: none;
-}
-
-.resume-text-details summary:hover {
-  background: var(--gray-100);
-}
-
-.resume-text-details .resume-raw {
-  padding: var(--spacing-md);
-  max-height: 300px;
 }
 
 /* === 卡片头复用 === */

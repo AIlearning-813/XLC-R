@@ -79,23 +79,41 @@ exports.main = async (event, context) => {
     fileContent: Buffer.from(JSON.stringify(backup, null, 2), 'utf-8'),
   });
 
-  // 清理 30 天前的旧备份
-  const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  // P2-19：清理 30 天前的旧备份
+  let deletedCount = 0;
   try {
-    const { fileList } = await app.getTempFileURL({ fileList: [] });
-    // 注意：CloudBase 云存储不支持按前缀批量删除，需通过控制台配置生命周期策略
-    // 此处仅记录，实际清理建议在 CloudBase 控制台配置：
-    //   云存储 → 生命周期 → backups/ 前缀 → 30 天后自动删除
+    const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+
+    // 列出 backups/ 目录下的所有文件
+    const { fileList } = await app.listDirectoryFiles({ prefix: 'backups/' });
+    if (fileList && fileList.length > 0) {
+      const oldFiles = fileList.filter(f => {
+        // 从文件名中提取时间戳（格式：YYYY-MM-DDTHH-mm-ss）
+        const match = f.Key?.match(/backups\/(\d{4}-\d{2}-\d{2})/);
+        if (!match) return false;
+        const fileDate = new Date(match[1]).getTime();
+        return fileDate < thirtyDaysAgo;
+      });
+
+      if (oldFiles.length > 0) {
+        const fileIDs = oldFiles.map(f => f.FileID).filter(Boolean);
+        if (fileIDs.length > 0) {
+          await app.deleteFile({ fileList: fileIDs });
+          deletedCount = fileIDs.length;
+        }
+      }
+    }
   } catch (cleanupErr) {
-    console.warn('清理旧备份异常（可忽略）:', cleanupErr.message);
+    console.warn('清理旧备份异常（可忽略，建议在控制台配置生命周期策略）:', cleanupErr.message);
   }
 
-  console.log(`✅ 备份完成: ${backupPath}（${totalDocs} 条文档）`);
+  console.log(`✅ 备份完成: ${backupPath}（${totalDocs} 条文档，清理 ${deletedCount} 个旧备份）`);
   return {
     ok: true,
     path: backupPath,
     totalDocs,
     fileID: upload.fileID,
     timestamp,
+    deletedOldBackups: deletedCount,
   };
 };

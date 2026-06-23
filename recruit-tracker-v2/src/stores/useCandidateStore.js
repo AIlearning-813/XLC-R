@@ -8,6 +8,7 @@ import { versionedUpdate, initialVersion, isVersionConflict, conflictMessage } f
 import { syncToParsedData } from '../services/candidate-sync';
 import { useAuthStore } from './useAuthStore';
 import { ownerFilter } from '../services/data-filter';
+import { DATA_RETENTION_DAYS_DEFAULT, CONSENT_STATUS, DELETION_REQUEST_STATUS } from '../config/constants';
 
 export const useCandidateStore = defineStore('candidate', () => {
   // ===== 状态 =====
@@ -71,11 +72,20 @@ export const useCandidateStore = defineStore('candidate', () => {
     const auth = useAuthStore();
 
     // P1-3：附加 phoneHash / emailHash 用于去重
+    // P2-18：附加 GDPR 合规默认字段
     const dataWithHashes = await attachHashes({
       ...candidateData,
       // Phase 1 数据隔离：自动注入 ownerId（优先使用传入值）
       ownerId: candidateData.ownerId || auth.currentUsername || 'system',
       createdBy: candidateData.createdBy || auth.currentUsername || 'system',
+      // GDPR 合规字段（默认值，可在创建时覆盖）
+      consentStatus: candidateData.consentStatus || CONSENT_STATUS.PENDING,
+      consentGivenAt: candidateData.consentGivenAt || null,
+      consentPurpose: candidateData.consentPurpose || null,
+      dataRetentionDays: candidateData.dataRetentionDays || DATA_RETENTION_DAYS_DEFAULT,
+      dataRetentionUntil: candidateData.dataRetentionUntil || null,
+      deletionRequested: candidateData.deletionRequested || false,
+      deletionRequestedAt: candidateData.deletionRequestedAt || null,
     });
 
     const result = await db.collection('Candidate').add({ ...dataWithHashes, _version: initialVersion() });
@@ -156,6 +166,14 @@ export const useCandidateStore = defineStore('candidate', () => {
         ...candidateWithHashes,
         ownerId: candidate.ownerId || auth.currentUsername || 'system',
         createdBy: candidate.createdBy || auth.currentUsername || 'system',
+        // P2-18：GDPR 合规默认字段
+        consentStatus: candidate.consentStatus || CONSENT_STATUS.PENDING,
+        consentGivenAt: candidate.consentGivenAt || null,
+        consentPurpose: candidate.consentPurpose || null,
+        dataRetentionDays: candidate.dataRetentionDays || DATA_RETENTION_DAYS_DEFAULT,
+        dataRetentionUntil: candidate.dataRetentionUntil || null,
+        deletionRequested: candidate.deletionRequested || false,
+        deletionRequestedAt: candidate.deletionRequestedAt || null,
         _version: initialVersion(),
       });
       candidateId = candidateResult.id;
@@ -433,6 +451,95 @@ export const useCandidateStore = defineStore('candidate', () => {
     }
   }
 
+  // ===== P2-18：GDPR / 个保法合规操作 =====
+
+  /**
+   * 记录候选人数据同意
+   * @param {string} id - Candidate ID
+   * @param {string} purpose - 数据处理目的
+   */
+  async function recordConsent(id, purpose = 'recruitment') {
+    const db = cloudbase.db();
+    if (!db) throw new Error('数据库未初始化');
+
+    const now = new Date();
+    const retentionUntil = new Date(now.getTime() + DATA_RETENTION_DAYS_DEFAULT * 24 * 60 * 60 * 1000);
+
+    await db.collection('Candidate').doc(id).update({
+      consentStatus: CONSENT_STATUS.GIVEN,
+      consentGivenAt: now,
+      consentPurpose: purpose,
+      dataRetentionDays: DATA_RETENTION_DAYS_DEFAULT,
+      dataRetentionUntil: retentionUntil,
+    });
+
+    // 更新本地缓存
+    const idx = candidates.value.findIndex(c => c._id === id);
+    if (idx !== -1) {
+      candidates.value[idx] = {
+        ...candidates.value[idx],
+        consentStatus: CONSENT_STATUS.GIVEN,
+        consentGivenAt: now,
+        consentPurpose: purpose,
+        dataRetentionDays: DATA_RETENTION_DAYS_DEFAULT,
+        dataRetentionUntil: retentionUntil,
+      };
+    }
+  }
+
+  /**
+   * 请求删除个人数据（个保法第47条）
+   * @param {string} id - Candidate ID
+   */
+  async function requestDeletion(id) {
+    const db = cloudbase.db();
+    if (!db) throw new Error('数据库未初始化');
+
+    await db.collection('Candidate').doc(id).update({
+      deletionRequested: true,
+      deletionRequestedAt: new Date(),
+    });
+
+    const idx = candidates.value.findIndex(c => c._id === id);
+    if (idx !== -1) {
+      candidates.value[idx] = {
+        ...candidates.value[idx],
+        deletionRequested: true,
+        deletionRequestedAt: new Date(),
+      };
+    }
+  }
+
+  /**
+   * 匿名化候选人数据（保留统计价值，移除个人标识）
+   * @param {string} id - Candidate ID
+   */
+  async function anonymizeCandidate(id) {
+    const db = cloudbase.db();
+    if (!db) throw new Error('数据库未初始化');
+
+    const anonymized = {
+      name: '已匿名',
+      phone: '',
+      email: '',
+      phoneHash: '',
+      emailHash: '',
+      parsedData: null,
+      resumeFileName: '',
+      resumeFileId: '',
+      consentStatus: CONSENT_STATUS.EXPIRED,
+      anonymizedAt: new Date(),
+    };
+
+    await db.collection('Candidate').doc(id).update(anonymized);
+
+    // 从本地缓存移除（匿名化后不应该再被搜索到）
+    candidates.value = candidates.value.filter(c => c._id !== id);
+    if (currentCandidate.value?._id === id) {
+      currentCandidate.value = null;
+    }
+  }
+
   return {
     // state
     candidates,
@@ -450,6 +557,10 @@ export const useCandidateStore = defineStore('candidate', () => {
     fetchDeleted,
     restore,
     permanentDelete,
+    // P2-18：GDPR 操作
+    recordConsent,
+    requestDeletion,
+    anonymizeCandidate,
     // 乐观锁工具
     isVersionConflict,
     conflictMessage,

@@ -21,7 +21,7 @@ const db = app.database();
 const _ = db.command;
 
 // ========== 漏斗阶段定义 ==========
-// 所有岗位共用的基础阶段（12 步 + 2 个结束状态）
+// P2-20：所有岗位共用的基础阶段（13 步 + 2 个结束状态，含背景调查）
 const FUNNEL_STAGES = [
   { key: 'resume', order: 0 },
   { key: 'valid_resume', order: 1 },
@@ -34,7 +34,8 @@ const FUNNEL_STAGES = [
   { key: 'final_interview', order: 8 },
   { key: 'final_pass', order: 9 },
   { key: 'offer', order: 10 },
-  { key: 'onboard', order: 11 },
+  { key: 'background_check', order: 11 },
+  { key: 'onboard', order: 12 },
 ];
 
 // 只需要 2 轮面试的岗位（无 final_interview 和 final_pass）
@@ -608,12 +609,14 @@ async function aggregateConversionRates(params = {}) {
     }
   }
 
+  // P2-20：增加背景调查通过率
   const ratePairs = [
     { label: '有效简历率', numerator: 'valid_resume', denominator: 'resume' },
     { label: '初试通过率', numerator: 'first_pass', denominator: 'first_interview' },
     { label: '复试通过率', numerator: 'second_pass', denominator: 'second_interview' },
     { label: '终试通过率', numerator: 'final_pass', denominator: 'final_interview' },
     { label: 'Offer率', numerator: 'offer', denominator: 'final_pass' },
+    { label: '背调通过率', numerator: 'onboard', denominator: 'background_check' },
     { label: '入职率', numerator: 'onboard', denominator: 'offer' },
   ];
 
@@ -905,6 +908,71 @@ async function aggregateDemandTracking(params = {}) {
   return { demands: demandResults, alerts, computedAt: new Date().toISOString() };
 }
 
+// ===== P2-21：端到端周期指标（简历投递→入职平均天数） =====
+
+async function aggregateE2ECycle(params = {}) {
+  const filter = { isArchived: _.neq(true), status: 'active', stage: 'onboard' };
+  if (params.jobId) filter.jobId = params.jobId;
+  if (params.ownerId) filter.ownerId = params.ownerId;
+  if (params.startDate || params.endDate) {
+    const onboardFilters = [];
+    if (params.startDate) onboardFilters.push(_.gte(new Date(params.startDate)));
+    if (params.endDate) onboardFilters.push(_.lte(new Date(params.endDate)));
+    filter.stageEnteredAt = onboardFilters.length === 1 ? onboardFilters[0] : _.and(...onboardFilters);
+  }
+
+  // 查询已入职的 Application（需要 funnel 时间戳）
+  const onboardApps = [];
+  let hasMore = true, cursor = null;
+  while (hasMore) {
+    let query = db.collection('Application')
+      .where(filter)
+      .field({ funnel: true, createdAt: true, stageEnteredAt: true, jobId: true })
+      .limit(500);
+    if (cursor) query = query.where({ _id: _.gt(cursor) });
+    const { data } = await query.get();
+    if (!data || data.length === 0) { hasMore = false; break; }
+    onboardApps.push(...data);
+    if (data.length < 500) hasMore = false; else cursor = data[data.length - 1]._id;
+  }
+
+  // 计算每个候选人的端到端天数（从简历投递到入职）
+  const cycles = [];
+  for (const app of onboardApps) {
+    const startAt = app.createdAt ? new Date(app.createdAt).getTime() : null;
+    const endAt = app.stageEnteredAt ? new Date(app.stageEnteredAt).getTime() : null;
+    if (startAt && endAt && endAt > startAt) {
+      cycles.push(Math.round((endAt - startAt) / (1000 * 60 * 60 * 24)));
+    }
+  }
+
+  if (cycles.length === 0) {
+    return {
+      avgDays: 0,
+      medianDays: 0,
+      minDays: 0,
+      maxDays: 0,
+      count: 0,
+      computedAt: new Date().toISOString(),
+    };
+  }
+
+  // 排序用于中位数计算
+  cycles.sort((a, b) => a - b);
+  const median = cycles.length % 2 === 0
+    ? Math.round((cycles[cycles.length / 2 - 1] + cycles[cycles.length / 2]) / 2)
+    : cycles[Math.floor(cycles.length / 2)];
+
+  return {
+    avgDays: Math.round(cycles.reduce((s, d) => s + d, 0) / cycles.length),
+    medianDays: median,
+    minDays: cycles[0],
+    maxDays: cycles[cycles.length - 1],
+    count: cycles.length,
+    computedAt: new Date().toISOString(),
+  };
+}
+
 exports.main = async (event, context) => {
   const { type, params = {} } = event;
 
@@ -967,6 +1035,11 @@ exports.main = async (event, context) => {
         result = await aggregateDemandTracking(params);
         break;
 
+      // P2-21：端到端周期指标（简历投递→入职平均天数）
+      case 'e2e_cycle':
+        result = await aggregateE2ECycle(params);
+        break;
+
       // P0-5：返回服务器时间用于客户端时钟校准
       case 'ping':
         return { success: true, data: null, serverTime: new Date().toISOString(), fromCache: false };
@@ -974,7 +1047,7 @@ exports.main = async (event, context) => {
       default:
         return {
           success: false,
-          error: `不支持的聚合类型: ${type}，支持的类型: overview, job_funnel, trend, dept_monthly, demand_metrics, recruiter_efficiency, conversion_rates, dept_onboard_overview, source_onboard_overview, demand_vs_onboard, demand_tracking`,
+          error: `不支持的聚合类型: ${type}，支持的类型: overview, job_funnel, trend, dept_monthly, demand_metrics, recruiter_efficiency, conversion_rates, dept_onboard_overview, source_onboard_overview, demand_vs_onboard, demand_tracking, e2e_cycle`,
         };
     }
 

@@ -19,8 +19,8 @@ const db = app.database();
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
 const DEEPSEEK_BASE_URL = 'https://api.deepseek.com/v1/chat/completions';
 
-// 云函数超时 30s，API 调用给 25s 缓冲
-const API_TIMEOUT = 25000;
+// P2-23：云函数超时 60s，API 调用给 50s 缓冲
+const API_TIMEOUT = 50000;
 
 // ========== RAG 管道 ==========
 

@@ -176,6 +176,16 @@ export async function getDuplicateCandidates() {
   }
 }
 
+/**
+ * P2-21：获取端到端周期指标（简历投递→入职平均天数）
+ * @param {Object} params - { jobId?, startDate?, endDate?, ownerId? }
+ * @returns {Promise<{ avgDays, medianDays, minDays, maxDays, count }>}
+ */
+export async function getE2ECycle(params = {}) {
+  const of = ownerFilter();
+  return callAggregator('e2e_cycle', { ...params, ...(of ? { ownerId: of.ownerId } : {}) });
+}
+
 export default {
   getDashboardOverview,
   getJobFunnel,
@@ -188,6 +198,7 @@ export default {
   getDeptOnboardOverview,
   getSourceOnboardStats,
   getDemandVsOnboard,
+  getE2ECycle,
   getSystemStatus,
   getDuplicateCandidates,
 };

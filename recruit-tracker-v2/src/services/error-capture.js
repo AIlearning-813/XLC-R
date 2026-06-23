@@ -33,7 +33,8 @@ async function flushErrors() {
         stack: e.context?.stack || null,
         context: {
           ...e.context,
-          url: window.location.href,
+          // P2-25：URL脱敏 — 仅记录路径，移除查询参数中的敏感 token
+          url: window.location.pathname,
           userAgent: navigator.userAgent,
         },
         severity: 'warning',
