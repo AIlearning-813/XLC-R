@@ -229,6 +229,9 @@ async function handleCreateConfig(event) {
     const result = await db.collection('EmailConfig').add(doc);
     return { success: true, id: result.id, config: { ...doc, _id: result.id } };
   } catch (err) {
+    if (err.message && err.message.includes('E11000')) {
+      return { success: false, message: `该邮箱 "${config.email}" 已配置过，请勿重复添加。如需修改请在列表中点"编辑"。` };
+    }
     return { success: false, message: `创建失败：${err.message}` };
   }
 }

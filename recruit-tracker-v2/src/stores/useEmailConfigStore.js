@@ -40,7 +40,7 @@ export const useEmailConfigStore = defineStore('emailConfig', () => {
     loading.value = true;
     error.value = '';
     try {
-      const uid = auth.currentUsername;
+      const uid = auth.currentUser?.uid;
       configs.value = uid ? await getEmailConfigs(uid) : [];
     } catch (err) {
       error.value = err.message || '获取邮箱配置失败';

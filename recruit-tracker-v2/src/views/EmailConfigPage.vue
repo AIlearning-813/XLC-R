@@ -254,8 +254,8 @@ onMounted(() => {
     </div>
 
     <!-- 添加/编辑弹窗 -->
-    <div v-if="showForm" class="modal-overlay" @click.self="closeForm">
-      <div class="modal-card">
+    <div v-if="showForm" class="modal-overlay" @mousedown.self="closeForm">
+      <div class="modal-card" @mousedown.stop>
         <div class="modal-header">
           <h3>{{ formTitle }}</h3>
           <button class="modal-close" @click="closeForm">
