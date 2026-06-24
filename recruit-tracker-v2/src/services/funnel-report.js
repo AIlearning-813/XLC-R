@@ -64,7 +64,8 @@ export async function getDashboardOverview(params = {}) {
  * @returns {Promise<object>} { stages, rates, rejectedCount, withdrawnCount, ... }
  */
 export async function getJobFunnel(jobId, jobType) {
-  return callAggregator('job_funnel', { jobId, jobType });
+  const of = ownerFilter();
+  return callAggregator('job_funnel', { jobId, jobType, ...(of ? { ownerId: of.ownerId } : {}) });
 }
 
 /**
@@ -74,7 +75,8 @@ export async function getJobFunnel(jobId, jobType) {
  * @returns {Promise<object>} { data: [{ month, total, onboard, ... }] }
  */
 export async function getTrend(months = 12, jobId) {
-  return callAggregator('trend', { months, jobId });
+  const of = ownerFilter();
+  return callAggregator('trend', { months, jobId, ...(of ? { ownerId: of.ownerId } : {}) });
 }
 
 /**
@@ -84,17 +86,20 @@ export async function getTrend(months = 12, jobId) {
  * @returns {Promise<object>} { jobs: [{ jobId, jobTitle, interviewCount, offerCount, onboardCount }] }
  */
 export async function getDeptMonthly(year, month) {
-  return callAggregator('dept_monthly', { year, month });
+  const of = ownerFilter();
+  return callAggregator('dept_monthly', { year, month, ...(of ? { ownerId: of.ownerId } : {}) });
 }
 
 // ===== Phase 6: 招聘需求指标 + 专员效能 =====
 
 export async function getDemandMetrics(filters = {}) {
-  return callAggregator('demand_metrics', filters);
+  const of = ownerFilter();
+  return callAggregator('demand_metrics', { ...filters, ...(of ? { ownerId: of.ownerId } : {}) });
 }
 
 export async function getRecruiterEfficiency(filters = {}) {
-  return callAggregator('recruiter_efficiency', filters);
+  const of = ownerFilter();
+  return callAggregator('recruiter_efficiency', { ...filters, ...(of ? { ownerId: of.ownerId } : {}) });
 }
 
 /** 给现有函数增加 filters 支持 */
@@ -110,7 +115,8 @@ export async function getConversionRates(jobId, params = {}) {
 
 /** 获取部门入职概览（支持筛选） */
 export async function getDeptOnboardOverview(params = {}) {
-  return callAggregator('dept_onboard_overview', params);
+  const of = ownerFilter();
+  return callAggregator('dept_onboard_overview', { ...params, ...(of ? { ownerId: of.ownerId } : {}) });
 }
 
 /** 获取渠道入职看板数据 */

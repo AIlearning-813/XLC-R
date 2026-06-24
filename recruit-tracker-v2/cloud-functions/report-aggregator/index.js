@@ -199,7 +199,7 @@ async function aggregateOverview(params = {}) {
 /**
  * 2. job_funnel — 单岗位漏斗
  */
-async function aggregateJobFunnel(jobId, jobType) {
+async function aggregateJobFunnel(jobId, jobType, ownerId) {
   // 获取岗位信息
   let jobTitle = '';
   if (jobId) {
@@ -214,6 +214,7 @@ async function aggregateJobFunnel(jobId, jobType) {
   // 查询该岗位所有未归档申请（游标分页，处理 >500 条数据）
   const baseFilter = { isArchived: _.neq(true) };
   if (jobId) baseFilter.jobId = jobId;
+  if (ownerId) baseFilter.ownerId = ownerId;
 
   const allApps = [];
   let cursor = null;
@@ -453,18 +454,21 @@ function roundPct(value) {
 /**
  * 4. dept_monthly — 部门月度交叉报表
  */
-async function aggregateDeptMonthly(year, month) {
+async function aggregateDeptMonthly(year, month, ownerId) {
   const y = year || new Date().getFullYear();
   const m = month !== undefined ? month : new Date().getMonth() + 1;
   const monthStart = new Date(y, m - 1, 1);
   const monthEnd = new Date(y, m, 0, 23, 59, 59, 999);
 
   // 获取所有活跃岗位（游标分页，防止 >500 岗位时截断）
+  // 非管理员只查自己的岗位
+  const jobFilter = { status: 'active' };
+  if (ownerId) jobFilter.ownerId = ownerId;
   const allJobs = [];
   let jobCursor = null;
   let hasMoreJobs = true;
   while (hasMoreJobs) {
-    let query = db.collection('Job').where({ status: 'active' }).limit(500);
+    let query = db.collection('Job').where(jobFilter).limit(500);
     if (jobCursor) query = query.where({ _id: _.gt(jobCursor) });
     const { data } = await query.get();
     if (!data || data.length === 0 || data.length < 500) hasMoreJobs = false;
@@ -687,6 +691,7 @@ async function aggregateDeptOnboardOverview(params = {}) {
   const monthEnd = new Date(y, m, 0, 23, 59, 59, 999);
 
   const deptFilter = params.department ? { status: 'active', department: params.department } : { status: 'active' };
+  if (params.ownerId) deptFilter.ownerId = params.ownerId;
   const { data: jobs } = await db.collection('Job').where(deptFilter).get();
   if (!jobs || jobs.length === 0) {
     return { year: y, month: m, departments: [], data: [], computedAt: new Date().toISOString() };
@@ -1038,7 +1043,7 @@ exports.main = async (event, context) => {
         break;
 
       case 'job_funnel':
-        result = await aggregateJobFunnel(params.jobId, params.jobType);
+        result = await aggregateJobFunnel(params.jobId, params.jobType, params.ownerId);
         break;
 
       case 'trend':
@@ -1046,7 +1051,7 @@ exports.main = async (event, context) => {
         break;
 
       case 'dept_monthly':
-        result = await aggregateDeptMonthly(params.year, params.month);
+        result = await aggregateDeptMonthly(params.year, params.month, params.ownerId);
         break;
 
       case 'demand_metrics':

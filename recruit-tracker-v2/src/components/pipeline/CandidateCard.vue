@@ -70,6 +70,19 @@ const isStale = computed(() => stayDays.value > 7);
 
 // ===== 快速流转下拉菜单 =====
 const menuOpen = ref(false);
+const menuTrigger = ref(null);
+
+// Teleport 到 body 后的定位样式（避免被看板 overflow:hidden 裁剪）
+const menuStyle = computed(() => {
+  if (!menuTrigger.value) return {};
+  const rect = menuTrigger.value.getBoundingClientRect();
+  return {
+    position: 'fixed',
+    top: `${rect.bottom + 4}px`,
+    right: `${window.innerWidth - rect.right}px`,
+    zIndex: 9999,
+  };
+});
 
 // 漏斗阶段顺序
 const stageOrderMap = computed(() => {
@@ -164,32 +177,34 @@ function handleToggleSelect(event) {
       <div class="card-top-right">
         <span class="card-source badge" :class="sourceBadgeClass">{{ sourceLabel }}</span>
         <div class="quick-move-wrap" @click.stop>
-          <button class="quick-move-btn" :class="{ active: menuOpen }" @click="toggleMenu" title="快速流转" aria-label="快速流转选项" aria-expanded="false">
+          <button ref="menuTrigger" class="quick-move-btn" :class="{ active: menuOpen }" @click="toggleMenu" title="快速流转" aria-label="快速流转选项" aria-expanded="false">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
               <polyline points="9 18 15 12 9 6"/>
             </svg>
           </button>
-          <Transition name="menu-drop">
-            <div v-if="menuOpen" class="quick-move-menu">
-              <div class="menu-label">阶段推进</div>
-              <button v-for="s in availableStages" :key="s.key" class="menu-item" @click="quickMove(s.key, $event)">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>
-                </svg>
-                {{ s.label }}
-              </button>
-              <div v-if="availableStages.length === 0" class="menu-empty">已是最后阶段</div>
-              <div class="menu-divider"></div>
-              <button class="menu-item menu-danger" @click="quickMove('rejected', $event)">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-                淘汰
-              </button>
-              <button class="menu-item menu-danger" @click="quickMove('withdrawn', $event)">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-                放弃
-              </button>
-            </div>
-          </Transition>
+          <Teleport to="body">
+            <Transition name="menu-drop">
+              <div v-if="menuOpen" class="quick-move-menu" :style="menuStyle">
+                <div class="menu-label">阶段推进</div>
+                <button v-for="s in availableStages" :key="s.key" class="menu-item" @click="quickMove(s.key, $event)">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>
+                  </svg>
+                  {{ s.label }}
+                </button>
+                <div v-if="availableStages.length === 0" class="menu-empty">已是最后阶段</div>
+                <div class="menu-divider"></div>
+                <button class="menu-item menu-danger" @click="quickMove('rejected', $event)">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                  淘汰
+                </button>
+                <button class="menu-item menu-danger" @click="quickMove('withdrawn', $event)">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                  放弃
+                </button>
+              </div>
+            </Transition>
+          </Teleport>
         </div>
       </div>
     </div>

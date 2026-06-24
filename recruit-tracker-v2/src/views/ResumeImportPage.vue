@@ -229,6 +229,7 @@ async function onCreateCandidate(data) {
       fileStatus, // 🆕 追踪文件上传状态：'none' | 'uploaded' | 'failed'
       recruitmentSource: candidateData.recruitmentSource || '',
       createdBy: auth.currentUsername || '',
+      ownerId: auth.currentUsername || '',
       createdAt: new Date(),
       updatedAt: new Date(),
     };

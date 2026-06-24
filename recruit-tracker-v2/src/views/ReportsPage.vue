@@ -82,16 +82,22 @@ async function loadAllData() {
     const filters = filterOwnerId.value ? { ownerId: filterOwnerId.value } : {};
     const timeParams = { startDate: fmtDate(dateRange.start), endDate: fmtDate(dateRange.end), ...filters };
 
-    const [funnel, dept, demand, efficiency, conv, deptOnboard, srcStats, dvo] = await Promise.all([
+    const [funnel, dept, demand, conv, deptOnboard, srcStats, dvo] = await Promise.all([
       getJobFunnel(selectedJobId.value || undefined, selectedJobType.value || undefined),
       getDeptMonthly(new Date().getFullYear(), new Date().getMonth() + 1),
       getDemandMetrics(filters),
-      getRecruiterEfficiency(filters),
       getConversionRates(selectedJobId.value || undefined, timeParams),
       getDeptOnboardOverview({ year: new Date().getFullYear(), month: new Date().getMonth() + 1, ...(selectedDept.value ? { department: selectedDept.value } : {}) }),
       getSourceOnboardStats(timeParams),
       getDemandVsOnboard(timeParams),
     ]);
+
+    // 专员效能仅管理员加载
+    let efficiency = null;
+    if (auth.isAdmin) {
+      const effResult = await getRecruiterEfficiency(filters);
+      efficiency = effResult;
+    }
 
     funnelData.value = funnel;
     demandData.value = demand;
@@ -420,8 +426,8 @@ onMounted(async () => {
       </div>
     </div>
 
-    <!-- 招聘专员效能（Phase 6） -->
-    <div v-if="efficiencyData?.recruiters?.length" class="report-card">
+    <!-- 招聘专员效能（仅管理员可见） -->
+    <div v-if="auth.isAdmin && efficiencyData?.recruiters?.length" class="report-card">
       <h3 class="card-title">👥 招聘专员效能</h3>
       <table class="eff-table">
         <thead><tr>

@@ -357,20 +357,22 @@ async function startImport() {
 
       const candResult = await db.collection('Candidate').add(candidateData);
 
-      // 创建 Application（如果映射了岗位和阶段）
-      if (row.expectedPosition || row.currentStage) {
-        await db.collection('Application').add({
-          candidateId: candResult.id,
-          stage: row.currentStage || 'resume',
-          stageEnteredAt: new Date(),
-          status: 'active',
-          funnelMeta: { entrySource: row.source || 'import' },
-          _version: 0,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          ownerId: auth.currentUsername || 'system',
-        });
-      }
+      // 始终创建 Application（确保候选人出现在招聘看板）
+      // 有岗位映射 → 挂在对应岗位下；无映射 → jobId 为空，出现在"未分配"区域
+      await db.collection('Application').add({
+        candidateId: candResult.id,
+        jobId: row.jobId || '',
+        stage: row.currentStage || 'resume',
+        stageEnteredAt: new Date(),
+        status: 'active',
+        funnel: { resumeAt: new Date() },
+        funnelMeta: { entrySource: row.source || 'import' },
+        isArchived: false,
+        _version: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        ownerId: auth.currentUsername || 'system',
+      });
 
       success++;
     } catch (err) {

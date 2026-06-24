@@ -378,8 +378,47 @@ async function processOneEntry(db, entry, summary) {
     const candidateResult = await db.collection('Candidate').add(candidateDoc);
     const candidateId = candidateResult.id;
 
-    // 🆕 不自动创建 Application，由招聘专员手动关联招聘需求
-    // 原因：邮箱无法判断候选人应关联哪个招聘需求，避免错配
+    // 🆕 自动匹配岗位并创建 Application
+    // 匹配成功 → Application 挂在匹配的岗位下，直接出现在看板对应岗位管道中
+    // 匹配失败 → Application 挂在 jobId: '' 下，出现在看板"未分配"区域，等待专员手动分配
+    let matchedJobId = '';
+    let matchedJobTitle = '';
+    try {
+      const jobId = await autoMatchJob(db, {
+        expectedPosition: candidateDoc.expectedPosition,
+        expectedSalary: candidateDoc.expectedSalary,
+      });
+      if (jobId) {
+        matchedJobId = jobId;
+        // 获取岗位名称用于展示
+        try {
+          const { data: jobData } = await db.collection('Job').doc(jobId).field({ title: true, name: true }).get();
+          if (jobData?.[0]) matchedJobTitle = jobData[0].title || jobData[0].name || '';
+        } catch (_) { /* 非关键 */ }
+      }
+    } catch (matchErr) {
+      console.warn('[parse-queue-processor] 自动匹配岗位失败:', matchErr.message);
+    }
+
+    // 创建 Application（确保候选人出现在招聘看板）
+    const applicationDoc = {
+      candidateId,
+      jobId: matchedJobId,
+      demandId: '',
+      demandTitle: matchedJobTitle,
+      stage: 'resume',
+      stageEnteredAt: new Date(),
+      status: 'active',
+      funnel: { resumeAt: new Date() },
+      funnelMeta: { entrySource: 'email' },
+      source: entry.source || 'email',
+      ownerId: entry.userId || 'system',
+      isArchived: false,
+      _version: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    await db.collection('Application').add(applicationDoc);
 
     // 更新 ParseQueue 状态
     await db.collection('ParseQueue').doc(entry._id).update({
@@ -388,7 +427,7 @@ async function processOneEntry(db, entry, summary) {
       processedAt: new Date(),
     });
 
-    // 创建通知（提示专员手动关联需求）
+    // 创建通知（提示自动匹配结果）
     await createNotification(db, {
       userId: entry.userId,
       type: 'parse_success',
@@ -400,7 +439,8 @@ async function processOneEntry(db, entry, summary) {
         fileName: entry.fileName,
         emailSubject: entry.sourceEmailSubject || '',
         parsedFields: Object.keys(basicInfo).filter((k) => basicInfo[k]),
-        needsAssignment: true,  // 🆕 标记需要手动分配
+        autoMatchedJob: matchedJobId ? matchedJobTitle || matchedJobId : null,
+        needsAssignment: !matchedJobId,  // 仅未匹配时需要手动分配
       },
     });
 
