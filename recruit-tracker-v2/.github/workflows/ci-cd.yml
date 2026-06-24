@@ -1,0 +1,153 @@
+# 新励成招聘管理系统 V2.0 — CI/CD 流水线
+#
+# 触发条件：
+#   - push 到 main/master 分支：完整流程（测试→构建→部署）
+#   - PR 到 main/master 分支：测试 + 构建（不部署）
+
+name: CI/CD
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch: # 支持手动触发
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  # ===== 单元测试 =====
+  test:
+    name: 单元测试
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 运行 Vitest 单元测试
+        run: npm test
+
+      - name: 上传测试报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: test-results/
+          retention-days: 7
+
+  # ===== 构建 =====
+  build:
+    name: 构建
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 构建生产包
+        run: npm run build
+        env:
+          VITE_CLOUDBASE_ENV_ID: ${{ secrets.VITE_CLOUDBASE_ENV_ID }}
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 3
+
+  # ===== 部署到 CloudBase（仅 main/master 分支） =====
+  deploy:
+    name: 部署到 CloudBase
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    environment:
+      name: production
+      url: https://${{ secrets.VITE_CLOUDBASE_ENV_ID }}.tcloudbaseapp.com
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 下载构建产物
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: 安装 CloudBase CLI
+        run: npm install -g @cloudbase/cli
+
+      - name: 登录 CloudBase
+        run: tcb login --apiKeyId ${{ secrets.TCB_API_KEY_ID }} --apiKey ${{ secrets.TCB_API_KEY }}
+
+      - name: 部署到静态托管
+        run: |
+          tcb hosting deploy dist/ -e ${{ secrets.VITE_CLOUDBASE_ENV_ID }}
+          echo "✅ 部署完成"
+          echo "🌐 https://${{ secrets.VITE_CLOUDBASE_ENV_ID }}.tcloudbaseapp.com"
+
+  # ===== 部署云函数（仅 main/master 分支） =====
+  deploy-functions:
+    name: 部署云函数
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    environment:
+      name: production
+
+    strategy:
+      fail-fast: false
+      matrix:
+        function:
+          - auth-proxy
+          - write-audit-log
+          - email-scanner
+          - resume-parser-proxy
+          - parse-queue-processor
+          - get-file-url
+          - report-aggregator
+          - report-cache-warmer
+          - db-backup
+          - rag-assistant-proxy
+          - health-monitor
+          - init-department-tree
+          - web-search-agent
+          - archive-old-applications
+          - history-insight-generator
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 CloudBase CLI
+        run: npm install -g @cloudbase/cli
+
+      - name: 登录 CloudBase
+        run: tcb login --apiKeyId ${{ secrets.TCB_API_KEY_ID }} --apiKey ${{ secrets.TCB_API_KEY }}
+
+      - name: 部署云函数 ${{ matrix.function }}
+        run: |
+          cd cloud-functions/${{ matrix.function }}
+          tcb fn deploy ${{ matrix.function }} -e ${{ secrets.VITE_CLOUDBASE_ENV_ID }} --force
+          echo "✅ 云函数 ${{ matrix.function }} 部署完成"

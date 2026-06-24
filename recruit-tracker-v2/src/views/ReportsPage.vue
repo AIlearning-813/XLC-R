@@ -7,6 +7,7 @@ import { getJobFunnel, getDeptMonthly, getDemandMetrics, getRecruiterEfficiency,
 import { batchExportCSV } from '../services/batch-operations';
 import { useAuthStore } from '../stores/useAuthStore';
 import { useJobStore } from '../stores/useJobStore';
+import { captureError } from '../services/error-capture';
 import { formatDateISO } from '../services/format-utils';
 import DateRangePicker from '../components/common/DateRangePicker.vue';
 import ConversionRatePanel from '../components/reports/ConversionRatePanel.vue';
@@ -68,7 +69,9 @@ async function loadJobs() {
   // 加载专员列表
   try {
     recruiters.value = await auth.fetchUsers();
-  } catch (_) {}
+  } catch (e) {
+    captureError('reports', '加载专员列表失败', { message: e?.message, context: 'ReportsPage.loadJobs' });
+  }
 }
 
 async function loadAllData() {

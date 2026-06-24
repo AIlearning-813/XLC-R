@@ -6,6 +6,7 @@ import cloudbase from '../services/cloudbase';
 import { initialVersion } from '../services/optimistic-lock';
 import { useAuthStore } from './useAuthStore';
 import { ownerFilter } from '../services/data-filter';
+import { captureError } from '../services/error-capture';
 
 export const useRecruitmentDemandStore = defineStore('recruitmentDemand', () => {
   const demands = ref([]);
@@ -96,7 +97,10 @@ export const useRecruitmentDemandStore = defineStore('recruitmentDemand', () => 
       };
       const jobResult = await useJobStore().add(jobData);
       await db.collection('RecruitmentDemand').doc(result.id).update({ linkedJobId: jobResult._id || jobResult.id });
-    } catch (e) { console.warn('[demandStore] 自动创建Job失败:', e.message); }
+    } catch (e) {
+      console.warn('[demandStore] 自动创建Job失败:', e.message);
+      captureError('demand_store', '自动创建Job失败', { message: e.message, context: 'add_demand' });
+    }
     demands.value.unshift({ ...normalized, _id: result.id });
     return { id: result.id, doc: normalized };
   }

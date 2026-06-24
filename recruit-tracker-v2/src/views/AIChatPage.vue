@@ -12,6 +12,7 @@ import { ref, nextTick, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import cloudbase from '../services/cloudbase';
 import { useKnowledgeStore } from '../stores/useKnowledgeStore';
+import { captureError } from '../services/error-capture';
 
 const router = useRouter();
 const kbStore = useKnowledgeStore();
@@ -118,7 +119,7 @@ async function markNotHelpful(msgIdx) {
       category: 'recruitment',
       tags: ['feedback', 'low_quality'],
     });
-  } catch (e) { /* 忽略 */ }
+  } catch (e) { captureError('ai_chat', '用户反馈快速添加知识库失败', { message: e.message, context: 'markBadAnswer' }); }
 }
 
 // 格式化时间

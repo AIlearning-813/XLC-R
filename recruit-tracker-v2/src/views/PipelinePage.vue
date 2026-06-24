@@ -1,7 +1,7 @@
 <script setup>
 /* 新励成招聘管理系统 V2.0 — 招聘看板（含结束流程+未分配候选人） */
 
-import { ref, computed, watch, onMounted } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useJobStore } from '../stores/useJobStore';
 import { useApplicationStore } from '../stores/useApplicationStore';
@@ -62,6 +62,22 @@ function onBatchCancel() {
   batchSelection.clear();
 }
 
+// P3-33：移动端检测 — 屏幕宽度 < 768px 时看板降级为列表视图
+const isMobile = ref(window.innerWidth < 768);
+const mobileStageFilter = ref('all');
+
+function onResize() {
+  isMobile.value = window.innerWidth < 768;
+}
+
+onMounted(() => {
+  window.addEventListener('resize', onResize);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('resize', onResize);
+});
+
 // ===== 计算属性 =====
 const jobs = computed(() => jobStore.activeJobs);
 
@@ -86,6 +102,39 @@ const visibleStages = computed(() => {
 
   return [...END_ZONE_STAGES, ...filtered];
 });
+
+// P3-33：移动端辅助函数
+const stageLabelMap = computed(() => {
+  const map = {};
+  for (const st of visibleStages.value) {
+    map[st.key] = st.label;
+  }
+  return map;
+});
+
+function stageLabel(stageKey) {
+  return stageLabelMap.value[stageKey] || stageKey;
+}
+
+function countAppsByStage(stageKey) {
+  return applications.value.filter(a => a.stage === stageKey).length;
+}
+
+const filteredMobileApps = computed(() => {
+  if (mobileStageFilter.value === 'all') return applications.value;
+  return applications.value.filter(a => a.stage === mobileStageFilter.value);
+});
+
+function fmtMobileDate(d) {
+  if (!d) return '';
+  const date = typeof d === 'string' ? new Date(d) : d;
+  const now = new Date();
+  const diffDays = Math.floor((now - date) / (1000 * 60 * 60 * 24));
+  if (diffDays === 0) return '今天';
+  if (diffDays === 1) return '昨天';
+  if (diffDays < 7) return `${diffDays}天前`;
+  return `${date.getMonth() + 1}/${date.getDate()}`;
+}
 
 // ===== 方法 =====
 
@@ -482,9 +531,57 @@ onMounted(() => {
         <p class="text-muted">请先在设置中创建招聘岗位</p>
       </div>
 
-      <!-- 看板 -->
+      <!-- P3-33：移动端列表视图 — 屏幕宽度 < 768px 时降级 -->
+      <div v-else-if="selectedJobId && isMobile" class="mobile-pipeline-list">
+        <!-- 阶段筛选 -->
+        <div class="mobile-stage-filter">
+          <select v-model="mobileStageFilter" class="form-select">
+            <option value="all">全部阶段 ({{ applications.length }})</option>
+            <option v-for="st in visibleStages" :key="st.key" :value="st.key">
+              {{ st.label }} ({{ countAppsByStage(st.key) }})
+            </option>
+          </select>
+        </div>
+
+        <!-- 候选人列表 -->
+        <div v-if="filteredMobileApps.length === 0" class="mobile-empty">
+          <p>此阶段暂无候选人</p>
+        </div>
+        <div v-else class="mobile-app-list">
+          <div
+            v-for="app in filteredMobileApps"
+            :key="app._id"
+            class="mobile-app-card"
+            @click="handleCardClick(app)"
+          >
+            <div class="mobile-card-main">
+              <span class="mobile-card-name">{{ candidatesMap[app.candidateId]?.name || '未命名' }}</span>
+              <span class="mobile-card-stage">{{ stageLabel(app.stage) }}</span>
+            </div>
+            <div class="mobile-card-meta">
+              <span v-if="candidatesMap[app.candidateId]?.phone">{{ candidatesMap[app.candidateId]?.phone }}</span>
+              <span v-if="!candidatesMap[app.candidateId]?.phone" class="text-muted">无联系方式</span>
+              <span class="mobile-card-date">{{ fmtMobileDate(app.stageEnteredAt) }}</span>
+            </div>
+            <!-- 快捷操作 -->
+            <div class="mobile-card-actions" @click.stop>
+              <select
+                class="form-select form-select-xs"
+                @change="(e) => { if (e.target.value) handleCardQuickMove(app, e.target.value); e.target.value = ''; }"
+              >
+                <option value="">移至…</option>
+                <option v-for="st in visibleStages.filter(s => !s.isEnd && s.key !== app.stage)" :key="st.key" :value="st.key">
+                  {{ st.label }}
+                </option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 桌面端看板 -->
       <KanbanBoard
-        v-else-if="selectedJobId"
+        v-else-if="selectedJobId && !isMobile"
         :stages="visibleStages"
         :applications="applications"
         :candidates-map="candidatesMap"
@@ -669,5 +766,102 @@ onMounted(() => {
 .pipeline-board-container {
   flex: 1;
   min-height: 0;
+}
+
+/* P3-33：移动端列表视图 */
+.mobile-pipeline-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  padding-bottom: var(--spacing-xl);
+}
+
+.mobile-stage-filter {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  padding: var(--spacing-sm);
+  background: var(--gray-25);
+  border-bottom: 1px solid var(--gray-100);
+}
+
+.mobile-stage-filter .form-select {
+  width: 100%;
+  padding: 10px var(--spacing-md);
+  font-size: var(--font-size-md);
+  border-radius: var(--radius-sm);
+}
+
+.mobile-empty {
+  text-align: center;
+  padding: var(--spacing-2xl);
+  color: var(--gray-400);
+}
+
+.mobile-app-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mobile-app-card {
+  background: #fff;
+  border: 1px solid var(--gray-100);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-md);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.mobile-app-card:active {
+  background: var(--gray-25);
+}
+
+.mobile-card-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.mobile-card-name {
+  font-weight: 600;
+  font-size: var(--font-size-md);
+  color: var(--gray-800);
+}
+
+.mobile-card-stage {
+  font-size: var(--font-size-xs);
+  padding: 2px 8px;
+  background: var(--gray-100);
+  border-radius: 10px;
+  color: var(--gray-600);
+  white-space: nowrap;
+}
+
+.mobile-card-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--font-size-xs);
+  color: var(--gray-500);
+}
+
+.mobile-card-date {
+  color: var(--gray-400);
+}
+
+.mobile-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 4px;
+  border-top: 1px solid var(--gray-50);
+}
+
+.mobile-card-actions .form-select-xs {
+  font-size: var(--font-size-xs);
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
 }
 </style>

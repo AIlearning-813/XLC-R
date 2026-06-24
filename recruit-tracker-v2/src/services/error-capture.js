@@ -88,7 +88,8 @@ export function setupErrorCapture(app) {
   });
 }
 
-function captureError(type, message, context = {}) {
+// P3-34：导出 captureError 供全项目使用 — 统一异常处理策略
+export function captureError(type, message, context = {}) {
   errorBuffer.push({
     type,
     message,

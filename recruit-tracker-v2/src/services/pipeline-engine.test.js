@@ -268,9 +268,9 @@ describe('checkPreconditions', () => {
     expect(r.missing).toContain('尚未发放 Offer');
   });
 
-  it('onboard 有 offerAt 则通过', () => {
+  it('onboard 有 offerAt 和 backgroundCheckAt 则通过（P2-20：背调前置）', () => {
     const r = checkPreconditions('onboard', {
-      funnel: { offerAt: new Date() },
+      funnel: { offerAt: new Date(), backgroundCheckAt: new Date() },
     }, null);
     expect(r.valid).toBe(true);
   });

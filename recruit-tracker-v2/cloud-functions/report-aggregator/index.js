@@ -400,12 +400,54 @@ async function aggregateTrend(months, jobId) {
     };
   });
 
+  // P3-31：计算同比（YoY）和环比（MoM）变化率
+  for (let i = 0; i < trendData.length; i++) {
+    const curr = trendData[i];
+
+    // 环比（MoM）：与上个月比较
+    if (i > 0) {
+      const prev = trendData[i - 1];
+      curr.momChange = prev.total > 0
+        ? roundPct(((curr.total - prev.total) / prev.total) * 100)
+        : null;
+      curr.onboardMomChange = prev.onboard > 0
+        ? roundPct(((curr.onboard - prev.onboard) / prev.onboard) * 100)
+        : null;
+    } else {
+      curr.momChange = null;
+      curr.onboardMomChange = null;
+    }
+
+    // 同比（YoY）：与去年同月比较
+    const [y, m] = curr.month.split('-').map(Number);
+    const lastYearKey = `${y - 1}-${String(m).padStart(2, '0')}`;
+    const lastYearSameMonth = trendData.find(d => d.month === lastYearKey);
+    if (lastYearSameMonth) {
+      curr.yoyChange = lastYearSameMonth.total > 0
+        ? roundPct(((curr.total - lastYearSameMonth.total) / lastYearSameMonth.total) * 100)
+        : null;
+      curr.onboardYoyChange = lastYearSameMonth.onboard > 0
+        ? roundPct(((curr.onboard - lastYearSameMonth.onboard) / lastYearSameMonth.onboard) * 100)
+        : null;
+    } else {
+      curr.yoyChange = null;
+      curr.onboardYoyChange = null;
+    }
+  }
+
   return {
     jobId: jobId || 'all',
     months: numMonths,
     data: trendData,
     computedAt: new Date().toISOString(),
   };
+}
+
+/**
+ * 四舍五入百分比到 1 位小数
+ */
+function roundPct(value) {
+  return Math.round(value * 10) / 10;
 }
 
 /**

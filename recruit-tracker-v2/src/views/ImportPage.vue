@@ -9,6 +9,7 @@
  *   ④ 确认导入 + 进度 + 结果
  */
 import { ref, computed } from 'vue';
+import * as XLSX from 'xlsx';
 import cloudbase from '../services/cloudbase';
 import { captureError } from '../services/error-capture';
 import { useAuthStore } from '../stores/useAuthStore';
@@ -39,19 +40,74 @@ function handleFileUpload(event) {
     return;
   }
 
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    const text = e.target.result;
-    if (ext === 'csv') {
-      parseCSV(text);
-    } else {
-      // Excel 需要 xlsx 库，此处用 CSV 回退提示
-      fileError.value = 'Excel 解析需要安装 xlsx 库。当前支持 CSV 格式，请将 Excel 另存为 CSV 后导入。';
-      // 尝试 CSV 解析
-      parseCSV(text);
+  if (ext === 'csv') {
+    // CSV：文本读取
+    const reader = new FileReader();
+    reader.onload = (e) => parseCSV(e.target.result);
+    reader.readAsText(file, encoding.value);
+  } else {
+    // P3-32：Excel（.xlsx/.xls）— 使用 SheetJS 解析
+    const reader = new FileReader();
+    reader.onload = (e) => parseExcel(e.target.result);
+    reader.readAsArrayBuffer(file);
+  }
+}
+
+/**
+ * P3-32：解析 Excel 文件（.xlsx/.xls）
+ * 使用 SheetJS 读取第一个工作表，自动检测表头
+ */
+function parseExcel(arrayBuffer) {
+  try {
+    const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+    const sheetName = workbook.SheetNames[0];
+    if (!sheetName) {
+      fileError.value = 'Excel 文件中没有找到工作表';
+      return;
     }
-  };
-  reader.readAsText(file, encoding.value);
+
+    const sheet = workbook.Sheets[sheetName];
+    // 转换为数组（header: 1 返回二维数组，第一行为表头）
+    const rows2D = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+
+    if (rows2D.length < 2) {
+      fileError.value = '文件为空或只有标题行';
+      return;
+    }
+
+    const header = rows2D[0].map(h => String(h || '').trim());
+    columns.value = header;
+
+    const rows = [];
+    for (let i = 1; i < rows2D.length; i++) {
+      const row = {};
+      header.forEach((h, idx) => {
+        let val = rows2D[i][idx];
+        // 处理日期类型（Excel 序列号或 Date 对象）
+        if (val instanceof Date) {
+          val = val.toISOString().slice(0, 10);
+        } else if (typeof val === 'number' && val > 40000 && val < 60000) {
+          // Excel 日期序列号（1900 年起始）
+          const jsDate = new Date((val - 25569) * 86400 * 1000);
+          val = jsDate.toISOString().slice(0, 10);
+        } else {
+          val = String(val ?? '').trim();
+        }
+        row[h] = val;
+      });
+      // 跳过全空行
+      if (Object.values(row).every(v => !v)) continue;
+      rows.push(row);
+    }
+
+    fileData.value = rows;
+    previewRows.value = rows.slice(0, 10);
+    maxStep.value = 2;
+    step.value = 2;
+  } catch (err) {
+    console.error('[ImportPage] Excel 解析失败:', err);
+    fileError.value = `Excel 解析失败：${err.message}`;
+  }
 }
 
 function parseCSV(text) {

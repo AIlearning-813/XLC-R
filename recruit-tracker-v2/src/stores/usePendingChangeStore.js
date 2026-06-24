@@ -8,6 +8,7 @@ import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import cloudbase from '../services/cloudbase';
 import { useAuthStore } from './useAuthStore';
+import { captureError } from '../services/error-capture';
 
 export const usePendingChangeStore = defineStore('pendingChange', () => {
   // ===== 状态 =====
@@ -80,7 +81,10 @@ export const usePendingChangeStore = defineStore('pendingChange', () => {
         },
         operator: auth.currentUsername || 'system',
       });
-    } catch (e) { console.warn('[usePendingChangeStore] 审计日志写入失败:', e.message); }
+    } catch (e) {
+      console.warn('[usePendingChangeStore] 审计日志写入失败:', e.message);
+      captureError('pending_change', '审计日志写入失败', { message: e.message, context: 'addChange' });
+    }
 
     return { id: result.id, doc: newChange };
   }
@@ -193,7 +197,10 @@ export const usePendingChangeStore = defineStore('pendingChange', () => {
         },
         operator: auth.currentUsername || 'system',
       });
-    } catch (e) { console.warn('[usePendingChangeStore] 审计日志写入失败:', e.message); }
+    } catch (e) {
+      console.warn('[usePendingChangeStore] 审计日志写入失败:', e.message);
+      captureError('pending_change', '审批审计日志写入失败', { message: e.message, context: 'approveChange' });
+    }
 
     return { success: true };
   }
@@ -273,7 +280,10 @@ export const usePendingChangeStore = defineStore('pendingChange', () => {
                 ownerId: doc.ownerId, createdBy: doc.ownerId, status: 'active',
               });
               await db.collection('RecruitmentDemand').doc(change.entityId || result?.id).update({ linkedJobId: jobResult._id || jobResult.id });
-            } catch (e) { console.warn('[executeChange] 自动创建Job失败:', e.message); }
+            } catch (e) {
+              console.warn('[executeChange] 自动创建Job失败:', e.message);
+              captureError('pending_change', '审批执行自动创建Job失败', { message: e.message, context: 'executeChange.createJob' });
+            }
           } else if (change.action === 'update' && change.entityId && change.after) {
             await db.collection('RecruitmentDemand').doc(change.entityId).update({ ...change.after, updatedAt: new Date() });
           } else if (change.action === 'delete' && change.entityId) {

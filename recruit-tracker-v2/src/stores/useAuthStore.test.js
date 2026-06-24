@@ -8,7 +8,7 @@ import { setActivePinia, createPinia } from 'pinia';
 
 // vi.mock 会被提升到文件顶部，所以用 vi.hoisted() 提前声明变量
 const { mockCloudbase, setLoginResult } = vi.hoisted(() => {
-  let callFunctionResult = { success: true, data: { username: 'admin', role: 'admin', name: '管理员' } };
+  let callFunctionResult = { success: true, data: { username: 'admin', role: 'admin', name: '管理员', sessionToken: 'mock-hmac-token' } };
   let loggedIn = false;
   const cloudbase = {
     getApp: vi.fn(() => ({})),
@@ -39,7 +39,8 @@ beforeEach(() => {
   localStorage.clear();
   setActivePinia(createPinia());
   auth = useAuthStore();
-  setLoginResult(true, { username: 'admin', role: 'admin', name: '管理员' });
+  // P1-5：必须包含 sessionToken，否则 saveSession 中 st 为 undefined
+  setLoginResult(true, { username: 'admin', role: 'admin', name: '管理员', sessionToken: 'mock-hmac-token' });
   vi.clearAllMocks();
 });
 
@@ -91,7 +92,8 @@ describe('useAuthStore', () => {
       const parsed = JSON.parse(saved);
       expect(parsed.u).toBe('admin');
       expect(parsed.r).toBe('admin');
-      expect(parsed.sig).toBeTruthy();
+      // P1-5：HMAC-SHA256 签名令牌使用 st 字段（替代旧版简单 sig）
+      expect(parsed.st).toBe('mock-hmac-token');
       expect(parsed.e).toBeGreaterThan(Date.now());
     });
   });

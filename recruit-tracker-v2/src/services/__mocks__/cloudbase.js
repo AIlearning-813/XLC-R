@@ -55,6 +55,7 @@ const mockCommand = {
   inc: (n) => ({ __command: 'inc', value: n }),
   neq: (v) => ({ __command: 'neq', value: v }),
   in: (arr) => ({ __command: 'in', value: arr }),
+  or: (conditions) => ({ __command: 'or', value: conditions }),
   push: (item) => ({ __command: 'push', value: item }),
   set: (obj) => ({ __command: 'set', value: obj }),
   remove: () => ({ __command: 'remove' }),
@@ -65,6 +66,7 @@ class MockQuery {
   constructor(collectionName) {
     this._collection = collectionName;
     this._conditions = {};
+    this._orConditions = null;
     this._orderField = null;
     this._orderDir = 'asc';
     this._limitCount = null;
@@ -72,8 +74,22 @@ class MockQuery {
   }
 
   where(conditions) {
-    Object.assign(this._conditions, conditions);
-    return this;
+    // 克隆当前查询以支持独立查询（模拟真实 SDK 行为）
+    const cloned = new MockQuery(this._collection);
+    cloned._conditions = { ...this._conditions };
+    cloned._orConditions = this._orConditions ? [...this._orConditions] : null;
+    cloned._orderField = this._orderField;
+    cloned._orderDir = this._orderDir;
+    cloned._limitCount = this._limitCount;
+    cloned._fieldFilter = this._fieldFilter;
+
+    // 处理 db.command.or() — 将其拆分为 _orConditions 存储
+    if (conditions && typeof conditions === 'object' && conditions.__command === 'or') {
+      cloned._orConditions = conditions.value || [];
+    } else {
+      Object.assign(cloned._conditions, conditions);
+    }
+    return cloned;
   }
 
   orderBy(field, direction) {
@@ -111,6 +127,15 @@ class MockQuery {
       } else if (value !== undefined && value !== null) {
         docs = docs.filter((d) => d[key] === value);
       }
+    }
+
+    // 应用 or 条件（任一子条件匹配即保留）
+    if (this._orConditions && this._orConditions.length > 0) {
+      docs = docs.filter((d) =>
+        this._orConditions.some((cond) =>
+          Object.entries(cond).every(([k, v]) => d[k] === v)
+        )
+      );
     }
 
     // 应用排序
@@ -239,10 +264,10 @@ const cloudbaseMock = {
   callFunction: vi.fn(async (name, data) => {
     const preset = __callFunctionResults[name];
     if (preset !== undefined) {
-      if (typeof preset === 'function') return { result: await preset(data) };
-      return { result: preset };
+      if (typeof preset === 'function') return await preset(data);
+      return preset;
     }
-    return { result: { success: true } };
+    return { success: true };
   }),
 
   isReady: vi.fn(() => true),

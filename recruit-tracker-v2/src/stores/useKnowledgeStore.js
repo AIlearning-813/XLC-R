@@ -11,6 +11,7 @@ import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import cloudbase from '../services/cloudbase';
 import { useAuthStore } from './useAuthStore';
+import { captureError } from '../services/error-capture';
 
 // 知识库 9 种分类
 export const KNOWLEDGE_CATEGORIES = [
@@ -143,7 +144,7 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
         detail: { title: entry.title, category: entry.category },
         operator: auth.currentUsername || 'system',
       });
-    } catch (e) { /* 忽略 */ }
+    } catch (e) { captureError('knowledge_store', 'KB条目创建审计日志写入失败', { message: e.message, context: 'quickAdd' }); }
 
     return newEntry;
   }

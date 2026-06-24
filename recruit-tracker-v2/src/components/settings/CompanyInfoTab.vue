@@ -8,6 +8,7 @@
 import { ref, reactive, onMounted } from 'vue';
 import cloudbase from '../../services/cloudbase';
 import { useAuthStore } from '../../stores/useAuthStore';
+import { captureError } from '../../services/error-capture';
 
 const auth = useAuthStore();
 const db = cloudbase.db();
@@ -116,7 +117,7 @@ async function handleSave() {
         detail: { summary: '更新公司信息' },
         operator: auth.currentUser?.uid || 'system',
       });
-    } catch (e) { /* 忽略 */ }
+    } catch (e) { captureError('settings', '公司信息审计日志写入失败', { message: e.message, context: 'CompanyInfoTab.save' }); }
 
     saved.value = true;
     setTimeout(() => saved.value = false, 3000);
