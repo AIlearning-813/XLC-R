@@ -81,6 +81,7 @@ const assignJobId = ref('');
 const assignDemandVisible = ref(false);
 const assignDemandCandidateId = ref('');
 const assignDemandCandidateName = ref('');
+const assignDemandExistingAppId = ref('');  // 已有 Application ID，避免重复创建
 
 // 编辑弹窗（简易内联编辑）
 const editVisible = ref(false);
@@ -514,6 +515,8 @@ async function confirmAssignJob() {
 function openAssignDemandDialog(row) {
   assignDemandCandidateId.value = row.candidateId || row._id;
   assignDemandCandidateName.value = row.name || '';
+  // 如果已有 Application，传递其 ID → 更新而非新建，避免重复
+  assignDemandExistingAppId.value = row.appId || '';
   assignDemandVisible.value = true;
 }
 
@@ -526,6 +529,7 @@ function onDemandAssigned(result) {
   }
   assignDemandCandidateId.value = '';
   assignDemandCandidateName.value = '';
+  assignDemandExistingAppId.value = '';
   loadData(currentFilters.value);
 }
 
@@ -894,11 +898,12 @@ onMounted(async () => {
       </Transition>
     </Teleport>
 
-    <!-- 🆕 关联招聘需求弹窗（替代旧的"分配岗位"弹窗） -->
+    <!-- 🆕 关联招聘需求弹窗 -->
     <AssignDemandDialog
       v-if="assignDemandVisible"
       :candidate-id="assignDemandCandidateId"
       :candidate-name="assignDemandCandidateName"
+      :existing-app-id="assignDemandExistingAppId"
       @assigned="onDemandAssigned"
       @close="assignDemandVisible = false"
     />
