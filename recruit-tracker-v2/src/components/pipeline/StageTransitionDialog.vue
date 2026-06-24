@@ -12,6 +12,7 @@ const props = defineProps({
   fromStage: { type: String, default: '' },
   toStage: { type: String, default: '' },
   job: { type: Object, default: null },
+  endStage: { type: String, default: '' },  // 淘汰细分阶段（resume/first_interview/second_interview/final_interview）
 });
 
 const emit = defineEmits(['confirm', 'cancel']);
@@ -41,6 +42,20 @@ const isEnding = computed(() => {
 const endType = computed(() => {
   if (props.toStage === 'rejected') return 'rejected';
   if (props.toStage === 'withdrawn') return 'withdrawn';
+  return null;
+});
+
+// 淘汰细分阶段的中文标签
+const rejectStageLabels = {
+  resume: '简历筛选淘汰',
+  first_interview: '初试淘汰',
+  second_interview: '复试淘汰',
+  final_interview: '终试淘汰',
+};
+const rejectStageLabel = computed(() => {
+  if (props.toStage === 'rejected' && props.endStage) {
+    return rejectStageLabels[props.endStage] || '淘汰';
+  }
   return null;
 });
 
@@ -125,7 +140,7 @@ watch(() => props.visible, (v) => {
               确认阶段流转
             </h3>
             <h3 class="dialog-title dialog-title-end" v-else>
-              {{ endType === 'rejected' ? '确认淘汰' : '确认放弃' }}
+              {{ endType === 'rejected' ? `确认淘汰 — ${rejectStageLabel || '淘汰'}` : '确认放弃' }}
             </h3>
             <button class="dialog-close" @click="handleCancel">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -150,7 +165,7 @@ watch(() => props.visible, (v) => {
                 <span
                   class="info-stage-badge to"
                   :class="{ end: isEnding }"
-                >{{ isEnding ? (endType === 'rejected' ? '淘汰' : '放弃') : toLabel }}</span>
+                >{{ isEnding ? (endType === 'rejected' ? (rejectStageLabel || '淘汰') : '放弃') : toLabel }}</span>
               </div>
             </div>
 

@@ -479,11 +479,22 @@ async function processOneEntry(db, entry, summary) {
 }
 
 /**
- * 自动匹配岗位：根据候选人的期望岗位名称模糊匹配已有岗位
- * 匹配成功返回 jobId，失败返回 null
+ * 自动匹配岗位：根据候选人的期望岗位名称匹配已有招聘需求的岗位
+ *
+ * 🔴 关键约束：只匹配有 RecruitmentDemand（招聘需求）的岗位，
+ * 不匹配系统"凭空造出来"的无需求岗位。
+ *
+ * 匹配逻辑：
+ *   1. 查询 RecruitmentDemand（status: 'recruiting'），获取 demand title + linkedJobId
+ *   2. 用候选人的 expectedPosition（简历中的意向岗位）去匹配 demand title
+ *   3. 匹配成功返回 linkedJobId（需求关联的真实岗位），失败返回 null
+ *
+ * @param {object} db - CloudBase 数据库实例
+ * @param {object} candidateInfo - { expectedPosition, expectedSalary }
+ * @returns {Promise<string|null>} 匹配到的 jobId，或 null
  */
 async function autoMatchJob(db, candidateInfo) {
-  const { expectedPosition, expectedSalary } = candidateInfo;
+  const { expectedPosition } = candidateInfo;
 
   if (!expectedPosition || expectedPosition.trim().length < 2) {
     console.log('[parse-queue-processor] 期望岗位为空或过短，跳过自动匹配');
@@ -491,58 +502,65 @@ async function autoMatchJob(db, candidateInfo) {
   }
 
   try {
-    // 查询所有活跃岗位
-    const { data: jobs } = await db
-      .collection('Job')
-      .where({ status: 'active' })
+    // 🔴 查询有招聘需求的岗位（RecruitmentDemand），而非全部活跃岗位（Job）
+    const { data: demands } = await db
+      .collection('RecruitmentDemand')
+      .where({ status: 'recruiting' })
+      .field({ title: true, linkedJobId: true, department: true })
       .get();
 
-    if (!jobs || jobs.length === 0) {
-      console.log('[parse-queue-processor] 无活跃岗位，跳过自动匹配');
+    if (!demands || demands.length === 0) {
+      console.log('[parse-queue-processor] 无进行中的招聘需求，跳过自动匹配');
+      return null;
+    }
+
+    // 过滤掉没有 linkedJobId 的需求（尚未创建关联岗位）
+    const validDemands = demands.filter(d => d.linkedJobId);
+    if (validDemands.length === 0) {
+      console.log('[parse-queue-processor] 所有需求均未关联岗位，跳过自动匹配');
       return null;
     }
 
     const position = expectedPosition.trim().toLowerCase();
 
-    // 策略1：精确匹配（岗位名包含期望岗位 或 期望岗位包含岗位名）
-    for (const job of jobs) {
-      const jobTitle = (job.title || job.name || '').toLowerCase().trim();
-      if (!jobTitle) continue;
+    // 策略1：精确匹配（需求标题包含期望岗位 或 期望岗位包含需求标题）
+    for (const demand of validDemands) {
+      const demandTitle = (demand.title || '').toLowerCase().trim();
+      if (!demandTitle) continue;
 
-      if (jobTitle === position || jobTitle.includes(position) || position.includes(jobTitle)) {
-        console.log(`[parse-queue-processor] ✅ 精确匹配: "${expectedPosition}" → "${job.title || job.name}"`);
-        return job._id;
+      if (demandTitle === position || demandTitle.includes(position) || position.includes(demandTitle)) {
+        console.log(`[parse-queue-processor] ✅ 精确匹配需求: "${expectedPosition}" → "${demand.title}" (jobId: ${demand.linkedJobId})`);
+        return demand.linkedJobId;
       }
     }
 
-    // 策略2：关键词匹配
+    // 策略2：关键词匹配（候选人的意向岗位关键词命中需求标题）
     const keywords = position.split(/[\s,，、/]+/).filter((k) => k.length >= 2);
-    for (const job of jobs) {
-      const jobTitle = (job.title || job.name || '').toLowerCase().trim();
-      if (!jobTitle) continue;
+    for (const demand of validDemands) {
+      const demandTitle = (demand.title || '').toLowerCase().trim();
+      if (!demandTitle) continue;
 
-      // 计算匹配的关键词数
-      const matchCount = keywords.filter((kw) => jobTitle.includes(kw)).length;
+      const matchCount = keywords.filter((kw) => demandTitle.includes(kw)).length;
       if (matchCount >= Math.ceil(keywords.length * 0.5) || matchCount >= 2) {
-        console.log(`[parse-queue-processor] ✅ 关键词匹配: "${expectedPosition}" → "${job.title || job.name}" (${matchCount}/${keywords.length})`);
-        return job._id;
+        console.log(`[parse-queue-processor] ✅ 关键词匹配需求: "${expectedPosition}" → "${demand.title}" (${matchCount}/${keywords.length}, jobId: ${demand.linkedJobId})`);
+        return demand.linkedJobId;
       }
     }
 
-    // 策略3：单关键词部分匹配（如 "CC" 匹配 "CC部"）
-    for (const job of jobs) {
-      const jobTitle = (job.title || job.name || '').toLowerCase().trim();
-      if (!jobTitle) continue;
+    // 策略3：单关键词部分匹配
+    for (const demand of validDemands) {
+      const demandTitle = (demand.title || '').toLowerCase().trim();
+      if (!demandTitle) continue;
 
       for (const kw of keywords) {
-        if (kw.length >= 2 && jobTitle.includes(kw)) {
-          console.log(`[parse-queue-processor] ✅ 单关键词匹配: "${expectedPosition}" → "${job.title || job.name}" (关键词: "${kw}")`);
-          return job._id;
+        if (kw.length >= 2 && demandTitle.includes(kw)) {
+          console.log(`[parse-queue-processor] ✅ 单关键词匹配需求: "${expectedPosition}" → "${demand.title}" (关键词: "${kw}", jobId: ${demand.linkedJobId})`);
+          return demand.linkedJobId;
         }
       }
     }
 
-    console.log(`[parse-queue-processor] ❌ 未匹配到岗位: "${expectedPosition}", 可选岗位: ${jobs.map(j => j.title || j.name).join(', ')}`);
+    console.log(`[parse-queue-processor] ❌ 未匹配到招聘需求: "${expectedPosition}", 可选需求: ${validDemands.map(d => d.title).join(', ')}`);
     return null;
   } catch (err) {
     console.error('[parse-queue-processor] 自动匹配岗位失败:', err.message);

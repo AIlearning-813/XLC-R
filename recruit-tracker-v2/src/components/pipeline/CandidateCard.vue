@@ -101,6 +101,14 @@ const availableStages = computed(() => {
   });
 });
 
+// 淘汰阶段选项（细分：简历筛选/初试/复试/终试）
+const rejectStageOptions = [
+  { key: 'resume', label: '简历筛选淘汰', icon: '📋' },
+  { key: 'first_interview', label: '初试淘汰', icon: '🗣️' },
+  { key: 'second_interview', label: '复试淘汰', icon: '👥' },
+  { key: 'final_interview', label: '终试淘汰', icon: '🏁' },
+];
+
 function toggleMenu(event) {
   event.stopPropagation();
   menuOpen.value = !menuOpen.value;
@@ -110,7 +118,7 @@ function closeMenu() {
   menuOpen.value = false;
 }
 
-function quickMove(toStage, event) {
+function quickMove(toStage, event, extra = {}) {
   event.stopPropagation();
   menuOpen.value = false;
   emit('quick-move', {
@@ -119,6 +127,7 @@ function quickMove(toStage, event) {
     application: props.application,
     fromStage: props.application?.stage || 'resume',
     toStage,
+    ...extra,
   });
 }
 
@@ -194,9 +203,15 @@ function handleToggleSelect(event) {
                 </button>
                 <div v-if="availableStages.length === 0" class="menu-empty">已是最后阶段</div>
                 <div class="menu-divider"></div>
-                <button class="menu-item menu-danger" @click="quickMove('rejected', $event)">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-                  淘汰
+                <div class="menu-label">淘汰（选择阶段）</div>
+                <button
+                  v-for="opt in rejectStageOptions"
+                  :key="opt.key"
+                  class="menu-item menu-danger"
+                  @click="quickMove('rejected', $event, { endStage: opt.key })"
+                >
+                  <span class="menu-item-icon">{{ opt.icon }}</span>
+                  {{ opt.label }}
                 </button>
                 <button class="menu-item menu-danger" @click="quickMove('withdrawn', $event)">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>

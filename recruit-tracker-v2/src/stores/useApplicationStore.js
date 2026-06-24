@@ -295,9 +295,13 @@ export const useApplicationStore = defineStore('application', () => {
 
     const expectedVersion = typeof current._version === 'number' ? current._version : 0;
 
+    // 支持显式指定淘汰阶段（如简历筛选淘汰/初试淘汰/复试淘汰/终试淘汰）
+    // 未指定时默认使用当前阶段
+    const endStage = options.endStage || current.stage;
+
     const updateData = {
       status, // 'rejected' | 'withdrawn'
-      endStage: current.stage,
+      endStage,
       endReason: reason,
       endedAt: new Date(),
     };
@@ -312,7 +316,7 @@ export const useApplicationStore = defineStore('application', () => {
         entityType: 'Application',
         entityIds: [id],
         detail: {
-          endStage: current.stage,
+          endStage,
           reason,
         },
         operator: options.operatorId || 'system',

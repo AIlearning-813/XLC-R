@@ -349,8 +349,8 @@ function handleCardMove({ applicationId, fromStage, toStage }) {
 }
 
 // 处理卡片快速流转按钮（不拖拽，直接弹窗确认）
-function handleCardQuickMove({ applicationId, candidate, application, fromStage, toStage }) {
-  pendingTransition.value = { applicationId, fromStage, toStage, isUnassigned: false };
+function handleCardQuickMove({ applicationId, candidate, application, fromStage, toStage, endStage }) {
+  pendingTransition.value = { applicationId, fromStage, toStage, isUnassigned: false, endStage };
   selectedCandidate.value = candidate;
   selectedApplication.value = application;
   dialogVisible.value = true;
@@ -376,7 +376,7 @@ async function handleTransitionConfirm({ note, reason }) {
         applicationId,
         toStage,
         reason || note || '未指定原因',
-        { operatorId: auth.userName }
+        { operatorId: auth.userName, endStage: pendingTransition.value?.endStage }
       );
     } else {
       await appStore.moveStage(applicationId, toStage, {
@@ -614,6 +614,7 @@ onMounted(() => {
       :job="selectedJob"
       :from-stage="pendingTransition?.fromStage || ''"
       :to-stage="pendingTransition?.toStage || ''"
+      :end-stage="pendingTransition?.endStage || ''"
       @confirm="handleTransitionConfirm"
       @cancel="handleTransitionCancel"
     />
