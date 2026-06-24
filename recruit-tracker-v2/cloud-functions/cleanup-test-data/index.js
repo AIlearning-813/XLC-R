@@ -25,6 +25,7 @@ const db = app.database();
 const COLLECTIONS_TO_CLEAR = [
   'Candidate',
   'Application',
+  'Job',
   'RecruitmentDemand',
   'ParseQueue',
   'ParseNotification',
