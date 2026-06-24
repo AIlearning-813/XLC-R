@@ -275,7 +275,7 @@ export const usePendingChangeStore = defineStore('pendingChange', () => {
             try {
               const jobStore = (await import('./useJobStore')).useJobStore();
               const jobResult = await jobStore().add({
-                title: doc.title, department: doc.department?.displayName || '',
+                title: doc.title, type: doc.jobType || 'CC', department: doc.department?.displayName || '',
                 headcount: doc.headcount || 1, requirements: doc.jobRequirements || '',
                 ownerId: doc.ownerId, createdBy: doc.ownerId, status: 'active',
               });
