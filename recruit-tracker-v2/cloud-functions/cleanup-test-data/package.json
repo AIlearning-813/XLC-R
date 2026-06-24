@@ -1,0 +1,6 @@
+{
+  "name": "cleanup-test-data",
+  "dependencies": {
+    "@cloudbase/node-sdk": "latest"
+  }
+}

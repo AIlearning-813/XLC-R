@@ -157,6 +157,13 @@
       "memorySize": 256,
       "runtime": "Nodejs20.19",
       "comment": "一次性云函数：从员工花名册初始化四级部门树到 Config 集合"
+    },
+    {
+      "name": "cleanup-test-data",
+      "timeout": 300,
+      "memorySize": 512,
+      "runtime": "Nodejs20.19",
+      "comment": "一次性云函数：清空内测前测试数据（Candidate/Application/RecruitmentDemand 等9个集合）"
     }
   ]
 }
