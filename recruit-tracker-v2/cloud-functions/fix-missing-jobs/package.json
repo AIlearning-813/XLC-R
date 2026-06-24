@@ -1,0 +1,6 @@
+{
+  "name": "fix-missing-jobs",
+  "dependencies": {
+    "@cloudbase/node-sdk": "latest"
+  }
+}

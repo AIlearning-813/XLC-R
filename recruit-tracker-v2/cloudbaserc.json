@@ -164,6 +164,20 @@
       "memorySize": 512,
       "runtime": "Nodejs20.19",
       "comment": "一次性云函数：清空内测前测试数据（Candidate/Application/RecruitmentDemand 等9个集合）"
+    },
+    {
+      "name": "db-diagnose",
+      "timeout": 30,
+      "memorySize": 256,
+      "runtime": "Nodejs20.19",
+      "comment": "一次性云函数：诊断数据库状态"
+    },
+    {
+      "name": "fix-missing-jobs",
+      "timeout": 60,
+      "memorySize": 256,
+      "runtime": "Nodejs20.19",
+      "comment": "一次性云函数：为 linkedJobId 为 null 的需求补建 Job"
     }
   ]
 }

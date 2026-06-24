@@ -1,0 +1,6 @@
+{
+  "name": "db-diagnose",
+  "dependencies": {
+    "@cloudbase/node-sdk": "latest"
+  }
+}
