@@ -103,6 +103,7 @@ async function loadFileUrl() {
     const result = await cloudbase.callFunction('get-file-url', {
       fileId: props.candidate.fileId,
       callerUsername: auth.currentUsername,
+      candidateOwnerId: props.candidate.ownerId || props.candidate.createdBy || '',
     });
     if (!result?.success) throw new Error(result?.error || '获取文件失败');
 
@@ -175,6 +176,17 @@ onBeforeUnmount(() => {
       <div class="card-header-actions">
         <button
           v-if="candidate.fileId"
+          class="btn btn-sm btn-secondary"
+          @click="loadFileUrl"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="23 4 23 10 17 10"/>
+            <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/>
+          </svg>
+          刷新预览
+        </button>
+        <button
+          v-if="candidate.fileId"
           class="btn btn-sm btn-primary"
           @click="downloadResume"
         >
@@ -222,7 +234,7 @@ onBeforeUnmount(() => {
         </div>
 
         <div v-else class="resume-preview-placeholder">
-          <span style="color: var(--gray-400);">点击上方「下载原始简历」按钮或刷新页面加载预览</span>
+          <span style="color: var(--gray-400);">点击上方「刷新预览」或「下载原始简历」按钮加载预览</span>
         </div>
       </div>
 

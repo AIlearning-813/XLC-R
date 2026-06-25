@@ -1,7 +1,7 @@
 <script setup>
 /* 新励成招聘管理系统 V2.0 — 候选人卡片（看板用，含快速流转按钮） */
 
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { FUNNEL_STAGES } from '../../config/constants';
 
 const props = defineProps({
@@ -118,6 +118,33 @@ function closeMenu() {
   menuOpen.value = false;
 }
 
+// 点击菜单外部时关闭（菜单通过 Teleport 挂在 body 下，不能用 mouseleave）
+function onDocumentClick(event) {
+  if (!menuOpen.value) return;
+  // 检查点击是否在触发按钮或菜单内部
+  const clickedTrigger = menuTrigger.value && menuTrigger.value.contains(event.target);
+  const clickedMenu = event.target.closest('.quick-move-menu');
+  if (!clickedTrigger && !clickedMenu) {
+    menuOpen.value = false;
+  }
+}
+
+function onEscape(event) {
+  if (event.key === 'Escape' && menuOpen.value) {
+    menuOpen.value = false;
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('click', onDocumentClick, true);
+  document.addEventListener('keydown', onEscape);
+});
+
+onUnmounted(() => {
+  document.removeEventListener('click', onDocumentClick, true);
+  document.removeEventListener('keydown', onEscape);
+});
+
 function quickMove(toStage, event, extra = {}) {
   event.stopPropagation();
   menuOpen.value = false;
@@ -179,7 +206,6 @@ function handleToggleSelect(event) {
     :class="{ stale: isStale }"
     :data-id="application._id"
     @click="handleClick"
-    @mouseleave="closeMenu"
   >
     <div class="card-top">
       <span class="card-name">{{ name }}</span>

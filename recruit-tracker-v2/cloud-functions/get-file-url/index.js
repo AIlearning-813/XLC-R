@@ -3,12 +3,13 @@
  *
  * 前端无法直接访问云存储（权限 + CORS），通过云函数下载文件内容并以 base64 返回。
  *
- * ⚠️ P0-2 修复：增加权限校验
- *   - 必须传入 callerUsername（由 auth-proxy 验证过的账号名）
- *   - 非管理员只能下载自己的文件（fileId 路径中包含自己的 username）
+ * 权限校验：
+ *   - 必须传入 callerUsername（当前登录账号名）
+ *   - 必须传入 candidateOwnerId（候选人所属专员）
  *   - 管理员可下载所有文件
+ *   - 专员只能下载自己负责的候选人简历（callerUsername === candidateOwnerId）
  *
- * 入参：{ fileId: 'cloud://xxx', callerUsername: 'admin' }
+ * 入参：{ fileId: 'cloud://xxx', callerUsername: 'user', candidateOwnerId: 'user' }
  * 返回：{ success: true, data: 'base64...', contentType: 'application/pdf', size: 12345 }
  */
 const cloudbase = require('@cloudbase/node-sdk');
@@ -36,39 +37,33 @@ async function verifyCaller(callerUsername) {
   }
 }
 
-/** 检查 fileId 路径是否属于指定用户（CloudBase 文件路径通常为 cloud://envId/resumes/username/...） */
-function fileBelongsToUser(fileId, username) {
-  if (!fileId || !username) return false;
-  // fileId 格式: cloud://envId.bucket/path/to/file
-  const parts = fileId.split('/');
-  // 跳过协议和 bucket（前 3 段），检查后续路径
-  const pathParts = parts.slice(3);
-  // 如果路径包含 resumes/{username} 则认为属于该用户
-  return pathParts.some((part, i) =>
-    part === username || (pathParts[i - 1] === 'resumes' && part === username)
-  ) || fileId.includes(`/resumes/${username}/`) || fileId.includes(`/${username}/`);
-}
-
 exports.main = async (event) => {
-  const { fileId, callerUsername } = event;
-  console.log('[get-file-url] 收到请求, fileId:', fileId, 'caller:', callerUsername);
+  const { fileId, callerUsername, candidateOwnerId } = event;
+  console.log('[get-file-url] 收到请求, fileId:', fileId, 'caller:', callerUsername, 'owner:', candidateOwnerId);
 
   if (!fileId) {
     console.log('[get-file-url] 缺少 fileId');
     return { success: false, error: '缺少 fileId' };
   }
 
-  // ===== P0-2 修复：权限校验 =====
+  // 权限校验：验证调用者身份
   const caller = await verifyCaller(callerUsername);
   if (!caller.valid) {
     console.log('[get-file-url] 身份校验失败:', caller.reason);
     return { success: false, error: caller.reason };
   }
 
-  // 非管理员只能访问自己的文件
-  if (!caller.isAdmin && !fileBelongsToUser(fileId, caller.username)) {
-    console.log(`[get-file-url] 权限拒绝: ${caller.username} 试图访问不属于自己的文件`);
-    return { success: false, error: '无权访问该文件' };
+  // 管理员可下载所有文件
+  // 专员只能下载自己负责的候选人简历（通过 candidateOwnerId 判断）
+  if (!caller.isAdmin) {
+    if (!candidateOwnerId) {
+      console.log(`[get-file-url] 权限拒绝: ${caller.username} 专员，未提供 candidateOwnerId`);
+      return { success: false, error: '无权访问该文件' };
+    }
+    if (caller.username !== candidateOwnerId) {
+      console.log(`[get-file-url] 权限拒绝: ${caller.username} 试图访问 ${candidateOwnerId} 的简历`);
+      return { success: false, error: '无权访问该文件' };
+    }
   }
 
   console.log(`[get-file-url] 权限通过: ${caller.username} (${caller.isAdmin ? 'admin' : 'recruiter'})`);
