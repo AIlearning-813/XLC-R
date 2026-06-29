@@ -8,20 +8,87 @@
  *   - 引用来源展示、复制/使用功能
  *   - 反馈闭环
  */
-import { ref, nextTick, onMounted } from 'vue';
+import { ref, nextTick, onMounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import cloudbase from '../services/cloudbase';
 import { useKnowledgeStore } from '../stores/useKnowledgeStore';
+import { useAuthStore } from '../stores/useAuthStore';
 import { captureError } from '../services/error-capture';
 
 const router = useRouter();
 const kbStore = useKnowledgeStore();
+const auth = useAuthStore();
 
 // 消息列表
 const messages = ref([]);
 const inputText = ref('');
 const loading = ref(false);
 const chatEl = ref(null);
+
+// ===== 聊天记录持久化（localStorage） =====
+const MAX_MESSAGES = 200; // 最多保留 200 条消息（避免 localStorage 撑满）
+const STORAGE_KEY_PREFIX = 'ai_chat_history_';
+
+function getStorageKey() {
+  const userId = auth.currentUsername || 'anonymous';
+  return STORAGE_KEY_PREFIX + userId;
+}
+
+/** 从 localStorage 恢复聊天记录 */
+function loadHistory() {
+  try {
+    const raw = localStorage.getItem(getStorageKey());
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        // 恢复 Date 对象（JSON 序列化后是字符串）
+        messages.value = parsed.map(m => ({
+          ...m,
+          time: m.time ? new Date(m.time) : new Date(),
+        }));
+        return;
+      }
+    }
+  } catch (e) {
+    console.warn('[AIChatPage] 恢复聊天记录失败:', e.message);
+  }
+  messages.value = [];
+}
+
+/** 保存聊天记录到 localStorage */
+function saveHistory() {
+  try {
+    // 限制条数，裁剪旧消息
+    const toSave = messages.value.length > MAX_MESSAGES
+      ? messages.value.slice(-MAX_MESSAGES)
+      : messages.value;
+    localStorage.setItem(getStorageKey(), JSON.stringify(toSave));
+  } catch (e) {
+    // localStorage 满了则清掉最旧的 50 条重试一次
+    console.warn('[AIChatPage] 保存聊天记录失败:', e.message);
+    try {
+      const trimmed = messages.value.slice(-100);
+      localStorage.setItem(getStorageKey(), JSON.stringify(trimmed));
+    } catch {
+      // 放弃保存，不影响聊天功能
+    }
+  }
+}
+
+// 监听消息变化，自动保存（防抖：每次变化后 500ms 内只写一次）
+let saveTimer = null;
+watch(messages, () => {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveHistory, 500);
+}, { deep: true });
+
+onMounted(() => {
+  loadHistory();
+  // 恢复后滚动到底部
+  if (messages.value.length > 0) {
+    nextTick(scrollToBottom);
+  }
+});
 
 // 建议快捷问题
 const quickQuestions = [
@@ -128,13 +195,34 @@ function fmtTime(d) {
   const date = typeof d === 'string' ? new Date(d) : d;
   return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
 }
+
+// 清空对话
+function clearHistory() {
+  if (!confirm('确定要清空所有对话记录吗？')) return;
+  messages.value = [];
+  try {
+    localStorage.removeItem(getStorageKey());
+  } catch {}
+}
 </script>
 
 <template>
   <div class="ai-chat-page">
     <div class="page-header">
-      <h2 class="page-title">✨ AI 招聘助手</h2>
-      <p class="page-desc">基于公司知识库和招聘历史数据的智能助手，帮你写JD、回答问题、分析候选人</p>
+      <div class="page-header-row">
+        <div>
+          <h2 class="page-title">✨ AI 招聘助手</h2>
+          <p class="page-desc">基于公司知识库和招聘历史数据的智能助手，帮你写JD、回答问题、分析候选人</p>
+        </div>
+        <button
+          v-if="messages.length > 0"
+          class="btn btn-sm btn-secondary clear-btn"
+          @click="clearHistory"
+          title="清空对话记录"
+        >
+          🗑 清空对话
+        </button>
+      </div>
     </div>
 
     <div class="chat-container">
@@ -251,8 +339,10 @@ function fmtTime(d) {
 }
 
 .page-header { margin-bottom: var(--spacing-md); }
+.page-header-row { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--spacing-md); }
 .page-title { font-size: var(--font-size-2xl); font-weight: 700; color: var(--gray-800); }
 .page-desc { font-size: var(--font-size-sm); color: var(--gray-400); margin-top: 2px; }
+.clear-btn { flex-shrink: 0; margin-top: 4px; }
 
 .chat-container {
   flex: 1;
