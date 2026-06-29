@@ -1,9 +1,10 @@
 <script setup>
 /* 新励成招聘管理系统 V2.0 — 侧边栏导航 */
 
-import { computed, ref } from 'vue';
+import { computed, ref, onMounted, onUnmounted } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useAuthStore } from '../../stores/useAuthStore';
+import { usePendingChangeStore } from '../../stores/usePendingChangeStore';
 
 const props = defineProps({
   mobileOpen: { type: Boolean, default: false },
@@ -13,6 +14,36 @@ const emit = defineEmits(['close']);
 const router = useRouter();
 const route = useRoute();
 const auth = useAuthStore();
+const pendingStore = usePendingChangeStore();
+
+// ===== 待审批数量（管理员可见） =====
+const pendingApprovalCount = ref(0);
+let approvalPollTimer = null;
+
+async function refreshApprovalCount() {
+  if (!auth.isAdmin) return;
+  try {
+    await pendingStore.fetchAll();
+    pendingApprovalCount.value = pendingStore.pendingCount;
+  } catch {
+    // 静默失败，不影响侧边栏渲染
+  }
+}
+
+onMounted(() => {
+  if (auth.isAdmin) {
+    refreshApprovalCount();
+    // 每 60 秒自动刷新待审批数量
+    approvalPollTimer = setInterval(refreshApprovalCount, 60000);
+  }
+});
+
+onUnmounted(() => {
+  if (approvalPollTimer) {
+    clearInterval(approvalPollTimer);
+    approvalPollTimer = null;
+  }
+});
 
 // ===== 修改密码 =====
 const showPwdDialog = ref(false);
@@ -141,6 +172,7 @@ function isActive(path) {
       >
         <span class="sidebar-item-icon" v-html="getIcon(item.icon)"></span>
         <span class="sidebar-item-title">{{ item.title }}</span>
+        <span v-if="item.path === '/admin-review' && pendingApprovalCount > 0" class="sidebar-badge">{{ pendingApprovalCount > 99 ? '99+' : pendingApprovalCount }}</span>
       </button>
     </nav>
 
@@ -421,6 +453,22 @@ function isActive(path) {
 .pwd-field input:focus { border-color: var(--primary); }
 .pwd-error { color: var(--danger); font-size: var(--font-size-sm); margin: var(--spacing-sm) 0; }
 .pwd-actions { display: flex; justify-content: flex-end; gap: var(--spacing-xs); margin-top: var(--spacing-md); }
+
+/* === 角标（待审批数量） === */
+.sidebar-badge {
+  margin-left: auto;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--danger, #c25450);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 20px;
+  text-align: center;
+  flex-shrink: 0;
+}
 
 /* === 移动端响应式 === */
 @media (max-width: 768px) {
