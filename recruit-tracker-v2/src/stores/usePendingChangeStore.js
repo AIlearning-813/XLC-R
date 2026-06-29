@@ -277,8 +277,8 @@ export const usePendingChangeStore = defineStore('pendingChange', () => {
               || '';
 
             // 先创建 Job（如果失败直接抛出，不创建需求，审批状态保持 pending 可重试）
-            const jobStore = (await import('./useJobStore')).useJobStore();
-            const jobResult = await jobStore().add({
+            const { useJobStore } = await import('./useJobStore');
+            const jobResult = await useJobStore().add({
               title: change.after.title,
               type: change.after.jobType || 'CC',
               department: deptName,

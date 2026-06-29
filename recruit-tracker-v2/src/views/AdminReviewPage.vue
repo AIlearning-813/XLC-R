@@ -79,8 +79,14 @@ async function handleReject() {
 
 const filteredChanges = computed(() => store.pendingChanges);
 
-function typeIcon(type) { return type === 'job' ? '' : ''; }
-function typeLabel(type) { return type === 'job' ? '岗位' : '系统配置'; }
+function typeIcon(type) {
+  const icons = { job: '', recruitmentDemand: '', config: '', candidate: '' };
+  return icons[type] || '';
+}
+function typeLabel(type) {
+  const labels = { job: '岗位', recruitmentDemand: '招聘需求', config: '系统配置', candidate: '候选人' };
+  return labels[type] || type || '未知';
+}
 function actionLabel(action) { return { create: '新建', update: '修改', delete: '删除' }[action] || action; }
 function statusLabel(status) { return { pending: '待审批', approved: '已通过', rejected: '已驳回' }[status] || status; }
 function statusClass(status) { return `badge-${status}`; }
@@ -88,7 +94,14 @@ function statusClass(status) { return `badge-${status}`; }
 function fmtDate(d) { return formatDateShort(d, ''); }
 
 function getChangedFields(change) {
-  if (!change.before || !change.after) return [];
+  if (!change.after) return [];
+  // 新建操作：显示所有字段（before 为空）
+  if (change.action === 'create' || !change.before) {
+    return Object.keys(change.after).map(key => ({
+      key, oldVal: undefined, newVal: change.after[key],
+    }));
+  }
+  // 修改/删除：显示变更字段
   const fields = [];
   for (const key of Object.keys(change.after)) {
     const oldVal = change.before[key];
