@@ -338,7 +338,7 @@ async function handleDiagnose(event) {
     message: '诊断完成',
     mailboxInfo: connResult.mailboxInfo,
     recentSenders,
-    recruitmentDomains: ['@zhipin.com', '@kanzhun.com', '@zhaopin.com.cn', '@liepin.com', '@xlczg.com'],
+    recruitmentDomains: ['@zhipin.com', '@bosszhipin.com', '@kanzhun.com', '@zhaopin.com.cn', '@liepin.com', '@51job.com', '@xlczg.com'],
   };
 }
 

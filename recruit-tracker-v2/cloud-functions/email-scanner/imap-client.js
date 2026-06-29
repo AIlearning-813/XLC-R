@@ -4,8 +4,8 @@
  * 使用 imapflow 库连接 IMAP 服务器，搜索并下载招聘平台发送的简历邮件附件。
  *
  * 支持的招聘平台发件人域名：
- *   @zhipin.com (BOSS直聘), @kanzhun.com (BOSS直聘/看准),
- *   @zhaopin.com.cn (智联招聘), @liepin.com (猎聘)
+ *   @zhipin.com / @bosszhipin.com (BOSS直聘), @kanzhun.com (BOSS直聘/看准),
+ *   @zhaopin.com.cn (智联招聘), @liepin.com (猎聘), @51job.com (前程无忧)
  */
 
 const { decrypt } = require('./crypto');
@@ -13,6 +13,7 @@ const { decrypt } = require('./crypto');
 // 招聘平台发件人域名过滤（不含 @ 前缀，支持子域名匹配）
 const RECRUITMENT_DOMAINS = [
   'zhipin.com',        // BOSS直聘（含 notice.zhipin.com 等子域名）
+  'bosszhipin.com',     // BOSS直聘（cv@notice/service.bosszhipin.com）
   'kanzhun.com',        // BOSS直聘/看准
   'zhaopin.com.cn',     // 智联招聘
   'liepin.com',         // 猎聘
