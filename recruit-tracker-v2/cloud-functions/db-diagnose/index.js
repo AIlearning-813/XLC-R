@@ -23,6 +23,68 @@ async function countAndSample(colName, filter = {}, limit = 5) {
 exports.main = async (event) => {
   const action = event?.action || 'diagnose';
 
+  // ---- 🆕 fix-orphan-demands：修复 linkedJobId 为 null 的招聘需求 ----
+  if (action === 'fix-orphan-demands') {
+    try {
+      // 查找 linkedJobId 为 null/null 且状态为 recruiting/active/pending 的需求
+      const { data: demands } = await db.collection('RecruitmentDemand')
+        .where({ linkedJobId: null })
+        .limit(100)
+        .get();
+
+      if (!demands || demands.length === 0) {
+        return { success: true, message: '没有需要修复的孤儿需求', fixed: 0 };
+      }
+
+      // 只修复非 deleted 状态的
+      const orphanDemands = demands.filter(d => d.status !== 'deleted');
+      const results = [];
+      for (const demand of orphanDemands) {
+        try {
+          const dept = demand.department || {};
+          const deptName = dept.displayName
+            || [dept.level1, dept.level2, dept.level3, dept.level4].filter(Boolean).join(' / ')
+            || '';
+
+          const jobResult = await db.collection('Job').add({
+            title: demand.title,
+            type: demand.jobType || 'CC',
+            department: deptName,
+            headcount: demand.headcount || 1,
+            requirements: demand.jobRequirements || '',
+            ownerId: demand.ownerId || 'system',
+            createdBy: demand.ownerId || 'system',
+            status: 'active',
+            _version: 0,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          });
+
+          await db.collection('RecruitmentDemand').doc(demand._id).update({
+            linkedJobId: jobResult.id,
+            updatedAt: new Date(),
+          });
+
+          results.push({ demandId: demand._id, title: demand.title, jobId: jobResult.id, status: 'fixed' });
+        } catch (e) {
+          results.push({ demandId: demand._id, title: demand.title, error: e.message, status: 'failed' });
+        }
+      }
+
+      const fixed = results.filter(r => r.status === 'fixed').length;
+      const failed = results.filter(r => r.status === 'failed').length;
+      return {
+        success: true,
+        message: `已修复 ${fixed} 个需求，${failed} 个失败（共 ${orphanDemands.length} 个孤儿需求，${demands.length} 个 linkedJobId 为 null 的需求中 ${demands.length - orphanDemands.length} 个已删除已跳过）`,
+        fixed,
+        failed,
+        results,
+      };
+    } catch (err) {
+      return { success: false, message: err.message };
+    }
+  }
+
   // ---- 🆕 import-department-tree：从花名册 JSON 文件导入四级部门树 ----
   if (action === 'import-department-tree') {
     try {
@@ -229,6 +291,31 @@ exports.main = async (event) => {
     results.ParseQueue.byStatus = { pending: pendingCount, processing: processingCount, done: doneCount };
   } catch (err) {
     results.ParseQueue = { error: err.message };
+  }
+
+  // ===== PendingChanges 审批记录诊断 🆕 =====
+  try {
+    const { total: pcTotal, data: pcData } = await db.collection('PendingChanges')
+      .orderBy('submittedAt', 'desc').limit(20).get();
+    results.PendingChanges = {
+      total: pcTotal,
+      records: (pcData || []).map(c => ({
+        _id: c._id,
+        type: c.type,
+        action: c.action,
+        entityType: c.entityType,
+        entityId: c.entityId,
+        entityLabel: c.entityLabel,
+        status: c.status,
+        submittedBy: c.submittedBy,
+        submittedAt: c.submittedAt,
+        reviewedBy: c.reviewedBy,
+        reviewedAt: c.reviewedAt,
+        reviewComment: c.reviewComment,
+      })),
+    };
+  } catch (err) {
+    results.PendingChanges = { error: err.message };
   }
 
   // ===== Config 诊断 🆕 =====

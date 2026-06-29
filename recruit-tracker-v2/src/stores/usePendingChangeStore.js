@@ -264,25 +264,46 @@ export const usePendingChangeStore = defineStore('pendingChange', () => {
 
         case 'recruitmentDemand': {
           if (change.action === 'create' && change.after) {
-            const doc = { ...change.after, status: 'recruiting', updatedAt: new Date() };
+            // 🔧 修复：先创建 Job，成功后再创建 Demand（避免 Job 失败导致孤儿需求 linkedJobId=null）
+            const { useConfigStore } = await import('./useConfigStore');
+            const configStore = useConfigStore();
+            await configStore.loadConfig();
+            const jobTypeConfig = configStore.jobTypes[change.after.jobType] || {};
+
+            // 拼接部门 displayName（兜底：如果 department 对象没有 displayName，从 level1-4 拼接）
+            const dept = change.after.department || {};
+            const deptName = dept.displayName
+              || [dept.level1, dept.level2, dept.level3, dept.level4].filter(Boolean).join(' / ')
+              || '';
+
+            // 先创建 Job（如果失败直接抛出，不创建需求，审批状态保持 pending 可重试）
+            const jobStore = (await import('./useJobStore')).useJobStore();
+            const jobResult = await jobStore().add({
+              title: change.after.title,
+              type: change.after.jobType || 'CC',
+              department: deptName,
+              headcount: change.after.headcount || 1,
+              requirements: jobTypeConfig.requirements || change.after.jobRequirements || '',
+              responsibilities: jobTypeConfig.responsibilities || '',
+              ownerId: change.after.ownerId,
+              createdBy: change.after.ownerId,
+              status: 'active',
+            });
+
+            const jobId = jobResult._id || jobResult.id;
+
+            // Job 创建成功后再创建 Demand，直接带 linkedJobId
+            const doc = {
+              ...change.after,
+              status: 'recruiting',
+              linkedJobId: jobId,
+              updatedAt: new Date(),
+            };
             if (change.entityId) {
               await db.collection('RecruitmentDemand').doc(change.entityId).update(doc);
             } else {
               const result = await db.collection('RecruitmentDemand').add(doc);
               change.entityId = result.id;
-            }
-            // Auto-create linked Job
-            try {
-              const jobStore = (await import('./useJobStore')).useJobStore();
-              const jobResult = await jobStore().add({
-                title: doc.title, type: doc.jobType || 'CC', department: doc.department?.displayName || '',
-                headcount: doc.headcount || 1, requirements: doc.jobRequirements || '',
-                ownerId: doc.ownerId, createdBy: doc.ownerId, status: 'active',
-              });
-              await db.collection('RecruitmentDemand').doc(change.entityId || result?.id).update({ linkedJobId: jobResult._id || jobResult.id });
-            } catch (e) {
-              console.warn('[executeChange] 自动创建Job失败:', e.message);
-              captureError('pending_change', '审批执行自动创建Job失败', { message: e.message, context: 'executeChange.createJob' });
             }
           } else if (change.action === 'update' && change.entityId && change.after) {
             await db.collection('RecruitmentDemand').doc(change.entityId).update({ ...change.after, updatedAt: new Date() });

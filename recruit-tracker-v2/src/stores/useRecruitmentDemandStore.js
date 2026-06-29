@@ -73,34 +73,37 @@ export const useRecruitmentDemandStore = defineStore('recruitmentDemand', () => 
       });
     }
 
-    // Admin direct: create demand + auto-create Job
-    normalized.status = 'recruiting';
-    const result = await db.collection('RecruitmentDemand').add(normalized);
-    const { useJobStore } = await import('./useJobStore');
-    try {
-      // 从岗位类型配置读取职责和要求
-      const { useConfigStore } = await import('./useConfigStore');
-      const configStore = useConfigStore();
-      await configStore.loadConfig();
-      const jobTypeConfig = configStore.jobTypes[demandData.jobType] || {};
+    // Admin direct: 先创建 Job，成功后创建 Demand（避免 Job 失败导致孤儿需求）
+    const { useConfigStore } = await import('./useConfigStore');
+    const configStore = useConfigStore();
+    await configStore.loadConfig();
+    const jobTypeConfig = configStore.jobTypes[demandData.jobType] || {};
 
-      const jobData = {
-        title: normalized.title,
-        department: normalized.department?.displayName || '',
-        type: demandData.jobType || 'CC',
-        headcount: normalized.headcount || 1,
-        requirements: jobTypeConfig.requirements || '',
-        responsibilities: jobTypeConfig.responsibilities || '',
-        ownerId: normalized.ownerId,
-        createdBy: normalized.ownerId,
-        status: 'active',
-      };
-      const jobResult = await useJobStore().add(jobData);
-      await db.collection('RecruitmentDemand').doc(result.id).update({ linkedJobId: jobResult._id || jobResult.id });
-    } catch (e) {
-      console.warn('[demandStore] 自动创建Job失败:', e.message);
-      captureError('demand_store', '自动创建Job失败', { message: e.message, context: 'add_demand' });
-    }
+    const dept = demandData.department || {};
+    const deptName = dept.displayName
+      || [dept.level1, dept.level2, dept.level3, dept.level4].filter(Boolean).join(' / ')
+      || '';
+
+    // 先创建 Job
+    const { useJobStore } = await import('./useJobStore');
+    const jobResult = await useJobStore().add({
+      title: normalized.title,
+      department: deptName,
+      type: demandData.jobType || 'CC',
+      headcount: normalized.headcount || 1,
+      requirements: jobTypeConfig.requirements || '',
+      responsibilities: jobTypeConfig.responsibilities || '',
+      ownerId: normalized.ownerId,
+      createdBy: normalized.ownerId,
+      status: 'active',
+    });
+
+    const jobId = jobResult._id || jobResult.id;
+
+    // Job 创建成功后创建 Demand，直接带 linkedJobId
+    normalized.status = 'recruiting';
+    normalized.linkedJobId = jobId;
+    const result = await db.collection('RecruitmentDemand').add(normalized);
     demands.value.unshift({ ...normalized, _id: result.id });
     return { id: result.id, doc: normalized };
   }
