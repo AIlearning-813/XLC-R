@@ -96,7 +96,20 @@ export const useConfigStore = defineStore('config', () => {
 
       if (data) {
         if (data.departments?.length) departments.value = data.departments;
-        if (data.departmentTree?.length) departmentTree.value = data.departmentTree;
+        if (data.departmentTree?.length) {
+          departmentTree.value = data.departmentTree;
+        } else if (data.departments?.length) {
+          // 🛡 兜底：departmentTree 为空但扁平列表有数据 → 自动构建一级树
+          departmentTree.value = data.departments.map(name => ({
+            id: 'dept_' + name.replace(/\s/g, '_'),
+            name,
+            level: 1,
+            children: [],
+          }));
+          // 同步扁平列表（从树生成）
+          departments.value = flattenTree(departmentTree.value);
+          console.warn('[useConfigStore] departmentTree 为空，已从扁平列表自动恢复');
+        }
         if (data.cities?.length) cities.value = data.cities;
         if (data.recruitmentSources?.length) recruitmentSources.value = data.recruitmentSources;
         if (data.jobTypes) jobTypes.value = { ...JOB_TYPES, ...data.jobTypes };
@@ -268,9 +281,21 @@ export const useConfigStore = defineStore('config', () => {
     if (!db) return;
 
     try {
+      // 🛡 保护：departmentTree 为空但 departments 有数据时，从扁动构建树
+      let treeToSave = departmentTree.value;
+      if ((!treeToSave || treeToSave.length === 0) && departments.value.length > 0) {
+        treeToSave = departments.value.map(name => ({
+          id: 'dept_' + name.replace(/\s/g, '_'),
+          name,
+          level: 1,
+          children: [],
+        }));
+        console.warn('[useConfigStore] saveToCloudBase: departmentTree 为空，已从扁平列表自动构建');
+      }
+
       const doc = {
         departments: departments.value,
-        departmentTree: departmentTree.value,
+        departmentTree: treeToSave,
         cities: cities.value,
         recruitmentSources: recruitmentSources.value,
         jobTypes: jobTypes.value,

@@ -20,9 +20,36 @@ async function countAndSample(colName, filter = {}, limit = 5) {
   }
 }
 
-exports.main = async () => {
-  const results = {};
+exports.main = async (event) => {
+  const action = event?.action || 'diagnose';
 
+  // ---- 🆕 fix-department-tree：修复空 departmentTree ----
+  if (action === 'fix-department-tree') {
+    try {
+      const { data: configData } = await db.collection('Config').doc('system').get();
+      const config = (Array.isArray(configData) ? configData[0] : configData) || {};
+      if (config.departmentTree && config.departmentTree.length > 0) {
+        return { success: true, message: 'departmentTree 已有数据，无需修复', tree: config.departmentTree };
+      }
+      const depts = config.departments || [];
+      if (depts.length === 0) {
+        return { success: false, message: 'departments 也为空，无法修复' };
+      }
+      const tree = depts.map(name => ({
+        id: 'dept_' + name.replace(/\s/g, '_'),
+        name, level: 1, children: [],
+      }));
+      await db.collection('Config').doc('system').update({
+        departmentTree: tree, updatedAt: new Date(),
+      });
+      return { success: true, message: `departmentTree 已从 ${depts.length} 个扁平部门重建`, tree };
+    } catch (err) {
+      return { success: false, message: err.message };
+    }
+  }
+
+  // ---- diagnose ----
+  const results = {};
   results.Job_active = await countAndSample('Job', { status: 'active' });
   results.RecruitmentDemand = await countAndSample('RecruitmentDemand', {});
 
@@ -87,6 +114,26 @@ exports.main = async () => {
     results.ParseQueue.byStatus = { pending: pendingCount, processing: processingCount, done: doneCount };
   } catch (err) {
     results.ParseQueue = { error: err.message };
+  }
+
+  // ===== Config 诊断 🆕 =====
+  try {
+    const { data: configData } = await db.collection('Config').doc('system').get();
+    const sysConfig = (Array.isArray(configData) ? configData[0] : configData) || {};
+    results.Config = {
+      exists: !!sysConfig,
+      departmentTreeCount: sysConfig.departmentTree?.length || 0,
+      departmentTree: sysConfig.departmentTree || [],
+      departmentsCount: sysConfig.departments?.length || 0,
+      departments: sysConfig.departments || [],
+      citiesCount: sysConfig.cities?.length || 0,
+      cities: sysConfig.cities || [],
+      jobTypesCount: sysConfig.jobTypes ? Object.keys(sysConfig.jobTypes).length : 0,
+      recruitmentSourcesCount: sysConfig.recruitmentSources?.length || 0,
+      updatedAt: sysConfig.updatedAt || null,
+    };
+  } catch (err) {
+    results.Config = { error: err.message };
   }
 
   return { success: true, results };
