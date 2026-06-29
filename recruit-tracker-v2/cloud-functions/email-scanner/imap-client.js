@@ -169,10 +169,11 @@ async function fetchNewResumes(config) {
     const seqSet = new Set([...unseenSeqs, ...recentSeqs]);
     let allSeqs = Array.from(seqSet).sort((a, b) => a - b);
 
-    // 最多处理 30 封
-    if (allSeqs.length > 30) {
-      console.log(`[imap-client] ${config.email}：合并后 ${allSeqs.length} 封，只处理最近 30 封`);
-      allSeqs = allSeqs.slice(-30);
+    // 最多处理 8 封（防超时：每封下载+提取+上传可能耗时数十秒）
+    const MAX_EMAILS_PER_SCAN = 8;
+    if (allSeqs.length > MAX_EMAILS_PER_SCAN) {
+      console.log(`[imap-client] ${config.email}：合并后 ${allSeqs.length} 封，只处理最近 ${MAX_EMAILS_PER_SCAN} 封`);
+      allSeqs = allSeqs.slice(-MAX_EMAILS_PER_SCAN);
     }
 
     console.log(`[imap-client] ${config.email}：共 ${allSeqs.length} 封待查（未读 ${unseenSeqs.length} + 最近 ${recentSeqs.length}，合并去重后）`);
@@ -185,8 +186,15 @@ async function fetchNewResumes(config) {
     // 逐封 FETCH（避免批量 for-await 卡死在某封邮件上）
     let msgCount = 0;
     const fetchStart = Date.now();
+    const MAILBOX_TIMEOUT_MS = 90000; // 单个邮箱最多处理 90 秒
 
     for (const seq of allSeqs) {
+      // 邮箱级时间预算：超时则停止，剩余邮件下次扫描再处理
+      if (Date.now() - fetchStart > MAILBOX_TIMEOUT_MS) {
+        console.log(`[imap-client] ${config.email}：邮箱处理已超 ${MAILBOX_TIMEOUT_MS / 1000}s，停止（已处理 ${msgCount}/${allSeqs.length} 封），剩余邮件下次扫描再取`);
+        break;
+      }
+
       msgCount++;
       let msg;
       try {

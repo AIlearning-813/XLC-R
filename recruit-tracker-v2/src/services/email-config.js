@@ -172,9 +172,22 @@ export async function testImapConnection(config) {
  * @returns {Promise<object>}
  */
 export async function triggerManualScan(force = false) {
-  const result = await cloudbase.callFunction('email-scanner', {
-    action: 'scan',
-    force,
-  });
-  return result || { success: false };
+  try {
+    const result = await cloudbase.callFunction(
+      'email-scanner',
+      { action: 'scan', force },
+      { timeout: 120000 }  // HTTP 超时 120s（云函数端单邮箱 90s 预算 + 余量）
+    );
+    return result || { success: false };
+  } catch (err) {
+    // HTTP 超时 / 网络错误 → 云函数可能仍在后台运行，下次定时扫描会继续
+    if (err.message?.includes('timeout') || err.message?.includes('TIMEOUT') || err.code === 'FUNCTION_TIME_LIMIT_EXCEEDED') {
+      return {
+        success: true,
+        message: '扫描任务已提交，正在后台处理中。请稍后查看扫描结果。如邮件较多，可能需要多次扫描才能处理完所有邮件。',
+        inProgress: true,
+      };
+    }
+    return { success: false, message: err.message || '扫描失败' };
+  }
 }

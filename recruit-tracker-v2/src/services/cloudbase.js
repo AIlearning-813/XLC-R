@@ -55,10 +55,10 @@ function storage() {
 }
 
 // 调用云函数
-async function callFunction(name, data) {
+async function callFunction(name, data, options = {}) {
   const app = getApp();
   if (!app) throw new Error('服务未初始化，无法调用云函数');
-  const res = await app.callFunction({ name, data });
+  const res = await app.callFunction({ name, data, ...options });
   return res.result;
 }
 

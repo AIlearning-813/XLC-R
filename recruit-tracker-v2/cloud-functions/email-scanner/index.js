@@ -143,11 +143,12 @@ exports.main = async (event, context) => {
 
       // 2. 逐个邮箱处理
       for (const config of configs) {
-        // 超时保护：剩余 < 60 秒则停止
+        // 超时保护：剩余 < 90 秒则停止（给当前邮箱留足处理时间）
         const elapsed = Date.now() - startTime;
-        const timeoutMs = (context.timeout || 300000) - 60000;
+        const timeoutMs = (context.timeout || 300000) - 90000;
         if (elapsed > timeoutMs) {
-          scanResult.message = `超时保护：已用 ${Math.round(elapsed / 1000)}s，剩余 ${Math.round((context.timeout - elapsed) / 1000)}s，停止扫描`;
+          scanResult.message = `超时保护：已用 ${Math.round(elapsed / 1000)}s，剩余 ${Math.round((context.timeout - elapsed) / 1000)}s，停止扫描剩余邮箱`;
+          scanResult.skippedMailboxes = configs.length - configs.indexOf(config);
           break;
         }
 

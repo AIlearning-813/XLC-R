@@ -125,9 +125,14 @@ export const useEmailConfigStore = defineStore('emailConfig', () => {
     try {
       const result = await triggerManualScan(force);
       if (result.success) {
-        toast.success(
-          result.message || `扫描完成：发现 ${result.totalEmails || 0} 封邮件，新增 ${result.newResumes || 0} 份简历`
-        );
+        if (result.inProgress) {
+          // 云函数超时但在后台继续运行
+          toast.info(result.message);
+        } else {
+          toast.success(
+            result.message || `扫描完成：发现 ${result.totalEmails || 0} 封邮件，新增 ${result.newResumes || 0} 份简历`
+          );
+        }
       } else {
         toast.error(result.message || '扫描失败');
       }
@@ -137,6 +142,8 @@ export const useEmailConfigStore = defineStore('emailConfig', () => {
       return { success: false };
     } finally {
       scanning.value = false;
+      // 刷新配置列表以显示最新扫描时间
+      await fetchConfigs();
     }
   }
 
