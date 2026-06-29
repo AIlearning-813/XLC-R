@@ -558,6 +558,7 @@ async function processMailbox(config, scanResult, forceRescan = false) {
   // 更新邮箱扫描状态
   await db.collection('EmailConfig').doc(config._id).update({
     lastScanAt: new Date(),
+    lastSuccessfulScanAt: new Date(),
     failureCount: 0,
     lastError: null,
     nextRetryAt: null,

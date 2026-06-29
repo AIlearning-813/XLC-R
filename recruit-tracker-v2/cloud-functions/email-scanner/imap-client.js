@@ -10,13 +10,14 @@
 
 const { decrypt } = require('./crypto');
 
-// 招聘平台发件人域名过滤
+// 招聘平台发件人域名过滤（不含 @ 前缀，支持子域名匹配）
 const RECRUITMENT_DOMAINS = [
-  '@zhipin.com',
-  '@kanzhun.com',
-  '@zhaopin.com.cn',
-  '@liepin.com',
-  '@xlczg.com', // 临时：公司邮箱，用于测试验证
+  'zhipin.com',        // BOSS直聘（含 notice.zhipin.com 等子域名）
+  'kanzhun.com',        // BOSS直聘/看准
+  'zhaopin.com.cn',     // 智联招聘
+  'liepin.com',         // 猎聘
+  '51job.com',          // 前程无忧
+  'xlczg.com',          // 公司邮箱
 ];
 
 // 支持的简历附件 MIME 类型
@@ -87,11 +88,18 @@ function isResumeAttachment(attachment) {
 
 /**
  * 检查发件人是否来自招聘平台
+ * 支持子域名匹配：notice.zhipin.com 匹配 zhipin.com
  */
 function isRecruitmentSender(from) {
   if (!from) return false;
   const fromLower = from.toLowerCase();
-  return RECRUITMENT_DOMAINS.some((domain) => fromLower.includes(domain));
+  // 提取邮箱域名（@ 后面的部分）
+  const atIndex = fromLower.lastIndexOf('@');
+  const domain = atIndex >= 0 ? fromLower.slice(atIndex + 1) : fromLower;
+
+  return RECRUITMENT_DOMAINS.some((d) =>
+    domain === d || domain.endsWith('.' + d)
+  );
 }
 
 /**

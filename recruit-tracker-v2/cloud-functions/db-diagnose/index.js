@@ -24,9 +24,70 @@ exports.main = async () => {
   const results = {};
 
   results.Job_active = await countAndSample('Job', { status: 'active' });
-  results.Job_all = await countAndSample('Job', {});
   results.RecruitmentDemand = await countAndSample('RecruitmentDemand', {});
-  results.PendingChanges = await countAndSample('PendingChanges', {});
+
+  // Candidate 数量
+  try {
+    const { total: candidateTotal } = await db.collection('Candidate').where({ status: 'active' }).count();
+    const { total: candidateAll } = await db.collection('Candidate').count();
+    results.Candidate = { active: candidateTotal, total: candidateAll };
+  } catch (err) {
+    results.Candidate = { error: err.message };
+  }
+
+  // Application 数量
+  try {
+    const { total: appTotal } = await db.collection('Application').count();
+    results.Application = { total: appTotal };
+  } catch (err) {
+    results.Application = { error: err.message };
+  }
+
+  // ===== EmailConfig 邮箱配置诊断 =====
+  try {
+    const { total: emailTotal, data: emailConfigs } = await db.collection('EmailConfig').limit(20).get();
+    results.EmailConfig = {
+      total: emailTotal,
+      configs: (emailConfigs || []).map(c => ({
+        _id: c._id,
+        email: c.email,
+        userId: c.userId,
+        enabled: c.enabled,
+        imapHost: c.imapHost,
+        failureCount: c.failureCount || 0,
+        lastScanAt: c.lastScanAt,
+        lastSuccessfulScanAt: c.lastSuccessfulScanAt,
+        lastError: c.lastError,
+        nextRetryAt: c.nextRetryAt,
+      })),
+    };
+  } catch (err) {
+    results.EmailConfig = { error: err.message };
+  }
+
+  // ===== ParseQueue 解析队列诊断 =====
+  try {
+    const { total: pqTotal, data: pqData } = await db.collection('ParseQueue').limit(5).get();
+    results.ParseQueue = {
+      total: pqTotal,
+      sample: (pqData || []).map(e => ({
+        _id: e._id,
+        status: e.status,
+        source: e.source,
+        sourceEmailFrom: e.sourceEmailFrom,
+        sourceEmailSubject: e.sourceEmailSubject,
+        fileName: e.fileName,
+        createdAt: e.createdAt,
+      })),
+    };
+    // 统计各状态数量
+    const { total: pendingCount } = await db.collection('ParseQueue').where({ status: 'pending' }).count();
+    const { total: processingCount } = await db.collection('ParseQueue').where({ status: 'processing' }).count();
+    const { total: doneCount } = await db.collection('ParseQueue').where({ status: 'done' }).count();
+    results.ParseQueue.byStatus = { pending: pendingCount, processing: processingCount, done: doneCount };
+  } catch (err) {
+    results.ParseQueue = { error: err.message };
+  }
 
   return { success: true, results };
 };
