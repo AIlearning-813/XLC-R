@@ -72,15 +72,58 @@ export const useConfigStore = defineStore('config', () => {
   };
 
   // ===== 初始化 =====
+  const LS_KEY = 'sys_config_cache';
+
+  // 从 localStorage 读取缓存（毫秒级，页面打开立即可用）
+  function loadFromCache() {
+    try {
+      const raw = localStorage.getItem(LS_KEY);
+      if (!raw) return false;
+      const cached = JSON.parse(raw);
+      if (!cached || !cached.departmentTree) return false;
+      // 缓存有效期 24 小时（过期后强制从云端刷新）
+      if (cached._ts && Date.now() - cached._ts > 86400000) return false;
+      // 立即应用缓存数据
+      departmentTree.value = cached.departmentTree || [];
+      departments.value = cached.departments || [];
+      cities.value = cached.cities || [];
+      recruitmentSources.value = cached.recruitmentSources || [];
+      if (cached.jobTypes) jobTypes.value = cached.jobTypes;
+      if (cached.alertThresholds) alertThresholds.value = cached.alertThresholds;
+      console.log('[useConfigStore] 已从本地缓存加载配置（立即可用）');
+      return true;
+    } catch { return false; }
+  }
+
+  // 保存到 localStorage 缓存
+  function saveToCache(data) {
+    try {
+      const cache = {
+        departmentTree: data.departmentTree || departmentTree.value,
+        departments: data.departments || departments.value,
+        cities: data.cities || cities.value,
+        recruitmentSources: data.recruitmentSources || recruitmentSources.value,
+        jobTypes: data.jobTypes || jobTypes.value,
+        alertThresholds: data.alertThresholds || alertThresholds.value,
+        _ts: Date.now(),
+      };
+      localStorage.setItem(LS_KEY, JSON.stringify(cache));
+    } catch { /* 忽略 */ }
+  }
+
   async function loadConfig() {
     if (loaded.value) return;
+
+    // 立即从缓存加载（不管云端如何，先让页面可用）
+    const cacheHit = loadFromCache();
+
     loading.value = true;
     error.value = '';
 
     try {
       const db = cloudbase.db();
       if (!db) {
-        // 离线：使用默认值
+        if (!cacheHit) alertThresholds.value = { ...defaultThresholds };
         loaded.value = true;
         return;
       }
@@ -106,7 +149,6 @@ export const useConfigStore = defineStore('config', () => {
             level: 1,
             children: [],
           }));
-          // 同步扁平列表（从树生成）
           departments.value = flattenTree(departmentTree.value);
           console.warn('[useConfigStore] departmentTree 为空，已从扁平列表自动恢复');
         }
@@ -118,14 +160,16 @@ export const useConfigStore = defineStore('config', () => {
         } else {
           alertThresholds.value = { ...defaultThresholds };
         }
+        // 云端数据写入本地缓存
+        saveToCache(data);
       } else {
-        alertThresholds.value = { ...defaultThresholds };
+        if (!cacheHit) alertThresholds.value = { ...defaultThresholds };
       }
 
       loaded.value = true;
     } catch (err) {
-      console.warn('[useConfigStore] 加载配置失败，使用默认值:', err.message);
-      alertThresholds.value = { ...defaultThresholds };
+      console.warn('[useConfigStore] 加载配置失败，使用缓存/默认值:', err.message);
+      if (!cacheHit) alertThresholds.value = { ...defaultThresholds };
       loaded.value = true;
     } finally {
       loading.value = false;
@@ -310,6 +354,8 @@ export const useConfigStore = defineStore('config', () => {
       } else {
         await db.collection('Config').add({ _id: 'system', ...doc, createdAt: new Date() });
       }
+      // 同步更新本地缓存
+      saveToCache(doc);
     } catch (err) {
       console.warn('[useConfigStore] 保存配置失败:', err.message);
     }

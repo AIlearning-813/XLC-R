@@ -23,6 +23,121 @@ async function countAndSample(colName, filter = {}, limit = 5) {
 exports.main = async (event) => {
   const action = event?.action || 'diagnose';
 
+  // ---- 🆕 import-department-tree：从花名册 JSON 文件导入四级部门树 ----
+  if (action === 'import-department-tree') {
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      const treeFile = path.join(__dirname, 'dept_tree_clean.json');
+      const raw = fs.readFileSync(treeFile, 'utf-8');
+      const { departmentTree, departments } = JSON.parse(raw);
+
+      // 同时保留原有扁平 departments 作为兼容
+      await db.collection('Config').doc('system').update({
+        departmentTree,
+        departments,
+        updatedAt: new Date(),
+      });
+
+      return {
+        success: true,
+        message: `部门树已从花名册导入：${departmentTree.length} 个一级部门，${departments.length} 个总节点`,
+        l1Count: departmentTree.length,
+        totalNodes: departments.length,
+      };
+    } catch (err) {
+      return { success: false, message: err.message };
+    }
+  }
+
+  // ---- 🆕 rebuild-tree-from-demands：从 RecruitmentDemand 重建四级部门树 ----
+  if (action === 'rebuild-tree-from-demands') {
+    try {
+      // 拉取所有 RecruitmentDemand（不限状态）
+      const all = [];
+      let cursor = null;
+      let hasMore = true;
+      while (hasMore) {
+        let query = db.collection('RecruitmentDemand').limit(100);
+        if (cursor) query = query.where({ _id: db.command.gt(cursor) });
+        const { data } = await query.get();
+        if (data && data.length > 0) {
+          all.push(...data);
+          cursor = data[data.length - 1]._id;
+          if (data.length < 100) hasMore = false;
+        } else { hasMore = false; }
+      }
+
+      // 提取所有不重复的四级路径
+      const pathSet = new Set();
+      for (const d of all) {
+        if (d.department?.level1) {
+          const path = [
+            d.department.level1,
+            d.department.level2 || '',
+            d.department.level3 || '',
+            d.department.level4 || '',
+          ].join('|||'); // 用 ||| 分隔，避免部门名含 / 冲突
+          pathSet.add(path);
+        }
+      }
+
+      if (pathSet.size === 0) {
+        return { success: false, message: 'RecruitmentDemand 中没有部门数据' };
+      }
+
+      // 构建树：{ name → { children: { name → ... } } }
+      const root = {};
+      for (const path of pathSet) {
+        const parts = path.split('|||').filter(Boolean);
+        let current = root;
+        for (const part of parts) {
+          if (!current[part]) current[part] = {};
+          current = current[part];
+        }
+      }
+
+      // 递归转树节点
+      let nodeIdCounter = 0;
+      function buildTree(obj, level) {
+        return Object.entries(obj).map(([name, children]) => {
+          const childObj = buildTree(children, level + 1);
+          return {
+            id: 'dept_recovered_' + (nodeIdCounter++),
+            name,
+            level,
+            children: childObj.length > 0 ? childObj : [],
+          };
+        });
+      }
+      const tree = buildTree(root, 1);
+
+      // 更新 Config
+      const flatNames = [];
+      function collectNames(nodes) {
+        for (const n of nodes) {
+          flatNames.push(n.name);
+          if (n.children?.length) collectNames(n.children);
+        }
+      }
+      collectNames(tree);
+
+      await db.collection('Config').doc('system').update({
+        departmentTree: tree,
+        departments: flatNames,
+        updatedAt: new Date(),
+      });
+
+      return {
+        success: true,
+        message: `从 ${all.length} 条招聘需求中恢复了 ${pathSet.size} 条不重复部门路径，重建为 ${tree.length} 个一级部门`,
+        tree,
+      };
+    } catch (err) {
+      return { success: false, message: err.message };
+    }
+  }
+
   // ---- 🆕 fix-department-tree：修复空 departmentTree ----
   if (action === 'fix-department-tree') {
     try {
