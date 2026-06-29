@@ -36,6 +36,9 @@ export const useConfigStore = defineStore('config', () => {
   }
 
   // ===== 计算属性 =====
+
+  // 🔧 立即从 localStorage 加载缓存（store 创建时毫秒级读取，确保任何组件使用 store 时数据立即可用）
+  loadFromCache();
   const departmentOptions = computed(() =>
     departments.value.map(d => ({ value: d, label: d }))
   );
