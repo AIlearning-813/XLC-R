@@ -200,19 +200,43 @@ async function loadAuditLogs() {
 // ===== 编辑 =====
 function startEdit() {
   if (!candidate.value) return;
+  const c = candidate.value;
+  // 深拷贝教育经历和工作经历数组，避免直接修改原数据
+  const eduSource = c.education?.length ? c.education : (c.parsedData?.education || []);
+  const workSource = c.workExperience?.length ? c.workExperience : (c.parsedData?.work_experience || []);
   editForm.value = {
-    name: candidate.value.name || '',
-    phone: candidate.value.phone || '',
-    email: candidate.value.email || '',
-    gender: candidate.value.gender || '',
-    age: candidate.value.age || '',
-    city: candidate.value.city || '',
-    yearsOfExperience: candidate.value.yearsOfExperience || '',
-    expectedPosition: candidate.value.expectedPosition || '',
-    expectedSalary: candidate.value.expectedSalary || '',
-    selfEvaluation: candidate.value.selfEvaluation || '',
+    name: c.name || '',
+    phone: c.phone || '',
+    email: c.email || '',
+    gender: c.gender || '',
+    age: c.age || '',
+    city: c.city || '',
+    yearsOfExperience: c.yearsOfExperience || '',
+    expectedPosition: c.expectedPosition || '',
+    expectedSalary: c.expectedSalary || '',
+    selfEvaluation: c.selfEvaluation || '',
+    education: eduSource.map(e => ({ ...e })),
+    workExperience: workSource.map(w => ({ ...w })),
   };
   editing.value = true;
+}
+
+// 教育经历编辑
+function addEducation() {
+  if (!editForm.value.education) editForm.value.education = [];
+  editForm.value.education.push({ school: '', degree: '', major: '', start_date: '', end_date: '' });
+}
+function removeEducation(index) {
+  editForm.value.education.splice(index, 1);
+}
+
+// 工作经历编辑
+function addWorkExperience() {
+  if (!editForm.value.workExperience) editForm.value.workExperience = [];
+  editForm.value.workExperience.push({ company: '', position: '', start_date: '', end_date: '', description: '' });
+}
+function removeWorkExperience(index) {
+  editForm.value.workExperience.splice(index, 1);
 }
 
 function cancelEdit() {
@@ -223,11 +247,20 @@ function cancelEdit() {
 async function saveEdit() {
   saving.value = true;
   try {
+    // 过滤空教育经历（学校和学历都为空）
+    const education = (editForm.value.education || [])
+      .filter(e => e.school?.trim() || e.degree?.trim());
+    // 过滤空工作经历（公司和职位都为空）
+    const workExperience = (editForm.value.workExperience || [])
+      .filter(w => w.company?.trim() || w.position?.trim());
+
     await candidateStore.update(candidateId.value, {
       ...editForm.value,
       age: editForm.value.age ? Number(editForm.value.age) : undefined,
       yearsOfExperience: editForm.value.yearsOfExperience
         ? Number(editForm.value.yearsOfExperience) : undefined,
+      education,
+      workExperience,
     });
 
     // 写审计日志
@@ -512,6 +545,44 @@ watch(candidateId, (newId) => {
               <div class="form-group full-width">
                 <label class="form-label">自我评价</label>
                 <textarea v-model="editForm.selfEvaluation" class="form-textarea" rows="3"></textarea>
+              </div>
+
+              <!-- 教育经历编辑 -->
+              <div class="form-group full-width">
+                <div class="section-label-row">
+                  <label class="form-label">教育经历</label>
+                  <button type="button" class="btn btn-xs btn-ghost" @click="addEducation">+ 添加</button>
+                </div>
+                <div v-if="!editForm.education?.length" class="text-muted" style="font-size:13px;padding:4px 0;">暂无教育经历</div>
+                <div v-for="(edu, i) in editForm.education" :key="'edu-'+i" class="inline-card">
+                  <div class="inline-card-row">
+                    <input v-model="edu.school" class="form-input" placeholder="学校名称" />
+                    <input v-model="edu.degree" class="form-input" placeholder="学历（如本科）" />
+                    <input v-model="edu.major" class="form-input" placeholder="专业" />
+                    <input v-model="edu.start_date" class="form-input" placeholder="入学（如2019-09）" style="max-width:130px;" />
+                    <input v-model="edu.end_date" class="form-input" placeholder="毕业（如2023-06）" style="max-width:130px;" />
+                    <button type="button" class="btn btn-xs btn-danger-ghost" @click="removeEducation(i)" title="删除此条">✕</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 工作经历编辑 -->
+              <div class="form-group full-width">
+                <div class="section-label-row">
+                  <label class="form-label">工作经历</label>
+                  <button type="button" class="btn btn-xs btn-ghost" @click="addWorkExperience">+ 添加</button>
+                </div>
+                <div v-if="!editForm.workExperience?.length" class="text-muted" style="font-size:13px;padding:4px 0;">暂无工作经历</div>
+                <div v-for="(exp, i) in editForm.workExperience" :key="'work-'+i" class="inline-card">
+                  <div class="inline-card-row">
+                    <input v-model="exp.company" class="form-input" placeholder="公司名称" />
+                    <input v-model="exp.position" class="form-input" placeholder="职位" />
+                    <input v-model="exp.start_date" class="form-input" placeholder="入职（如2020-03）" style="max-width:130px;" />
+                    <input v-model="exp.end_date" class="form-input" placeholder="离职（空=至今）" style="max-width:130px;" />
+                    <button type="button" class="btn btn-xs btn-danger-ghost" @click="removeWorkExperience(i)" title="删除此条">✕</button>
+                  </div>
+                  <input v-model="exp.description" class="form-input" placeholder="工作描述（可选）" style="margin-top:4px;" />
+                </div>
               </div>
 
               <div class="edit-actions full-width">
@@ -872,6 +943,59 @@ function getFunnelKey(stage) {
 .form-group.full-width {
   grid-column: 1 / -1;
 }
+
+/* === 学历/工作经历编辑 === */
+.section-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--spacing-xs);
+}
+
+.inline-card {
+  background: var(--gray-25);
+  border: 1px solid var(--gray-100);
+  border-radius: var(--radius-sm);
+  padding: var(--spacing-sm);
+  margin-bottom: var(--spacing-xs);
+}
+
+.inline-card-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.inline-card-row .form-input {
+  flex: 1;
+  min-width: 100px;
+}
+
+.btn-xs {
+  padding: 2px 10px;
+  font-size: 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--gray-200);
+  background: #fff;
+  color: var(--gray-600);
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+}
+.btn-xs:hover { background: var(--gray-50); }
+
+.btn-danger-ghost {
+  background: transparent;
+  border: none;
+  color: var(--danger);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+.btn-danger-ghost:hover { background: rgba(229,62,62,0.08); }
 
 /* === 列表项（教育/工作）=== */
 .list-item {
