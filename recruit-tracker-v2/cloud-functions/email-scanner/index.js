@@ -512,7 +512,9 @@ async function processMailbox(config, scanResult, forceRescan = false) {
           const dateStr = new Date().toISOString().slice(0, 10);
           // P1 修复：净化文件名，防止路径遍历（../ 攻击）
           const safeFilename = (attachment.filename || 'attachment').replace(/\.\./g, '').replace(/[\\/]/g, '_');
-          const cloudPath = `email-attachments/${dateStr}/${config._id}/${safeFilename}`;
+          // P1 修复：加入时间戳+随机串防止同名附件互相覆盖（不同候选人同名附件会串位）
+          const uniquePrefix = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+          const cloudPath = `email-attachments/${dateStr}/${config._id}/${uniquePrefix}/${safeFilename}`;
           const uploadResult = await app.uploadFile({
             cloudPath,
             fileContent: attachment.content,

@@ -525,8 +525,8 @@ export const useCandidateStore = defineStore('candidate', () => {
       phoneHash: '',
       emailHash: '',
       parsedData: null,
-      resumeFileName: '',
-      resumeFileId: '',
+      fileName: '',
+      fileId: '',
       consentStatus: CONSENT_STATUS.EXPIRED,
       anonymizedAt: new Date(),
     };

@@ -275,6 +275,141 @@ exports.main = async (event) => {
     }
   }
 
+  // ---- 🆕 find-duplicate-fileids：查找共享相同 fileId 的候选人（简历串位诊断）----
+  if (action === 'find-duplicate-fileids') {
+    try {
+      // 拉取所有有 fileId 的候选人
+      const all = [];
+      let cursor = null;
+      let hasMore = true;
+      while (hasMore) {
+        let query = db.collection('Candidate')
+          .where({ fileId: db.command.neq('') })
+          .limit(100);
+        if (cursor) query = query.where({ _id: db.command.gt(cursor) });
+        const { data } = await query.get();
+        if (data && data.length > 0) {
+          all.push(...data);
+          cursor = data[data.length - 1]._id;
+          if (data.length < 100) hasMore = false;
+        } else { hasMore = false; }
+      }
+
+      // 按 fileId 分组，找出重复的
+      const byFileId = {};
+      for (const c of all) {
+        if (!c.fileId) continue;
+        if (!byFileId[c.fileId]) byFileId[c.fileId] = [];
+        byFileId[c.fileId].push({
+          _id: c._id,
+          name: c.name,
+          fileName: c.fileName,
+          source: c.source,
+          createdBy: c.createdBy,
+          createdAt: c.createdAt,
+        });
+      }
+
+      const duplicates = Object.entries(byFileId)
+        .filter(([, candidates]) => candidates.length > 1)
+        .map(([fileId, candidates]) => ({ fileId, count: candidates.length, candidates }));
+
+      // 统计无 fileId 的候选人
+      const noFileId = all.filter(c => !c.fileId).map(c => ({
+        _id: c._id, name: c.name, source: c.source, createdBy: c.createdBy,
+      }));
+
+      return {
+        success: true,
+        totalWithFileId: all.filter(c => c.fileId).length,
+        totalWithoutFileId: noFileId.length,
+        duplicateGroups: duplicates.length,
+        duplicates,
+        noFileIdSample: noFileId.slice(0, 10),
+      };
+    } catch (err) {
+      return { success: false, message: err.message };
+    }
+  }
+
+  // ---- 🆕 fix-duplicate-fileids：清除重复 fileId（简历串位修复）----
+  if (action === 'fix-duplicate-fileids') {
+    try {
+      // 拉取所有有 fileId 的候选人
+      const all = [];
+      let cursor = null;
+      let hasMore = true;
+      while (hasMore) {
+        let query = db.collection('Candidate')
+          .where({ fileId: db.command.neq('') })
+          .limit(100);
+        if (cursor) query = query.where({ _id: db.command.gt(cursor) });
+        const { data } = await query.get();
+        if (data && data.length > 0) {
+          all.push(...data);
+          cursor = data[data.length - 1]._id;
+          if (data.length < 100) hasMore = false;
+        } else { hasMore = false; }
+      }
+
+      // 按 fileId 分组
+      const byFileId = {};
+      for (const c of all) {
+        if (!c.fileId) continue;
+        if (!byFileId[c.fileId]) byFileId[c.fileId] = [];
+        byFileId[c.fileId].push(c);
+      }
+
+      // 找出重复组（>1 个候选人共享同一 fileId）
+      const duplicateGroups = Object.entries(byFileId)
+        .filter(([, candidates]) => candidates.length > 1);
+
+      if (duplicateGroups.length === 0) {
+        return { success: true, message: '没有重复 fileId，无需修复', fixed: 0 };
+      }
+
+      // 对每个重复组，保留最后一个（最新 createdAt）的 fileId，清除其他的
+      let fixed = 0;
+      const results = [];
+      for (const [fileId, candidates] of duplicateGroups) {
+        // 按 createdAt 排序，最后一个保留 fileId
+        const sorted = candidates.sort((a, b) => {
+          const da = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+          const db = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+          return da - db;
+        });
+        const keeper = sorted[sorted.length - 1]; // 最新的保留
+        const toFix = sorted.slice(0, -1); // 其余清除 fileId
+
+        for (const c of toFix) {
+          try {
+            await db.collection('Candidate').doc(c._id).update({
+              fileId: '',
+              fileName: c.fileName || '',
+              _duplicateFileIdNote: `原始简历文件与 ${keeper.name}(${keeper._id}) 冲突被覆盖，已清除错误引用。AI解析文本仍在 resumeRawText 中。修复时间: ${new Date().toISOString()}`,
+              updatedAt: new Date(),
+            });
+            fixed++;
+            results.push({ _id: c._id, name: c.name, action: 'cleared', keeper: keeper.name });
+          } catch (e) {
+            results.push({ _id: c._id, name: c.name, action: 'failed', error: e.message });
+          }
+        }
+        results.push({ _id: keeper._id, name: keeper.name, action: 'kept', note: '最后上传，fileId 保留' });
+      }
+
+      return {
+        success: true,
+        message: `修复了 ${fixed} 个候选人（清除了错误 fileId），涉及 ${duplicateGroups.length} 个重复组`,
+        fixed,
+        duplicateGroups: duplicateGroups.length,
+        results,
+      };
+    } catch (err) {
+      return { success: false, message: err.message };
+    }
+  }
+
   // ---- diagnose ----
   const results = {};
   results.Job_active = await countAndSample('Job', { status: 'active' });

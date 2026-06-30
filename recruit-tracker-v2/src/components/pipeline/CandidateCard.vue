@@ -198,8 +198,8 @@ function handleToggleSelect(event) {
     </span>
     <template v-else>
       <span class="compact-badge badge" :class="sourceBadgeClass">{{ sourceLabel }}</span>
-      <span class="compact-recorder" v-if="candidate?.ownerId || candidate?.createdBy" :title="'录入人: ' + (candidate.ownerId || candidate.createdBy)">
-        {{ candidate.ownerId || candidate.createdBy }}
+      <span class="compact-recorder" :title="'录入人: ' + (candidate.ownerId || candidate.createdBy || '未知')">
+        {{ candidate.ownerId || candidate.createdBy || '—' }}
       </span>
     </template>
   </div>
@@ -263,8 +263,8 @@ function handleToggleSelect(event) {
         {{ stayLabel }}
       </span>
       <span class="card-phone" v-if="candidate?.phone">{{ candidate.phone }}</span>
-      <span class="card-recorder" v-if="candidate?.ownerId || candidate?.createdBy">
-        {{ candidate.ownerId || candidate.createdBy }}
+      <span class="card-recorder">
+        {{ candidate.ownerId || candidate.createdBy || '—' }}
       </span>
     </div>
   </div>
