@@ -202,6 +202,12 @@ onBeforeUnmount(() => {
       </div>
     </div>
     <div class="card-body">
+      <!-- 原始文件不可用提示 -->
+      <div v-if="!candidate.fileId && candidate.resumeRawText" class="resume-preview-placeholder" style="padding: var(--spacing-md); background: #FFFBEB; border: 1px solid #FDE68A; border-radius: var(--radius-sm); margin-bottom: var(--spacing-md); display: flex; align-items: center; gap: 10px;">
+        <span style="font-size: 18px;">⚠️</span>
+        <span style="color: #92400E; font-size: var(--font-size-sm);">原始简历文件不可用（可能因邮箱导入时同名附件覆盖丢失），以下为 AI 提取的文本内容：</span>
+      </div>
+
       <!-- 原始文件预览 -->
       <div v-if="candidate.fileId" class="resume-preview">
         <div v-if="fileLoading" class="resume-preview-placeholder">
@@ -239,8 +245,8 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- 提取文本（折叠） -->
-      <details v-if="candidate.resumeRawText" class="resume-text-details">
-        <summary>📄 提取文本（AI 解析用）</summary>
+      <details v-if="candidate.resumeRawText" class="resume-text-details" :open="!candidate.fileId">
+        <summary>📄 提取文本（AI 解析用）{{ !candidate.fileId ? '（原始文件不可用，以下为AI提取内容）' : '' }}</summary>
         <pre class="resume-raw">{{ candidate.resumeRawText }}</pre>
       </details>
 

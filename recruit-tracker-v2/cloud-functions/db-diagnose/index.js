@@ -278,14 +278,12 @@ exports.main = async (event) => {
   // ---- 🆕 find-duplicate-fileids：查找共享相同 fileId 的候选人（简历串位诊断）----
   if (action === 'find-duplicate-fileids') {
     try {
-      // 拉取所有有 fileId 的候选人
+      // 拉取全部候选人，在 JS 中过滤（避免 CloudBase neq 查询的不可靠行为）
       const all = [];
       let cursor = null;
       let hasMore = true;
       while (hasMore) {
-        let query = db.collection('Candidate')
-          .where({ fileId: db.command.neq('') })
-          .limit(100);
+        let query = db.collection('Candidate').limit(100);
         if (cursor) query = query.where({ _id: db.command.gt(cursor) });
         const { data } = await query.get();
         if (data && data.length > 0) {
@@ -295,10 +293,12 @@ exports.main = async (event) => {
         } else { hasMore = false; }
       }
 
+      const withFileId = all.filter(c => c.fileId && c.fileId.length > 0);
+      const withoutFileId = all.filter(c => !c.fileId || c.fileId.length === 0);
+
       // 按 fileId 分组，找出重复的
       const byFileId = {};
-      for (const c of all) {
-        if (!c.fileId) continue;
+      for (const c of withFileId) {
         if (!byFileId[c.fileId]) byFileId[c.fileId] = [];
         byFileId[c.fileId].push({
           _id: c._id,
@@ -314,18 +314,16 @@ exports.main = async (event) => {
         .filter(([, candidates]) => candidates.length > 1)
         .map(([fileId, candidates]) => ({ fileId, count: candidates.length, candidates }));
 
-      // 统计无 fileId 的候选人
-      const noFileId = all.filter(c => !c.fileId).map(c => ({
-        _id: c._id, name: c.name, source: c.source, createdBy: c.createdBy,
-      }));
-
       return {
         success: true,
-        totalWithFileId: all.filter(c => c.fileId).length,
-        totalWithoutFileId: noFileId.length,
+        totalCandidates: all.length,
+        totalWithFileId: withFileId.length,
+        totalWithoutFileId: withoutFileId.length,
         duplicateGroups: duplicates.length,
         duplicates,
-        noFileIdSample: noFileId.slice(0, 10),
+        noFileIdSample: withoutFileId.slice(0, 10).map(c => ({
+          _id: c._id, name: c.name, source: c.source, createdBy: c.createdBy,
+        })),
       };
     } catch (err) {
       return { success: false, message: err.message };
@@ -335,14 +333,12 @@ exports.main = async (event) => {
   // ---- 🆕 fix-duplicate-fileids：清除重复 fileId（简历串位修复）----
   if (action === 'fix-duplicate-fileids') {
     try {
-      // 拉取所有有 fileId 的候选人
+      // 拉取全部候选人，在 JS 中过滤
       const all = [];
       let cursor = null;
       let hasMore = true;
       while (hasMore) {
-        let query = db.collection('Candidate')
-          .where({ fileId: db.command.neq('') })
-          .limit(100);
+        let query = db.collection('Candidate').limit(100);
         if (cursor) query = query.where({ _id: db.command.gt(cursor) });
         const { data } = await query.get();
         if (data && data.length > 0) {
@@ -352,10 +348,11 @@ exports.main = async (event) => {
         } else { hasMore = false; }
       }
 
+      const withFileId = all.filter(c => c.fileId && c.fileId.length > 0);
+
       // 按 fileId 分组
       const byFileId = {};
-      for (const c of all) {
-        if (!c.fileId) continue;
+      for (const c of withFileId) {
         if (!byFileId[c.fileId]) byFileId[c.fileId] = [];
         byFileId[c.fileId].push(c);
       }
@@ -365,7 +362,13 @@ exports.main = async (event) => {
         .filter(([, candidates]) => candidates.length > 1);
 
       if (duplicateGroups.length === 0) {
-        return { success: true, message: '没有重复 fileId，无需修复', fixed: 0 };
+        return {
+          success: true,
+          message: `没有重复 fileId，无需修复。总共 ${all.length} 个候选人，${withFileId.length} 个有 fileId。`,
+          fixed: 0,
+          totalCandidates: all.length,
+          totalWithFileId: withFileId.length,
+        };
       }
 
       // 对每个重复组，保留最后一个（最新 createdAt）的 fileId，清除其他的
@@ -385,7 +388,6 @@ exports.main = async (event) => {
           try {
             await db.collection('Candidate').doc(c._id).update({
               fileId: '',
-              fileName: c.fileName || '',
               _duplicateFileIdNote: `原始简历文件与 ${keeper.name}(${keeper._id}) 冲突被覆盖，已清除错误引用。AI解析文本仍在 resumeRawText 中。修复时间: ${new Date().toISOString()}`,
               updatedAt: new Date(),
             });
@@ -403,6 +405,8 @@ exports.main = async (event) => {
         message: `修复了 ${fixed} 个候选人（清除了错误 fileId），涉及 ${duplicateGroups.length} 个重复组`,
         fixed,
         duplicateGroups: duplicateGroups.length,
+        totalCandidates: all.length,
+        totalWithFileId: withFileId.length,
         results,
       };
     } catch (err) {
@@ -430,7 +434,29 @@ exports.main = async (event) => {
       // 统计有/无录入人的数量
       withRecorder: (candidateSample || []).filter(c => c.ownerId || c.createdBy).length,
       withoutRecorder: (candidateSample || []).filter(c => !c.ownerId && !c.createdBy).length,
+      // 简历文件统计（全量计数）
+      withFileId: 0,
+      withoutFileId: 0,
+      knownSamples: [],
     };
+    // 全量 fileId + resumeRawText 统计
+    try {
+      const { total: withFid } = await db.collection('Candidate')
+        .where({ fileId: db.command.neq('') }).count();
+      const { total: withText } = await db.collection('Candidate')
+        .where({ resumeRawText: db.command.neq('') }).count();
+      const knownNames = ['曾颖', '景梓媛', '贡秋拉姆', '查亮', '李女士', '尹涛'];
+      const { data: knownSample } = await db.collection('Candidate')
+        .where({ name: db.command.in(knownNames) }).get();
+      results.Candidate.withFileId = withFid;
+      results.Candidate.withoutFileId = candidateAll - withFid;
+      results.Candidate.withResumeRawText = withText;
+      results.Candidate.knownSamples = (knownSample || []).map(c => ({
+        _id: c._id, name: c.name, fileId: c.fileId || '', fileName: c.fileName,
+        hasResumeRawText: !!(c.resumeRawText && c.resumeRawText.length > 10),
+        _duplicateFileIdNote: c._duplicateFileIdNote || '',
+      }));
+    } catch (_) {}
   } catch (err) {
     results.Candidate = { error: err.message };
   }
