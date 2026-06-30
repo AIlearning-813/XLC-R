@@ -85,6 +85,56 @@ exports.main = async (event) => {
     }
   }
 
+  // ---- 🆕 fix-candidate-recorder：回填缺失的 createdBy/ownerId ----
+  if (action === 'fix-candidate-recorder') {
+    try {
+      // 查找 createdBy 为空或 null 的候选人（非 deleted）
+      const { data: candidates } = await db.collection('Candidate')
+        .where({ status: db.command.neq('deleted') })
+        .limit(200)
+        .get();
+
+      const missing = (candidates || []).filter(c => !c.createdBy && !c.ownerId);
+      if (missing.length === 0) {
+        return { success: true, message: '所有候选人都有录入人信息，无需修复', fixed: 0 };
+      }
+
+      let fixed = 0;
+      const results = [];
+      for (const c of missing) {
+        // 尝试从关联 Application 推断录入人
+        let recorder = 'system';
+        try {
+          const { data: apps } = await db.collection('Application')
+            .where({ candidateId: c._id }).limit(1).get();
+          if (apps?.[0]?.ownerId) recorder = apps[0].ownerId;
+        } catch (_) {}
+
+        try {
+          await db.collection('Candidate').doc(c._id).update({
+            createdBy: recorder,
+            ownerId: c.ownerId || recorder,
+            updatedAt: new Date(),
+          });
+          fixed++;
+          results.push({ _id: c._id, name: c.name, recorder, status: 'fixed' });
+        } catch (e) {
+          results.push({ _id: c._id, name: c.name, error: e.message, status: 'failed' });
+        }
+      }
+
+      return {
+        success: true,
+        message: `已修复 ${fixed} 个候选人（共 ${missing.length} 个缺失录入人）`,
+        fixed,
+        total: missing.length,
+        results,
+      };
+    } catch (err) {
+      return { success: false, message: err.message };
+    }
+  }
+
   // ---- 🆕 import-department-tree：从花名册 JSON 文件导入四级部门树 ----
   if (action === 'import-department-tree') {
     try {
@@ -230,11 +280,22 @@ exports.main = async (event) => {
   results.Job_active = await countAndSample('Job', { status: 'active' });
   results.RecruitmentDemand = await countAndSample('RecruitmentDemand', {});
 
-  // Candidate 数量
+  // Candidate 数量 + 字段抽查
   try {
     const { total: candidateTotal } = await db.collection('Candidate').where({ status: 'active' }).count();
     const { total: candidateAll } = await db.collection('Candidate').count();
-    results.Candidate = { active: candidateTotal, total: candidateAll };
+    const { data: candidateSample } = await db.collection('Candidate').limit(5).get();
+    results.Candidate = {
+      active: candidateTotal,
+      total: candidateAll,
+      sample: (candidateSample || []).map(c => ({
+        _id: c._id, name: c.name, source: c.source,
+        ownerId: c.ownerId, createdBy: c.createdBy, submittedBy: c.submittedBy,
+      })),
+      // 统计有/无录入人的数量
+      withRecorder: (candidateSample || []).filter(c => c.ownerId || c.createdBy).length,
+      withoutRecorder: (candidateSample || []).filter(c => !c.ownerId && !c.createdBy).length,
+    };
   } catch (err) {
     results.Candidate = { error: err.message };
   }
