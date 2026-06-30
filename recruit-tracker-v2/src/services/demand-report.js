@@ -34,7 +34,7 @@ export async function getDemandTracking(params = {}) {
 /** 获取需求预警列表（已逾期/临近截止/高缺口） */
 export function getDemandAlerts(trackingData) {
   if (!trackingData?.demands) return [];
-  return trackingData.demands.filter(d => d.isOverdue || d.isNearDeadline || d.completionRate < 30);
+  return trackingData.demands.filter(d => d.isOverdue || d.isNearDeadline || d.isHighGap);
 }
 
 export default { getDemandTracking, getDemandAlerts };

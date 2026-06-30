@@ -911,6 +911,7 @@ async function aggregateDemandTracking(params = {}) {
   }
 
   const nowDate = new Date();
+  const GRACE_PERIOD_DAYS = 14; // 新建需求宽限期：14天内不报"高缺口"预警
   const demandResults = demands.map(d => {
     const job = jobsMap[d.linkedJobId];
     const stats = appStats[d.linkedJobId] || { total: 0, onboard: 0 };
@@ -919,14 +920,24 @@ async function aggregateDemandTracking(params = {}) {
     const gap = Math.max(0, headcount - onboarded);
     const completionRate = headcount > 0 ? Math.round(onboarded / headcount * 100) : 0;
 
+    // 计算需求已创建天数（用于宽限期判断）
+    const submittedDate = d.submittedAt ? new Date(d.submittedAt) : new Date(d.createdAt || d._createTime);
+    const daysSinceSubmission = submittedDate
+      ? Math.floor((nowDate.getTime() - submittedDate.getTime()) / 86400000)
+      : 999;
+
     let deadline = null;
     let remainingDays = null;
     if (d.recruitmentCycle && d.submittedAt) {
-      const submittedDate = new Date(d.submittedAt);
       const cycleDays = parseInt(d.recruitmentCycle) || 30;
       deadline = new Date(submittedDate.getTime() + cycleDays * 86400000);
       remainingDays = Math.ceil((deadline.getTime() - nowDate.getTime()) / 86400000);
     }
+
+    const isOverdue = remainingDays !== null && remainingDays < 0;
+    const isNearDeadline = remainingDays !== null && remainingDays >= 0 && remainingDays <= 7;
+    // 高缺口：完成率<30% 且 不是新需求（超过宽限期）且 未逾期
+    const isHighGap = completionRate < 30 && daysSinceSubmission > GRACE_PERIOD_DAYS && !isOverdue;
 
     return {
       id: d._id,
@@ -938,8 +949,10 @@ async function aggregateDemandTracking(params = {}) {
       completionRate,
       deadline: deadline ? deadline.toISOString() : null,
       remainingDays,
-      isOverdue: remainingDays !== null && remainingDays < 0,
-      isNearDeadline: remainingDays !== null && remainingDays >= 0 && remainingDays <= 7,
+      isOverdue,
+      isNearDeadline,
+      isHighGap,
+      daysSinceSubmission,
       jobTitle: job?.title || '',
       appCount: stats.total,
       status: d.status,
@@ -949,7 +962,7 @@ async function aggregateDemandTracking(params = {}) {
   const alerts = {
     overdueCount: demandResults.filter(d => d.isOverdue).length,
     nearDeadlineCount: demandResults.filter(d => d.isNearDeadline).length,
-    highGapCount: demandResults.filter(d => d.completionRate < 30 && !d.isOverdue).length,
+    highGapCount: demandResults.filter(d => d.isHighGap).length,
   };
 
   return { demands: demandResults, alerts, computedAt: new Date().toISOString() };
