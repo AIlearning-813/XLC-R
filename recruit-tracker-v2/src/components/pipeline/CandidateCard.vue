@@ -196,7 +196,12 @@ function handleToggleSelect(event) {
     <span v-if="endInfo" class="compact-end-badge" :class="application.status === 'rejected' ? 'end-reject' : 'end-withdraw'">
       {{ endInfo.typeLabel }}于 {{ endInfo.stageLabel }}
     </span>
-    <span v-else class="compact-badge badge" :class="sourceBadgeClass">{{ sourceLabel }}</span>
+    <template v-else>
+      <span class="compact-badge badge" :class="sourceBadgeClass">{{ sourceLabel }}</span>
+      <span class="compact-recorder" v-if="candidate?.ownerId || candidate?.createdBy" :title="'录入人: ' + (candidate.ownerId || candidate.createdBy)">
+        {{ candidate.ownerId || candidate.createdBy }}
+      </span>
+    </template>
   </div>
 
   <!-- 完整模式 -->
@@ -302,6 +307,17 @@ function handleToggleSelect(event) {
   font-size: 9px;
   padding: 1px 5px;
   flex-shrink: 0;
+}
+
+.compact-recorder {
+  font-size: 9px;
+  color: var(--gray-400);
+  flex-shrink: 0;
+  margin-left: 2px;
+  max-width: 60px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .compact-end-badge {
