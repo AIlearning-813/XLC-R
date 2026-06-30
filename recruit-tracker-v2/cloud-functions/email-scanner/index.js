@@ -105,6 +105,11 @@ exports.main = async (event, context) => {
     return handleRotateKeys(event);
   }
 
+  // ---- 🆕 refetch：重新拉取丢失的简历附件 ----
+  if (action === 'refetch') {
+    return handleRefetch(event);
+  }
+
   // ---- 扫描邮件 ----
   if (action === 'scan') {
     // 检查关键模块
@@ -576,4 +581,194 @@ async function processMailbox(config, scanResult, forceRescan = false) {
  */
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// ===== 🆕 refetch：从邮箱重新拉取丢失的简历附件 =====
+
+async function handleRefetch(event) {
+  if (!modules.imapClient) {
+    return { success: false, message: `IMAP 模块未加载：${loadErrors.imapClient}` };
+  }
+
+  const maxCandidates = event?.maxCandidates || 5;
+  const candidateIds = event?.candidateIds || [];
+
+  console.log(`[email-scanner:refetch] 开始，最多 ${maxCandidates} 个候选人`);
+
+  // 1. 找到 fileId 为空的 email 来源候选人
+  let candidates;
+  if (candidateIds.length > 0) {
+    const { data } = await db.collection('Candidate')
+      .where({ _id: db.command.in(candidateIds) })
+      .get();
+    candidates = (data || []).filter(c => c.status !== 'deleted');
+  } else {
+    // 拉取全部候选人，筛选需要修复的
+    const all = [];
+    let cursor = null;
+    let hasMore = true;
+    while (hasMore) {
+      let query = db.collection('Candidate').limit(100);
+      if (cursor) query = query.where({ _id: db.command.gt(cursor) });
+      const { data } = await query.get();
+      if (data && data.length > 0) {
+        all.push(...data);
+        cursor = data[data.length - 1]._id;
+        if (data.length < 100) hasMore = false;
+      } else { hasMore = false; }
+    }
+    candidates = all.filter(c =>
+      (!c.fileId || c.fileId.length === 0) &&
+      c.source === 'email' &&
+      c.status !== 'deleted'
+    );
+  }
+
+  console.log(`[email-scanner:refetch] 找到 ${candidates.length} 个需要修复的候选人，处理前 ${maxCandidates} 个`);
+
+  const toProcess = candidates.slice(0, maxCandidates);
+  const results = [];
+  let successCount = 0;
+  let skipCount = 0;
+  let failCount = 0;
+
+  // 缓存 EmailConfig，避免重复查询
+  const configCache = {};
+
+  for (const candidate of toProcess) {
+    const ctx = { _id: candidate._id, name: candidate.name };
+    console.log(`[email-scanner:refetch] 处理: ${candidate.name}`);
+
+    try {
+      // 2. 查找关联的 ParseQueue 条目
+      let pqEntry = null;
+      try {
+        const { data: pqData } = await db.collection('ParseQueue')
+          .where({ parsedCandidateId: candidate._id })
+          .limit(1)
+          .get();
+        pqEntry = pqData?.[0];
+      } catch (_) {}
+
+      if (!pqEntry) {
+        // 尝试通过 source + 候选人名字匹配
+        try {
+          const { data: pq2 } = await db.collection('ParseQueue')
+            .where({
+              source: 'email',
+              status: 'done',
+            })
+            .limit(50)
+            .get();
+          pqEntry = (pq2 || []).find(e =>
+            (e.sourceEmailSubject || '').includes(candidate.name)
+          );
+        } catch (_) {}
+      }
+
+      if (!pqEntry) {
+        skipCount++;
+        results.push({ ...ctx, status: 'skipped', reason: '未找到关联的 ParseQueue 条目' });
+        continue;
+      }
+
+      // 3. 获取 EmailConfig（使用缓存）
+      const configId = pqEntry.sourceEmailConfigId;
+      if (!configId) {
+        skipCount++;
+        results.push({ ...ctx, status: 'skipped', reason: 'ParseQueue 缺少 sourceEmailConfigId' });
+        continue;
+      }
+
+      if (!configCache[configId]) {
+        try {
+          const { data: cfg } = await db.collection('EmailConfig').doc(configId).get();
+          configCache[configId] = Array.isArray(cfg) ? cfg[0] : cfg;
+        } catch (_) {
+          configCache[configId] = null;
+        }
+      }
+
+      const config = configCache[configId];
+      if (!config || !config.enabled) {
+        skipCount++;
+        results.push({ ...ctx, status: 'skipped', reason: 'EmailConfig 不可用或已禁用' });
+        continue;
+      }
+
+      // 4. 从 IMAP 重新下载附件
+      console.log(`[email-scanner:refetch] 连接 ${config.email}, 搜索: ${(pqEntry.sourceEmailSubject || '').substring(0, 50)}`);
+      let attachments;
+      try {
+        attachments = await modules.imapClient.fetchEmailBySubject(
+          config,
+          pqEntry.sourceEmailSubject || '',
+          pqEntry.sourceEmailFrom || ''
+        );
+      } catch (fetchErr) {
+        failCount++;
+        results.push({ ...ctx, status: 'failed', reason: `IMAP获取失败: ${fetchErr.message}` });
+        continue;
+      }
+
+      if (!attachments || attachments.length === 0) {
+        failCount++;
+        results.push({ ...ctx, status: 'failed', reason: '未在邮箱中找到匹配的附件（邮件可能已删除）' });
+        continue;
+      }
+
+      // 取第一个匹配的附件
+      const attachment = attachments[0];
+
+      // 5. 上传到云存储（唯一路径，防止覆盖）
+      const dateStr = new Date().toISOString().slice(0, 10);
+      const safeFilename = (attachment.filename || 'resume').replace(/\.\./g, '').replace(/[\\/]/g, '_');
+      const uniquePrefix = `refetch_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const cloudPath = `email-attachments/${dateStr}/${configId}/${uniquePrefix}/${safeFilename}`;
+
+      console.log(`[email-scanner:refetch] 上传: ${cloudPath}`);
+      const uploadResult = await app.uploadFile({
+        cloudPath,
+        fileContent: attachment.content,
+      });
+
+      const newFileId = uploadResult.fileID || uploadResult.downloadUrl;
+      if (!newFileId) {
+        failCount++;
+        results.push({ ...ctx, status: 'failed', reason: '云存储上传失败' });
+        continue;
+      }
+
+      // 6. 更新 Candidate.fileId
+      await db.collection('Candidate').doc(candidate._id).update({
+        fileId: newFileId,
+        fileName: attachment.filename || candidate.fileName,
+        updatedAt: new Date(),
+      });
+
+      successCount++;
+      results.push({
+        ...ctx,
+        status: 'success',
+        newFileId,
+        fileName: attachment.filename,
+        size: attachment.size,
+      });
+      console.log(`[email-scanner:refetch] ✅ ${candidate.name} 简历已修复 (${attachment.size} 字节)`);
+    } catch (err) {
+      failCount++;
+      results.push({ ...ctx, status: 'failed', reason: err.message });
+      console.error(`[email-scanner:refetch] ❌ ${candidate.name}: ${err.message}`);
+    }
+  }
+
+  return {
+    success: true,
+    total: candidates.length,
+    processed: toProcess.length,
+    successCount,
+    skipCount,
+    failCount,
+    results,
+  };
 }

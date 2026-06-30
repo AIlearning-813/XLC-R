@@ -554,4 +554,164 @@ function extractAttachments(msg, seq) {
   return filtered;
 }
 
-module.exports = { fetchNewResumes, testConnection, isRecruitmentSender };
+/**
+ * fetchEmailBySubject — 按主题搜索并下载指定邮件的附件
+ *
+ * 用于 refetch-resumes：从邮箱重新拉取之前丢失的简历附件。
+ *
+ * @param {object} config - EmailConfig 文档
+ * @param {string} subject - 邮件主题（用于搜索）
+ * @param {string} fromAddr - 发件人地址（用于匹配）
+ * @returns {Promise<Array<{content, filename, contentType, size}>>}
+ */
+async function fetchEmailBySubject(config, subject, fromAddr) {
+  const { ImapFlow } = require('imapflow');
+
+  let plainPassword;
+  try {
+    plainPassword = decrypt(config.imapPassword);
+  } catch (err) {
+    throw new Error(`密码解密失败：${err.message}`);
+  }
+
+  const client = new ImapFlow({
+    host: config.imapHost || 'imap.qq.com',
+    port: config.imapPort || 993,
+    secure: true,
+    auth: { user: config.imapUser || config.email, pass: plainPassword },
+    logger: false,
+    tls: { rejectUnauthorized: true },
+  });
+
+  try {
+    await connectWithTimeout(client, 30000);
+    await client.mailboxOpen('INBOX');
+
+    // 不依赖 IMAP SEARCH（不同服务器实现不同），直接遍历最近邮件
+    const mb = await client.mailboxOpen('INBOX');
+    const last = mb.exists;
+    const seqs = [];
+    for (let i = last; i >= Math.max(1, last - 149); i--) seqs.push(i);
+    console.log(`[imap-client] refetch 遍历最近 ${seqs.length} 封邮件`);
+
+    // 提取发件人域名用于匹配
+    const fromDomain = fromAddr
+      ? (fromAddr.match(/@([^>]+)/) || [])[1]?.replace('>', '').trim() || ''
+      : '';
+    // 提取候选人姓名用于匹配
+    const nameFromSubject = (subject || '').split('|')[0]?.trim() || '';
+
+    for (const seq of seqs.slice(0, 50)) {
+      try {
+        const message = await client.fetchOne(seq, {
+          source: true,
+          envelope: true,
+          bodyParts: [''],
+        });
+
+        const env = message.envelope;
+        if (!env) continue;
+
+        const msgSubject = env.subject || '';
+        const msgFrom = (env.from || []).map(f => f.address || f.name || '').join(', ').toLowerCase();
+
+        // 发件人域名匹配（必须来自同一招聘平台）
+        if (fromDomain && !msgFrom.includes(fromDomain)) {
+          continue;
+        }
+
+        // 主题中包含候选人姓名
+        if (nameFromSubject && !msgSubject.includes(nameFromSubject)) {
+          continue;
+        }
+
+        // 用 extractAttachments 找出附件
+        const attachments = extractAttachments(message);
+        if (attachments.length > 0) {
+          console.log(`[imap-client] refetch seq=${seq}: 找到 ${attachments.length} 个附件候选`);
+          // 下载附件内容
+          const resultAttachments = [];
+          for (const att of attachments) {
+            // 跳过太小的文件
+            if (att.size < 1024) continue;
+
+            try {
+              const downloadResult = await client.download(seq, att.part);
+              const content = downloadResult?.content || downloadResult || Buffer.from('');
+              resultAttachments.push({
+                content: content,
+                filename: att.filename,
+                contentType: att.contentType,
+                size: att.size || (Buffer.isBuffer(content) ? content.length : 0),
+              });
+            } catch (downloadErr) {
+              console.warn(`[imap-client] refetch 下载附件 ${att.filename} 失败: ${downloadErr.message}`);
+            }
+          }
+
+          if (resultAttachments.length > 0) {
+            console.log(`[imap-client] refetch ✅ 找到 ${resultAttachments.length} 个附件`);
+            return resultAttachments;
+          }
+        }
+      } catch (e) {
+        console.warn(`[imap-client] refetch seq=${seq} 获取失败: ${e.message}`);
+      }
+    }
+
+    return []; // 未找到匹配的附件
+  } finally {
+    try { await client.logout(); } catch (_) {}
+  }
+}
+
+/**
+ * extractAttachments — 复用 fetchMessage 中的附件提取逻辑
+ */
+function extractAttachments(msg) {
+  const attachments = [];
+
+  function walkStructure(struct, path, depth) {
+    if (!struct) return;
+    if (depth > 10) return;
+
+    const isMultipart = (struct.type || '').startsWith('multipart');
+    const isMessage = (struct.type || '') === 'message';
+
+    if (struct.type && !isMultipart && !isMessage) {
+      const hasDisposition = !!(struct.disposition);
+      const hasFilename = !!(struct.filename || struct.parameters?.name);
+
+      if (hasDisposition || hasFilename) {
+        let mimeType, mimeSubtype;
+        if ((struct.type || '').includes('/')) {
+          [mimeType, mimeSubtype] = struct.type.split('/');
+        } else {
+          mimeType = struct.type;
+          mimeSubtype = struct.subtype || 'octet-stream';
+        }
+
+        const partId = path.length === 0 ? '1' : path.join('.');
+        attachments.push({
+          filename: struct.filename || struct.parameters?.name || `resume_attachment_${path.join('_')}`,
+          contentType: `${mimeType}/${mimeSubtype}`,
+          disposition: struct.disposition || 'attachment',
+          size: struct.size || 0,
+          part: partId,
+          contentId: struct.id || null,
+        });
+      }
+    }
+
+    if (Array.isArray(struct.childNodes)) {
+      struct.childNodes.forEach((child, index) => {
+        walkStructure(child, [...path, String(index + 1)], depth + 1);
+      });
+    }
+  }
+
+  walkStructure(msg.bodyStructure, [], 0);
+  return attachments.filter(att => isResumeAttachment(att));
+}
+
+module.exports = { fetchNewResumes, fetchEmailBySubject, testConnection, isRecruitmentSender };
