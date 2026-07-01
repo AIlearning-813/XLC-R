@@ -515,9 +515,12 @@ async function processMailbox(config, scanResult, forceRescan = false) {
         let fileUrl = null;
         try {
           const dateStr = new Date().toISOString().slice(0, 10);
-          // P1 修复：净化文件名，防止路径遍历（../ 攻击）
-          const safeFilename = (attachment.filename || 'attachment').replace(/\.\./g, '').replace(/[\\/]/g, '_');
-          // P1 修复：加入时间戳+随机串防止同名附件互相覆盖（不同候选人同名附件会串位）
+          // 净化文件名：防路径遍历 + 转 ASCII（COS 签名对中文路径编码不一致导致 SignatureDoesNotMatch）
+          const rawFilename = (attachment.filename || 'attachment').replace(/\.\./g, '').replace(/[\\/]/g, '_');
+          const ext = rawFilename.lastIndexOf('.') >= 0 ? rawFilename.slice(rawFilename.lastIndexOf('.')) : '.pdf';
+          const asciiBase = (rawFilename.slice(0, rawFilename.lastIndexOf('.')) || 'resume')
+            .replace(/[^a-zA-Z0-9_-]/g, '_');
+          const safeFilename = asciiBase + ext;
           const uniquePrefix = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
           const cloudPath = `email-attachments/${dateStr}/${config._id}/${uniquePrefix}/${safeFilename}`;
           const uploadResult = await app.uploadFile({
@@ -722,14 +725,23 @@ async function handleRefetch(event) {
 
       // 5. 上传到云存储（唯一路径，防止覆盖）
       const dateStr = new Date().toISOString().slice(0, 10);
-      const safeFilename = (attachment.filename || 'resume').replace(/\.\./g, '').replace(/[\\/]/g, '_');
+      // COS 签名对中文/全角字符路径编码敏感，统一转 ASCII 防止签名不匹配
+      const rawFilename = (attachment.filename || 'resume').replace(/\.\./g, '').replace(/[\\/]/g, '_');
+      const ext = rawFilename.lastIndexOf('.') >= 0 ? rawFilename.slice(rawFilename.lastIndexOf('.')) : '.pdf';
+      const asciiBase = (rawFilename.slice(0, rawFilename.lastIndexOf('.')) || 'resume')
+        .replace(/[^a-zA-Z0-9_-]/g, '_');  // 非 ASCII 字符全部替换
+      const safeFilename = asciiBase + ext;
       const uniquePrefix = `refetch_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       const cloudPath = `email-attachments/${dateStr}/${configId}/${uniquePrefix}/${safeFilename}`;
 
-      console.log(`[email-scanner:refetch] 上传: ${cloudPath}`);
+      console.log(`[email-scanner:refetch] 上传: ${cloudPath} (${attachment.content?.length || 0} bytes, 原名: ${rawFilename})`);
+      // 确保 content 是标准 Buffer
+      const fileBuffer = Buffer.isBuffer(attachment.content)
+        ? attachment.content
+        : Buffer.from(attachment.content);
       const uploadResult = await app.uploadFile({
         cloudPath,
-        fileContent: attachment.content,
+        fileContent: fileBuffer,
       });
 
       const newFileId = uploadResult.fileID || uploadResult.downloadUrl;

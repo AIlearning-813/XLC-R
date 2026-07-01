@@ -585,14 +585,11 @@ async function fetchEmailBySubject(config, subject, fromAddr) {
 
   try {
     await connectWithTimeout(client, 30000);
-    await client.mailboxOpen('INBOX');
-
-    // 不依赖 IMAP SEARCH（不同服务器实现不同），直接遍历最近邮件
     const mb = await client.mailboxOpen('INBOX');
     const last = mb.exists;
     const seqs = [];
-    for (let i = last; i >= Math.max(1, last - 149); i--) seqs.push(i);
-    console.log(`[imap-client] refetch 遍历最近 ${seqs.length} 封邮件`);
+    for (let i = last; i >= Math.max(1, last - 499); i--) seqs.push(i);
+    console.log(`[imap-client] refetch 遍历最近 ${seqs.length} 封邮件 (seq ${last} → ${Math.max(1, last - 499)})`);
 
     // 提取发件人域名用于匹配
     const fromDomain = fromAddr
@@ -601,19 +598,36 @@ async function fetchEmailBySubject(config, subject, fromAddr) {
     // 提取候选人姓名用于匹配
     const nameFromSubject = (subject || '').split('|')[0]?.trim() || '';
 
-    for (const seq of seqs.slice(0, 50)) {
+    let checkedCount = 0;
+    for (const seq of seqs) {
+      checkedCount++;
       try {
-        const message = await client.fetchOne(seq, {
-          source: true,
+        // 使用 client.fetch() + for-await-of（与 fetchNewResumes 相同的已验证模式）
+        // 不要 source:true（会下载整封原始邮件，极慢）；只需要 envelope + bodyStructure
+        let message = null;
+        for await (const msg of client.fetch(String(seq), {
+          uid: true,
           envelope: true,
-          bodyParts: [''],
-        });
+          bodyStructure: true,
+        })) {
+          message = msg;
+          break;  // 只取第一个结果
+        }
+
+        if (!message) {
+          continue;
+        }
 
         const env = message.envelope;
         if (!env) continue;
 
         const msgSubject = env.subject || '';
         const msgFrom = (env.from || []).map(f => f.address || f.name || '').join(', ').toLowerCase();
+
+        // 进度日志（每 20 封）
+        if (checkedCount % 20 === 1) {
+          console.log(`[imap-client] refetch 进度: ${checkedCount}/${seqs.length}, 当前 seq=${seq}: ${msgSubject.substring(0, 40)}`);
+        }
 
         // 发件人域名匹配（必须来自同一招聘平台）
         if (fromDomain && !msgFrom.includes(fromDomain)) {
@@ -624,6 +638,8 @@ async function fetchEmailBySubject(config, subject, fromAddr) {
         if (nameFromSubject && !msgSubject.includes(nameFromSubject)) {
           continue;
         }
+
+        console.log(`[imap-client] refetch seq=${seq}: 发件人/姓名匹配成功！${msgSubject.substring(0, 50)}`);
 
         // 用 extractAttachments 找出附件
         const attachments = extractAttachments(message);
@@ -637,12 +653,28 @@ async function fetchEmailBySubject(config, subject, fromAddr) {
 
             try {
               const downloadResult = await client.download(seq, att.part);
-              const content = downloadResult?.content || downloadResult || Buffer.from('');
+              // 处理 imapflow 下载返回值（可能是 Buffer / { meta, content: Buffer } / { meta, content: Stream }）
+              let content = null;
+              if (Buffer.isBuffer(downloadResult)) {
+                content = downloadResult;
+              } else if (downloadResult && typeof downloadResult === 'object') {
+                const rawContent = downloadResult.content;
+                if (Buffer.isBuffer(rawContent)) {
+                  content = rawContent;
+                } else if (rawContent && typeof rawContent === 'object') {
+                  // Stream → Buffer（imapflow 可能返回 Passthrough 流）
+                  content = await streamToBuffer(rawContent);
+                }
+              }
+              if (!content || content.length === 0) {
+                console.warn(`[imap-client] refetch 下载附件 ${att.filename} 为空`);
+                continue;
+              }
               resultAttachments.push({
                 content: content,
                 filename: att.filename,
                 contentType: att.contentType,
-                size: att.size || (Buffer.isBuffer(content) ? content.length : 0),
+                size: att.size || content.length,
               });
             } catch (downloadErr) {
               console.warn(`[imap-client] refetch 下载附件 ${att.filename} 失败: ${downloadErr.message}`);
