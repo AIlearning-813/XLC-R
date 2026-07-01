@@ -146,6 +146,16 @@ exports.main = async (event, context) => {
 
       console.log(`[email-scanner] 找到 ${configs.length} 个启用的邮箱`);
 
+      // 1.5. 🆕 重试之前上传失败的 ParseQueue 条目（在扫描新邮件前）
+      try {
+        const uploadRetryResult = await retryFailedUploads(db, app, modules, configs);
+        if (uploadRetryResult.retried > 0) {
+          scanResult.uploadRetries = uploadRetryResult;
+        }
+      } catch (retryErr) {
+        console.warn('[email-scanner] 上传重试异常:', retryErr.message);
+      }
+
       // 2. 逐个邮箱处理
       for (const config of configs) {
         // 超时保护：剩余 < 90 秒则停止（给当前邮箱留足处理时间）
@@ -511,28 +521,39 @@ async function processMailbox(config, scanResult, forceRescan = false) {
           extractedText = '[格式路由模块未加载，无法提取文本]';
         }
 
-        // 上传文件到云存储
+        // 上传文件到云存储（带重试，最多 3 次，间隔 2 秒）
         let fileUrl = null;
-        try {
-          const dateStr = new Date().toISOString().slice(0, 10);
-          // 净化文件名：防路径遍历 + 转 ASCII（COS 签名对中文路径编码不一致导致 SignatureDoesNotMatch）
-          const rawFilename = (attachment.filename || 'attachment').replace(/\.\./g, '').replace(/[\\/]/g, '_');
-          const ext = rawFilename.lastIndexOf('.') >= 0 ? rawFilename.slice(rawFilename.lastIndexOf('.')) : '.pdf';
-          const asciiBase = (rawFilename.slice(0, rawFilename.lastIndexOf('.')) || 'resume')
-            .replace(/[^a-zA-Z0-9_-]/g, '_');
-          const safeFilename = asciiBase + ext;
-          const uniquePrefix = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-          const cloudPath = `email-attachments/${dateStr}/${config._id}/${uniquePrefix}/${safeFilename}`;
-          const uploadResult = await app.uploadFile({
-            cloudPath,
-            fileContent: attachment.content,
-          });
-          fileUrl = uploadResult.fileID || uploadResult.downloadUrl || null;
-        } catch (uploadErr) {
-          console.warn(`[email-scanner] 文件上传失败：${uploadErr.message}`);
+        const MAX_UPLOAD_RETRIES = 3;
+        for (let attempt = 0; attempt < MAX_UPLOAD_RETRIES; attempt++) {
+          try {
+            const dateStr = new Date().toISOString().slice(0, 10);
+            // 净化文件名：防路径遍历 + 转 ASCII（COS 签名对中文路径编码不一致导致 SignatureDoesNotMatch）
+            const rawFilename = (attachment.filename || 'attachment').replace(/\.\./g, '').replace(/[\\/]/g, '_');
+            const ext = rawFilename.lastIndexOf('.') >= 0 ? rawFilename.slice(rawFilename.lastIndexOf('.')) : '.pdf';
+            const asciiBase = (rawFilename.slice(0, rawFilename.lastIndexOf('.')) || 'resume')
+              .replace(/[^a-zA-Z0-9_-]/g, '_');
+            const safeFilename = asciiBase + ext;
+            const uniquePrefix = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+            const cloudPath = `email-attachments/${dateStr}/${config._id}/${uniquePrefix}/${safeFilename}`;
+            const uploadResult = await app.uploadFile({
+              cloudPath,
+              fileContent: attachment.content,
+            });
+            fileUrl = uploadResult.fileID || uploadResult.downloadUrl || null;
+            if (fileUrl) break;  // 成功则跳出重试循环
+          } catch (uploadErr) {
+            const attemptNum = attempt + 1;
+            if (attempt < MAX_UPLOAD_RETRIES - 1) {
+              console.warn(`[email-scanner] 文件上传失败（第${attemptNum}/${MAX_UPLOAD_RETRIES}次），2秒后重试：${uploadErr.message}`);
+              await sleep(2000);
+            } else {
+              console.error(`[email-scanner] 文件上传失败（${MAX_UPLOAD_RETRIES}次尝试均失败），将进入重试队列：${uploadErr.message}`);
+            }
+          }
         }
 
         // 写入 ParseQueue
+        const uploadFailed = !fileUrl;
         const queueEntry = {
           source: 'email',
           userId: config.userId,  // 邮箱配置所属用户，用于通知归属和 Application 分配
@@ -548,12 +569,13 @@ async function processMailbox(config, scanResult, forceRescan = false) {
           fileHash,
           fileUrl,
           fileId: fileUrl,        // parse-queue-processor 使用此字段下载
+          uploadFailed,           // 🆕 上传失败标记，用于后续重试
           preExtractedText: extractedText,  // parse-queue-processor 优先使用预提取文本
           extractedText,
           extractedFormat,
-          status: 'pending',
-          retryCount: 0,
-          nextRetryAt: null,
+          status: uploadFailed ? 'retry' : 'pending',  // 上传失败 → retry，等待下次重试
+          retryCount: uploadFailed ? 1 : 0,
+          nextRetryAt: uploadFailed ? new Date(Date.now() + 5 * 60 * 1000) : null,  // 5 分钟后重试
           createdAt: new Date(),
           updatedAt: new Date(),
         };
@@ -584,6 +606,173 @@ async function processMailbox(config, scanResult, forceRescan = false) {
  */
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * 🆕 重试之前上传失败的 ParseQueue 条目
+ * 每次 scan 前调用，从 IMAP 重新下载附件 → 上传 COS → 回填 Candidate.fileId
+ */
+async function retryFailedUploads(db, app, modules, configs) {
+  const now = new Date();
+  const results = { retried: 0, success: 0, failed: 0 };
+
+  try {
+    // 查询 uploadFailed + status='retry' + 重试时间已到的条目
+    const { data: entries } = await db
+      .collection('ParseQueue')
+      .where({
+        uploadFailed: true,
+        status: 'retry',
+        nextRetryAt: db.command.lt(now),
+      })
+      .limit(10)
+      .get();
+
+    if (!entries || entries.length === 0) return results;
+
+    console.log(`[email-scanner] 发现 ${entries.length} 条上传失败的 ParseQueue 条目，开始重试`);
+
+    // 建立 EmailConfig 缓存
+    const configCache = {};
+    for (const cfg of configs) {
+      configCache[cfg._id] = cfg;
+    }
+
+    for (const entry of entries) {
+      try {
+        const config = configCache[entry.sourceEmailConfigId];
+        if (!config) {
+          console.warn(`[email-scanner:upload-retry] ParseQueue ${entry._id}: EmailConfig ${entry.sourceEmailConfigId} 不存在或已禁用，跳过`);
+          continue;
+        }
+
+        // 从 IMAP 重新下载附件
+        console.log(`[email-scanner:upload-retry] 重新下载: ${(entry.sourceEmailSubject || '').substring(0, 50)}`);
+        let attachments;
+        try {
+          attachments = await modules.imapClient.fetchEmailBySubject(
+            config,
+            entry.sourceEmailSubject || '',
+            entry.sourceEmailFrom || ''
+          );
+        } catch (fetchErr) {
+          console.warn(`[email-scanner:upload-retry] IMAP 下载失败: ${fetchErr.message}`);
+          await updateUploadRetry(db, entry, fetchErr.message);
+          results.failed++;
+          continue;
+        }
+
+        if (!attachments || attachments.length === 0) {
+          console.warn(`[email-scanner:upload-retry] 未在邮箱中找到匹配附件（邮件可能已删除）`);
+          await updateUploadRetry(db, entry, '未在邮箱中找到匹配附件');
+          results.failed++;
+          continue;
+        }
+
+        const attachment = attachments[0];
+
+        // 上传 COS（带 3 次重试）
+        let fileUrl = null;
+        const MAX_RETRIES = 3;
+        for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+          try {
+            const dateStr = new Date().toISOString().slice(0, 10);
+            const rawFilename = (attachment.filename || 'resume').replace(/\.\./g, '').replace(/[\\/]/g, '_');
+            const ext = rawFilename.lastIndexOf('.') >= 0 ? rawFilename.slice(rawFilename.lastIndexOf('.')) : '.pdf';
+            const asciiBase = (rawFilename.slice(0, rawFilename.lastIndexOf('.')) || 'resume')
+              .replace(/[^a-zA-Z0-9_-]/g, '_');
+            const safeFilename = asciiBase + ext;
+            const uniquePrefix = `retry_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+            const cloudPath = `email-attachments/${dateStr}/${entry.sourceEmailConfigId}/${uniquePrefix}/${safeFilename}`;
+            const fileBuffer = Buffer.isBuffer(attachment.content)
+              ? attachment.content
+              : Buffer.from(attachment.content);
+            const uploadResult = await app.uploadFile({
+              cloudPath,
+              fileContent: fileBuffer,
+            });
+            fileUrl = uploadResult.fileID || uploadResult.downloadUrl || null;
+            if (fileUrl) break;
+          } catch (uploadErr) {
+            if (attempt < MAX_RETRIES - 1) {
+              console.warn(`[email-scanner:upload-retry] 上传失败（第${attempt + 1}/${MAX_RETRIES}次），重试中...`);
+              await sleep(2000);
+            }
+          }
+        }
+
+        if (!fileUrl) {
+          await updateUploadRetry(db, entry, '上传重试 3 次均失败');
+          results.failed++;
+          continue;
+        }
+
+        // ✅ 上传成功 → 更新 ParseQueue 状态
+        await db.collection('ParseQueue').doc(entry._id).update({
+          fileUrl,
+          fileId: fileUrl,
+          uploadFailed: false,
+          status: 'pending',   // 恢复为 pending，让 parse-queue-processor 正常消费
+          retryCount: 0,
+          nextRetryAt: null,
+          updatedAt: new Date(),
+        });
+
+        // 回填已创建的 Candidate.fileId
+        if (entry.parsedCandidateId) {
+          await db.collection('Candidate').doc(entry.parsedCandidateId).update({
+            fileId: fileUrl,
+            fileName: attachment.filename || entry.fileName,
+            updatedAt: new Date(),
+          });
+          console.log(`[email-scanner:upload-retry] ✅ Candidate ${entry.parsedCandidateId} fileId 已回填`);
+        }
+
+        results.success++;
+        results.retried++;
+        console.log(`[email-scanner:upload-retry] ✅ ParseQueue ${entry._id} 上传重试成功`);
+      } catch (err) {
+        console.error(`[email-scanner:upload-retry] ParseQueue ${entry._id} 处理异常:`, err.message);
+        results.failed++;
+      }
+    }
+  } catch (err) {
+    console.error('[email-scanner:upload-retry] 查询失败:', err.message);
+  }
+
+  if (results.retried > 0) {
+    console.log(`[email-scanner:upload-retry] 完成: 重试 ${results.retried}, 成功 ${results.success}, 失败 ${results.failed}`);
+  }
+  return results;
+}
+
+/**
+ * 🆕 更新上传重试状态（指数退避）
+ */
+async function updateUploadRetry(db, entry, errorMsg) {
+  const retryCount = (entry.retryCount || 0) + 1;
+  const MAX_RETRIES = 5;
+  const BACKOFF_MINUTES = [5, 10, 20, 40, 80];  // 指数退避
+
+  if (retryCount >= MAX_RETRIES) {
+    // 超过最大重试次数，标记为永久失败
+    await db.collection('ParseQueue').doc(entry._id).update({
+      status: 'failed',
+      failReason: `上传重试耗尽（${retryCount}次）：${errorMsg}`,
+      updatedAt: new Date(),
+    });
+    console.warn(`[email-scanner:upload-retry] ❌ ParseQueue ${entry._id} 上传重试耗尽，标记为 failed`);
+  } else {
+    const backoffIndex = Math.min(retryCount - 1, BACKOFF_MINUTES.length - 1);
+    const nextRetryAt = new Date(Date.now() + BACKOFF_MINUTES[backoffIndex] * 60 * 1000);
+    await db.collection('ParseQueue').doc(entry._id).update({
+      retryCount,
+      nextRetryAt,
+      lastError: errorMsg,
+      updatedAt: new Date(),
+    });
+    console.warn(`[email-scanner:upload-retry] ParseQueue ${entry._id} 第${retryCount}次重试失败，下次 ${nextRetryAt.toISOString()}`);
+  }
 }
 
 // ===== 🆕 refetch：从邮箱重新拉取丢失的简历附件 =====
