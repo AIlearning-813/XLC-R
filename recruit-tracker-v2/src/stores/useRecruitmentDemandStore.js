@@ -44,7 +44,17 @@ export const useRecruitmentDemandStore = defineStore('recruitmentDemand', () => 
     if (!db) return null;
     try {
       const { data } = await db.collection('RecruitmentDemand').doc(id).get();
-      currentDemand.value = data?.[0] || null;
+      const doc = data?.[0] || null;
+      // 权限检查：专员只能看自己的需求
+      if (doc) {
+        const of = ownerFilter();
+        if (of && doc.ownerId !== of.ownerId) {
+          // 无权访问，返回 null 并设置错误
+          error.value = '无权访问此需求';
+          return null;
+        }
+      }
+      currentDemand.value = doc;
       return currentDemand.value;
     } catch (err) { error.value = err.message; return null; }
   }

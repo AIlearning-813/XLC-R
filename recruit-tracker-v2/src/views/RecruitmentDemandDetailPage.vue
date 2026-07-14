@@ -8,8 +8,16 @@ const route = useRoute(); const router = useRouter();
 const store = useRecruitmentDemandStore();
 const auth = useAuthStore();
 const demand = ref(null);
+const accessDenied = ref(false);
 
-onMounted(async () => { demand.value = await store.fetchById(route.params.id); });
+onMounted(async () => {
+  const result = await store.fetchById(route.params.id);
+  if (!result && store.error === '无权访问此需求') {
+    accessDenied.value = true;
+  } else {
+    demand.value = result;
+  }
+});
 
 async function changeStatus(s) {
   await store.updateStatus(demand.value._id, s);
@@ -18,7 +26,15 @@ async function changeStatus(s) {
 </script>
 
 <template>
-  <div class="page" v-if="demand">
+  <div v-if="accessDenied" class="page">
+    <div class="empty-state" style="text-align: center; padding: var(--spacing-3xl);">
+      <p style="font-size: var(--font-size-xl); color: var(--gray-500); margin-bottom: var(--spacing-md);">无权访问此需求</p>
+      <p style="color: var(--gray-400);">你只能查看自己提交的招聘需求</p>
+      <button class="btn btn-primary" style="margin-top: var(--spacing-lg);" @click="router.push('/demands')">返回需求列表</button>
+    </div>
+  </div>
+
+  <div class="page" v-else-if="demand">
     <button class="btn btn-sm" @click="router.back()">← 返回</button>
     <div class="detail-card">
       <h2>{{ demand.title }}</h2>
@@ -65,4 +81,5 @@ async function changeStatus(s) {
 .detail-actions { display: flex; gap: var(--spacing-sm); margin-top: var(--spacing-lg); }
 .btn-success { background: #28a745; color: #fff; border: none; }
 .loading { text-align: center; padding: var(--spacing-3xl); color: var(--gray-400); }
+.empty-state { text-align: center; }
 </style>
