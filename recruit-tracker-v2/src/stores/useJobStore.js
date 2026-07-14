@@ -8,6 +8,7 @@ import { versionedUpdate, initialVersion, isVersionConflict, conflictMessage } f
 import { normalizeJobData, validateJobData } from '../config/constants';
 import { useAuthStore } from './useAuthStore';
 import { usePendingChangeStore } from './usePendingChangeStore';
+import { ownerFilter } from '../services/data-filter';
 
 export const useJobStore = defineStore('job', () => {
   // ===== 状态 =====
@@ -43,8 +44,13 @@ export const useJobStore = defineStore('job', () => {
     error.value = '';
 
     try {
+      // 数据隔离：专员只看自己的岗位，管理员看全部
+      const conditions = { status: 'active' };
+      const of = ownerFilter();
+      if (of) conditions.ownerId = of.ownerId;
+
       const result = await db.collection('Job')
-        .where({ status: 'active' })
+        .where(conditions)
         .orderBy('createdAt', 'desc')
         .get();
 

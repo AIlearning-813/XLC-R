@@ -172,8 +172,8 @@ async function aggregateOverview(params = {}) {
     }).count(),
     // 待解析简历
     db.collection('ParseQueue').where({ status: 'pending' }).count(),
-    // 活跃岗位数
-    db.collection('Job').where({ status: 'active' }).count(),
+    // 活跃岗位数（数据隔离：专员只统计自己的）
+    db.collection('Job').where({ status: 'active', ...ownerFilter }).count(),
     // 周期内入职（用于展示，同上）
     db.collection('Application').where({
       ...ownerFilter,
