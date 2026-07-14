@@ -9,10 +9,46 @@ import cloudbase from './cloudbase';
  * 支持的格式：PDF（PDF.js）、DOCX（Mammoth.js）、TXT/RTF/HTML（直接读取）
  * 图片格式暂不支持浏览器端提取（阶段 3 通过云函数 OCR）
  *
+ * 🆕 自动兜底：浏览器端提取失败时，自动切换到服务端提取
+ *
  * @param {File} file - 简历文件
  * @returns {Promise<string>} 提取的纯文本
  */
 export async function extractText(file) {
+  const mime = file.type;
+  const name = file.name.toLowerCase();
+
+  try {
+    // 尝试浏览器端提取
+    return await extractTextBrowser(file);
+  } catch (browserErr) {
+    console.warn('[resume-parser] 浏览器端文本提取失败，切换到服务端兜底:', browserErr.message);
+    // 记录原始错误供调试
+    const originalError = browserErr.message || String(browserErr);
+
+    try {
+      // 🆕 自动切换到服务端提取
+      const text = await extractTextViaServer(file);
+      console.log('[resume-parser] ✅ 服务端兜底提取成功:', text.length, '字符');
+      return text;
+    } catch (serverErr) {
+      console.error('[resume-parser] 服务端兜底也失败:', serverErr.message);
+      // 抛出包含浏览器端原始错误 + 服务端错误的详细信息
+      throw new Error(
+        `简历解析失败，请尝试以下方法：\n` +
+        `1. 清除浏览器缓存后重试（Chrome: Ctrl+Shift+Del）\n` +
+        `2. 将简历文件转换为其他格式（如 Word→PDF 或 PDF→Word）\n` +
+        `3. 联系管理员通过邮箱归集方式导入\n` +
+        `（错误详情：浏览器端 - ${originalError.slice(0, 100)}；服务端 - ${serverErr.message.slice(0, 100)}）`
+      );
+    }
+  }
+}
+
+/**
+ * 浏览器端文本提取（原有逻辑）
+ */
+async function extractTextBrowser(file) {
   const mime = file.type;
   const name = file.name.toLowerCase();
 
@@ -46,10 +82,82 @@ export async function extractText(file) {
 }
 
 /**
+ * 🆕 服务端文本提取（浏览器端失败时的兜底）
+ *
+ * 将文件上传到 CloudBase 云存储，然后调用 email-scanner 云函数的
+ * extractText 动作，使用服务端的 format-router 来提取文本。
+ * 服务端 format-router 支持 PDF/DOCX/图片OCR/RTF/HTML/ZIP 等所有格式。
+ *
+ * @param {File} file - 简历文件
+ * @returns {Promise<string>} 提取的纯文本
+ */
+async function extractTextViaServer(file) {
+  const storage = cloudbase.storage();
+  if (!storage) {
+    throw new Error('云存储未初始化，无法使用服务端提取');
+  }
+
+  // 1. 上传文件到云存储
+  const cloudPath = `resumes/manual-fallback/${Date.now()}_${file.name}`;
+  let uploadResult;
+  try {
+    uploadResult = await storage.uploadFile({
+      cloudPath,
+      filePath: file,
+    });
+  } catch (uploadErr) {
+    throw new Error(`文件上传失败：${uploadErr.message}`);
+  }
+
+  const fileId = uploadResult.fileID;
+  if (!fileId) {
+    throw new Error('文件上传成功但未获取到 fileID');
+  }
+
+  console.log('[resume-parser] 文件已上传到云存储:', fileId);
+
+  // 2. 调用 email-scanner 的 extractText 动作
+  let extractResult;
+  try {
+    extractResult = await cloudbase.callFunction('email-scanner', {
+      action: 'extractText',
+      fileId,
+      fileName: file.name,
+      mimeType: file.type || 'application/pdf',
+    });
+  } catch (callErr) {
+    throw new Error(`服务端文本提取调用失败：${callErr.message}`);
+  }
+
+  if (!extractResult || !extractResult.success) {
+    throw new Error(extractResult?.error || '服务端文本提取返回空结果');
+  }
+
+  const text = extractResult.text || '';
+  if (text.trim().length < 10) {
+    throw new Error('服务端提取的文本内容过短，文件可能为空白或损坏');
+  }
+
+  return text;
+}
+
+/**
  * 使用 PDF.js 提取 PDF 文本层
  */
 async function extractPdfText(file) {
-  const pdfjsLib = await import('pdfjs-dist');
+  let pdfjsLib;
+  try {
+    pdfjsLib = await import('pdfjs-dist');
+  } catch (importErr) {
+    // 🆕 动态导入失败（常见于浏览器缓存/网络/扩展问题）
+    throw new Error(
+      `PDF解析库加载失败：浏览器无法加载PDF处理组件。` +
+      `这通常是因为浏览器缓存问题或网络限制导致。` +
+      `系统将自动切换到服务端处理。` +
+      `（技术详情：${importErr.message.slice(0, 80)}）`
+    );
+  }
+
   // 设置 Worker
   pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
     'pdfjs-dist/build/pdf.worker.min.mjs',
@@ -81,7 +189,19 @@ async function extractPdfText(file) {
  * 使用 Mammoth.js 提取 DOCX 文本
  */
 async function extractDocxText(file) {
-  const mammoth = await import('mammoth');
+  let mammoth;
+  try {
+    mammoth = await import('mammoth');
+  } catch (importErr) {
+    // 🆕 动态导入失败
+    throw new Error(
+      `Word解析库加载失败：浏览器无法加载Word处理组件。` +
+      `这通常是因为浏览器缓存问题或网络限制导致。` +
+      `系统将自动切换到服务端处理。` +
+      `（技术详情：${importErr.message.slice(0, 80)}）`
+    );
+  }
+
   const arrayBuffer = await file.arrayBuffer();
   const result = await mammoth.extractRawText({ arrayBuffer });
   const text = result.value.trim();

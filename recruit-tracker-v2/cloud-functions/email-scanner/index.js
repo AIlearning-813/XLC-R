@@ -110,6 +110,11 @@ exports.main = async (event, context) => {
     return handleRefetch(event);
   }
 
+  // ---- 🆕 extractText：服务端提取简历文本（浏览器端解析失败时的兜底）----
+  if (action === 'extractText') {
+    return handleExtractText(event);
+  }
+
   // ---- 扫描邮件 ----
   if (action === 'scan') {
     // 检查关键模块
@@ -972,4 +977,57 @@ async function handleRefetch(event) {
     failCount,
     results,
   };
+}
+
+/**
+ * 🆕 handleExtractText — 服务端提取简历文本
+ *
+ * 浏览器端 pdfjs-dist / mammoth 动态导入可能因缓存、网络代理、
+ * 浏览器扩展等原因失败。此函数提供服务端兜底：从云存储下载文件，
+ * 使用 format-router 提取文本后返回。
+ *
+ * 入参：{ fileId, fileName, mimeType }
+ * 返回：{ success, text, format } 或 { success: false, error }
+ */
+async function handleExtractText(event) {
+  const { fileId, fileName, mimeType } = event;
+
+  if (!fileId) {
+    return { success: false, error: '缺少 fileId 参数' };
+  }
+
+  if (!modules.formatRouter) {
+    return { success: false, error: `服务端文本提取模块未加载：${loadErrors.formatRouter || '未知错误'}` };
+  }
+
+  try {
+    console.log(`[email-scanner:extractText] 开始提取: ${fileName || fileId} (${mimeType || '未知类型'})`);
+
+    // 1. 从云存储下载文件
+    const downloadResult = await app.downloadFile({ fileID: fileId });
+    const fileBuffer = Buffer.from(downloadResult.fileContent);
+
+    console.log(`[email-scanner:extractText] 文件下载成功: ${fileBuffer.length} 字节`);
+
+    // 2. 使用 format-router 提取文本
+    const extractResult = await modules.formatRouter.route(
+      fileBuffer,
+      fileName || 'resume.pdf',
+      mimeType || 'application/pdf'
+    );
+
+    console.log(`[email-scanner:extractText] 文本提取成功: ${extractResult.text.length} 字符, 格式: ${extractResult.format}`);
+
+    return {
+      success: true,
+      text: extractResult.text,
+      format: extractResult.format,
+    };
+  } catch (err) {
+    console.error(`[email-scanner:extractText] 提取失败:`, err.message);
+    return {
+      success: false,
+      error: `文本提取失败：${err.message}`,
+    };
+  }
 }
