@@ -385,6 +385,32 @@ async function cleanupExpiredCache() {
 
 // ========== 主入口 ==========
 exports.main = async (event, context) => {
+  // 🆕 强制清空所有缓存（action=clearAll）
+  if (event.action === 'clearAll') {
+    try {
+      let deleted = 0;
+      let hasMore = true;
+      let cursor = null;
+      while (hasMore) {
+        let query = db.collection('ReportCache').limit(500);
+        if (cursor) query = query.where({ _id: _.gt(cursor) });
+        const { data } = await query.get();
+        if (!data || data.length === 0) { hasMore = false; break; }
+        for (const doc of data) {
+          await db.collection('ReportCache').doc(doc._id).remove();
+          deleted++;
+        }
+        if (data.length < 500) hasMore = false;
+        else cursor = data[data.length - 1]._id;
+      }
+      console.log(`[cache-warmer] 已清空 ${deleted} 条缓存`);
+      return { success: true, action: 'clearAll', deleted };
+    } catch (err) {
+      console.error(`[cache-warmer] 清空缓存失败: ${err.message}`);
+      return { success: false, error: err.message };
+    }
+  }
+
   console.log('[cache-warmer] 开始预热报表缓存...');
   const startTime = Date.now();
   const results = { overview: false, jobFunnels: 0, deptMonthly: false, conversionRates: false, demandVsOnboard: false, sourceOnboard: false, cleaned: 0, errors: [] };
