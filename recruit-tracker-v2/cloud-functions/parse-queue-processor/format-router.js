@@ -174,8 +174,26 @@ async function extractPdf(buffer) {
   const pdfParse = getPdfParse();
   const data = await pdfParse(buffer);
   const fullText = (data.text || '').trim();
+
+  // 🆕 文本量过少（<100字符）→ 可能是扫描件/图片型PDF，尝试 OCR
+  if (fullText.length < 100) {
+    console.log(`[format-router] PDF 文本量过少 (${fullText.length} 字符)，可能是扫描件，尝试 OCR...`);
+
+    try {
+      // 腾讯云 GeneralBasicOCR 支持 PDF base64 输入（最多识别第一页）
+      const ocrText = await callTencentOCR(buffer);
+      if (ocrText && ocrText.trim().length > fullText.length) {
+        console.log(`[format-router] ✅ OCR 提取成功: ${ocrText.length} 字符`);
+        return ocrText.trim();
+      }
+      console.log(`[format-router] OCR 返回文本不多 (${ocrText?.length || 0} 字符)，使用原始文本提取结果`);
+    } catch (ocrErr) {
+      console.warn(`[format-router] OCR 尝试失败: ${ocrErr.message}，使用原始文本提取结果`);
+    }
+  }
+
   if (fullText.length < 20) {
-    throw new Error('PDF 文本量过少，可能是扫描件，请使用 OCR 处理');
+    throw new Error('PDF 无可提取文本，且 OCR 也未获取到有效内容。该文件可能为多页扫描件或图片质量过低，建议转换为 Word 格式或使用清晰扫描件。');
   }
   return fullText;
 }
