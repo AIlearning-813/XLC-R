@@ -91,13 +91,40 @@ const EXTRACT_RESUME_TOOL = {
 // 基础 System Prompt
 const BASE_SYSTEM_PROMPT = `你是一位专业的招聘系统简历解析助手。请从用户提供的简历文本中，使用 extract_resume 工具提取结构化信息。
 
-规则：
+## 基本信息提取规则
+
+### 姓名识别（最重要）
+姓名通常出现在以下位置，按优先级查找：
+1. 简历开头第一行（最常见格式："张三"、"张三 | 产品经理"、"张三 - 求职意向"）
+2. 紧跟"姓名"/"名字"/"应聘人"/"候选人"标签后的文字
+3. 简历顶部单独一行、字号较大或加粗的文字
+4. 邮件主题中的候选人姓名（如提供邮件上下文）
+
+中文姓名识别标准：
+- 通常为 2-4 个汉字（如"张三"、"欧阳修"、"司马相如"）
+- 由常见中文姓氏开头（如王、李、张、刘、陈、杨、黄、赵、周、吴、徐、孙、马、朱、胡、郭、何、林、罗、高、梁、郑、谢、宋、唐、韩、冯、于、董、萧、程、曹、袁、邓、许、傅、沈、曾、彭、吕、苏、蒋、蔡、贾、丁、魏、薛、叶、阎、余、潘、杜、戴、夏、钟、汪、田、任、姜、范、方、石、姚、谭、廖、邹、熊、金、陆、郝、孔、白、崔、康、毛、邱、秦、江、史、顾、侯、邵、孟、龙、万、段、雷、钱、汤、尹、易、常、武、乔、贺、赖、龚、文）
+- ❌ 以下不是姓名：单个字母或数字（如"B"、"A"、"123"）、邮箱地址、手机号码、公司名称、职位名称
+- 如果简历正文中姓名确实无法识别，可参考邮件上下文中提供的候选人姓名（如提供的话）
+
+### 其他基本信息
+- 手机号码：11位中国大陆手机号（1[3-9]xxxxxxxxx）
+- 性别：男/女，通常出现在个人信息区域
+- 邮箱：标准邮箱地址格式
+- 年龄：通常为数字，出生日期需换算为当前年龄（2026年）
+- 城市：所在城市名称
+- 工作年限：数字（年），可从工作经历总时长推算
+
+## 教育经历
+- 学历取值：高中/中专/大专/本科/硕士/博士/MBA
+- 学校名称要完整（如"清华大学"而非"清华"）
+
+## 工作经历
+- 项目经历不提取到 work_experience 中（通常会有"项目经验"/"项目经历"标题）
+- 日期格式统一为 YYYY-MM 或 YYYY-MM-DD
+
+## 其他规则
 - 只提取明确出现在简历中的信息，不要猜测或编造
 - 如果某项信息未找到，对应的字段不要出现在输出中（不要输出 null 或空字符串）
-- 手机号码应为 11 位中国大陆手机号
-- 日期格式统一为 YYYY-MM 或 YYYY-MM-DD
-- 学历取值：高中/中专/大专/本科/硕士/博士/MBA
-- 工作经历和项目经历要区分（项目经历不提取到 work_experience 中）
 - 期望薪资若以范围形式出现（如"8-12K"），保留原始表述
 - 自我评价最多提取 200 字`;
 
@@ -105,7 +132,7 @@ const BASE_SYSTEM_PROMPT = `你是一位专业的招聘系统简历解析助手�
  * 主入口
  */
 exports.main = async (event, context) => {
-  const { resumeText } = event;
+  const { resumeText, emailContext } = event;
 
   // 参数校验
   if (!resumeText || resumeText.trim().length === 0) {
@@ -119,7 +146,23 @@ exports.main = async (event, context) => {
 
   try {
     // 构建增强 System Prompt（含修正案例库 few-shot examples）
-    const systemPrompt = await buildSystemPrompt(db, BASE_SYSTEM_PROMPT);
+    let systemPrompt = await buildSystemPrompt(db, BASE_SYSTEM_PROMPT);
+
+    // 🆕 注入邮件上下文（辅助 DeepSeek 识别姓名）
+    if (emailContext && (emailContext.subject || emailContext.from || emailContext.fileName)) {
+      const contextLines = [
+        '',
+        '## 邮件上下文（辅助姓名识别）',
+        `- 邮件主题："${emailContext.subject || ''}"`,
+        `- 发件人："${emailContext.from || ''}"`,
+        `- 附件名："${emailContext.fileName || ''}"`,
+        '',
+        '注意：如果简历正文中姓名不清晰或缺失，可以尝试从邮件主题中提取候选人姓名',
+        '（中文招聘平台邮件主题通常包含候选人姓名，格式如"张三的简历"、"张三-Java开发工程师"）。',
+        '但仅在简历正文确实无法识别姓名时才使用此信息。',
+      ];
+      systemPrompt = systemPrompt + contextLines.join('\n');
+    }
 
     console.log(`[resume-parser-proxy] 开始解析，文本长度: ${resumeText.length}`);
 
@@ -133,6 +176,7 @@ exports.main = async (event, context) => {
       body: JSON.stringify({
         model: 'deepseek-chat',
         temperature: 0,
+        max_tokens: 2048,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: resumeText },

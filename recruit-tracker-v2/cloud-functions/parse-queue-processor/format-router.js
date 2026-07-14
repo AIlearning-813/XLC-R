@@ -418,7 +418,43 @@ async function route(buffer, fileName, mimeType) {
     throw new Error(`未能从文件中提取到文本内容（格式：${format}）`);
   }
 
+  // 🆕 文本规范化：去噪 + 规范化空白，提升 DeepSeek 解析准确率
+  text = normalizeResumeText(text);
+
   return { text: text.trim(), format };
+}
+
+/**
+ * 文本预处理：规范化简历文本，去除常见噪音
+ *
+ * PDF 提取和 OCR 识别经常产生乱码字符、多余空白、编码残留，
+ * 规范化后能显著提升 DeepSeek 的解析准确率。
+ *
+ * @param {string} text - 原始提取文本
+ * @returns {string} 规范化后的文本
+ */
+function normalizeResumeText(text) {
+  if (!text) return text;
+
+  let cleaned = text;
+
+  // 1. 合并 3 个以上连续空行为 2 个空行
+  cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+
+  // 2. 规范化全角空格为半角空格
+  cleaned = cleaned.replace(/　/g, ' ');
+
+  // 3. 去掉每行开头的乱码/控制字符（常见于 PDF 提取），但保留中文和常见符号
+  cleaned = cleaned.replace(/^[^一-鿿　-〿＀-￯ -~\t]{1,5}/gm, '');
+
+  // 4. 去掉行首行尾多余空白
+  cleaned = cleaned.split('\n').map(line => line.trim()).join('\n');
+
+  // 5. 替换常见 PDF 提取乱码字符
+  cleaned = cleaned.replace(/[ --]/g, '');  // 控制字符
+  cleaned = cleaned.replace(/[�]/g, '');  // Unicode 替换字符（损坏字符）
+
+  return cleaned;
 }
 
 module.exports = { route, MIME_TO_FORMAT, EXT_TO_FORMAT };

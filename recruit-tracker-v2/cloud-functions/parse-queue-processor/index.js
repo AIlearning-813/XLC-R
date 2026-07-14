@@ -213,6 +213,171 @@ exports.main = async (event, context) => {
 };
 
 /**
+ * 校验候选人姓名质量
+ *
+ * 过滤明显无效的姓名（单字母、数字、邮箱地址、手机号等），
+ * 确保入库的候选人姓名至少达到基本质量标准。
+ *
+ * @param {string} rawName - DeepSeek 解析的原始姓名
+ * @returns {{ valid: boolean, cleanedName: string, reason: string }}
+ */
+function validateAndCleanName(rawName) {
+  if (!rawName || rawName.trim().length === 0) {
+    return { valid: false, cleanedName: '', reason: '姓名为空' };
+  }
+
+  let name = rawName.trim();
+
+  // 去掉常见 OCR/提取噪音前缀和后缀
+  name = name.replace(/^[_\-\s·•●◎○■□★☆♦♥♣♠▲△▼▽◆◇|/\\:;]+/, '');
+  name = name.replace(/[_\-\s·•●◎○■□★☆♦♥♣♠▲△▼▽◆◇|/\\:;]+$/, '');
+
+  if (name.length === 0) {
+    return { valid: false, cleanedName: '', reason: '去除噪音后姓名为空' };
+  }
+
+  // 单字母英文名 → 无效（如 "B", "A", "X"）
+  if (/^[a-zA-Z]$/.test(name)) {
+    return { valid: false, cleanedName: name, reason: '姓名为单字母，无效' };
+  }
+
+  // 两个相同字母 → 无效（如 "BB", "aa"）
+  if (/^[a-zA-Z]{2}$/.test(name) && name[0].toLowerCase() === name[1].toLowerCase()) {
+    return { valid: false, cleanedName: name, reason: '姓名为重复单字母，无效' };
+  }
+
+  // 纯数字或含特殊符号 → 无效
+  if (/^\d+$/.test(name)) {
+    return { valid: false, cleanedName: name, reason: '姓名为纯数字，无效' };
+  }
+
+  if (/^[!@#$%^&*()+\-=\[\]{};':"\\|,.<>\/?]+$/.test(name)) {
+    return { valid: false, cleanedName: name, reason: '姓名为纯特殊符号，无效' };
+  }
+
+  // 邮箱地址/手机号 → 无效
+  if (/@/.test(name) || /^1[3-9]\d{9}$/.test(name)) {
+    return { valid: false, cleanedName: name, reason: '姓名被误识别为邮箱/手机号' };
+  }
+
+  // "未知" 或 "不详" 等占位符 → 无效
+  if (/^(未知|不详|无|未知名|匿名|佚名|unnamed|unknown|n\/a|null|none)$/i.test(name)) {
+    return { valid: false, cleanedName: name, reason: '姓名为占位符' };
+  }
+
+  // 中文姓名：至少2个汉字
+  const chineseChars = name.match(/[一-鿿]/g);
+  if (chineseChars && chineseChars.length >= 2) {
+    return { valid: true, cleanedName: name, reason: '' };
+  }
+
+  // 英文姓名：至少2个字符，包含字母（排除纯数字/符号）
+  if (/^[a-zA-Z\s\-'.]{2,30}$/.test(name) && name.replace(/[^a-zA-Z]/g, '').length >= 2) {
+    return { valid: true, cleanedName: name, reason: '' };
+  }
+
+  // 中英混合（如某些外企简历）
+  if (name.length >= 2 && /[一-鿿]/.test(name)) {
+    return { valid: true, cleanedName: name, reason: '' };
+  }
+
+  // 日文/韩文姓名（含假名/谚文）
+  if (/[぀-ゟ゠-ヿ가-힯]/.test(name) && name.length >= 2) {
+    return { valid: true, cleanedName: name, reason: '' };
+  }
+
+  return { valid: false, cleanedName: name, reason: `姓名格式异常: "${name}"` };
+}
+
+/**
+ * 从邮件主题/发件人中尝试提取候选人姓名（兜底策略）
+ *
+ * 招聘平台邮件主题常见格式：
+ *   - "张三的简历" → "张三"
+ *   - "张三- Java开发工程师" → "张三"
+ *   - "\"张三\" <zhangsan@example.com>" → "张三"
+ *   - "张三 应聘 产品经理" → "张三"
+ *   - "【BOSS直聘】张三投递了Java开发" → "张三"
+ *
+ * @param {string} subject - 邮件主题
+ * @param {string} from - 发件人地址
+ * @returns {string|null} 提取到的姓名，或 null
+ */
+function extractNameFromEmailMeta(subject, from) {
+  if (subject) {
+    // 常见主题模式
+    const patterns = [
+      // "XXX的简历" / "XXX 的简历"
+      /^(.{2,4})的简历/,
+      // "XXX-职位名" / "XXX - 职位名"
+      /^(.{2,4})[-_\s—]+.{1,}/,
+      // "XXX应聘XXX"
+      /^(.{2,4})应聘/,
+      // "XXX投递XXX"
+      /^(.{2,4})投递/,
+      // "XXX_职位名"
+      /^(.{2,4})_/,
+      // "XXX 职位名"
+      /^(.{2,4})\s.{1,}/,
+      // "【平台】XXX投递了..."
+      /】(.{2,4})投递/,
+      // "【平台】XXX的简历"
+      /】(.{2,4})的简历/,
+      // "简历：XXX" / "候选人：XXX"
+      /[：:]\s*(.{2,4})\s*$/,
+      // "Resume of XXX" → 英文名
+      /resume\s+(?:of\s+)?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/i,
+    ];
+
+    for (const pattern of patterns) {
+      const match = subject.match(pattern);
+      if (match) {
+        const candidate = match[1].trim();
+        // 验证确实是中文姓名（2-4个汉字）
+        if (/^[一-鿿]{2,4}$/.test(candidate)) {
+          return candidate;
+        }
+        // 英文名：2-20字符，首字母大写
+        if (/^[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?$/.test(candidate) && candidate.length <= 20) {
+          return candidate;
+        }
+      }
+    }
+
+    // 通用中文姓名正则（主题开头2-4个连续汉字）
+    const generalMatch = subject.match(/^([一-鿿]{2,4})/);
+    if (generalMatch) {
+      const candidate = generalMatch[1];
+      // 排除常见的非姓名开头词
+      const nonNameWords = ['回复', '转发', '关于', '您好', '你好', '尊敬', '请查', '附件', '简历', '应聘',
+        '招聘', '求职', '个人', '最新', '更新', '自动', '系统', '通知', '提醒', '测试'];
+      if (!nonNameWords.some(w => candidate.startsWith(w))) {
+        return candidate;
+      }
+    }
+  }
+
+  // 策略2：从发件人名称中提取（格式: "张三" <email> 或 张三 <email>）
+  if (from) {
+    const quotedMatch = from.match(/"(.{2,4})"/);
+    if (quotedMatch && /^[一-鿿]{2,4}$/.test(quotedMatch[1])) {
+      return quotedMatch[1];
+    }
+    // 格式: 张三 <email>（无引号）
+    const angleMatch = from.match(/^(.{2,4})\s*</);
+    if (angleMatch && /^[一-鿿]{2,4}$/.test(angleMatch[1])) {
+      // 排除明显的部门/职位名称
+      const nonPersonNames = ['人事部', '行政部', '财务部', '技术部', '市场部', '销售部'];
+      if (!nonPersonNames.includes(angleMatch[1])) {
+        return angleMatch[1];
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
  * 处理单个 ParseQueue 条目
  */
 async function processOneEntry(db, entry, summary) {
@@ -279,7 +444,14 @@ async function processOneEntry(db, entry, summary) {
   try {
     parseResult = await app.callFunction({
       name: 'resume-parser-proxy',
-      data: { resumeText },
+      data: {
+        resumeText,
+        emailContext: {
+          subject: entry.sourceEmailSubject || '',
+          from: entry.sourceEmailFrom || '',
+          fileName: entry.fileName || '',
+        },
+      },
     });
   } catch (parseErr) {
     if (isRetryableError(parseErr)) {
@@ -305,6 +477,30 @@ async function processOneEntry(db, entry, summary) {
   try {
     const candidateData = parseData.data || {};
     const basicInfo = candidateData.basic_info || {};
+
+    // 🆕 姓名质量校验 + 邮件元数据兜底提取
+    let nameSource = 'ai_parsed';  // 姓名来源追踪
+    const nameCheck = validateAndCleanName(basicInfo.name);
+    if (!nameCheck.valid) {
+      console.log(`[parse-queue-processor] 姓名校验失败: ${nameCheck.reason}，原始值: "${basicInfo.name}"，尝试从邮件元数据提取`);
+
+      // 尝试从邮件主题/发件人提取姓名
+      const fallbackName = extractNameFromEmailMeta(
+        entry.sourceEmailSubject || '',
+        entry.sourceEmailFrom || ''
+      );
+
+      if (fallbackName) {
+        console.log(`[parse-queue-processor] ✅ 从邮件元数据提取到姓名: "${fallbackName}"`);
+        basicInfo.name = fallbackName;
+        nameSource = 'email_meta';
+      } else {
+        console.warn(`[parse-queue-processor] ⚠️ 无法提取有效姓名，降级使用原始值`);
+        nameSource = 'unresolved';
+        // 姓名无效但仍有其他信息（手机/邮箱），创建候选人但标注姓名不确定
+        // 不阻塞管道，让专员后续手动修正
+      }
+    }
 
     // 重复检测（候选人级：phone + email）
     const existingCandidate = await checkCandidateDuplicate(db, basicInfo);
@@ -341,6 +537,7 @@ async function processOneEntry(db, entry, summary) {
     const candidateDoc = {
       // 基本信息（顶层，方便直接查询和展示）
       name: basicInfo.name || '',
+      _nameSource: nameSource,  // 🆕 姓名来源追踪：ai_parsed / email_meta / unresolved
       gender: basicInfo.gender || '',
       phone: phoneVal,
       email: emailVal,
