@@ -177,9 +177,28 @@ async function extractPdfText(file) {
 
   const fullText = texts.join('\n').trim();
 
-  // 如果提取的文本很短（< 20 字符），可能是扫描件
-  if (fullText.length < 20) {
-    throw new Error('该文件可能为扫描件（无可提取的文本层），浏览器端暂不支持文字识别，请通过邮箱归集方式处理。');
+  // 🆕 文本质量检查：不仅看长度，还看内容有效性
+  // 图片型PDF常能提取到元数据（创建者、日期等）超过20字符，
+  // 但这些垃圾数据对AI解析毫无价值，需要检测后触发服务端OCR兜底
+  const chineseChars = (fullText.match(/[一-鿿]/g) || []).length;
+  const alphaChars = (fullText.match(/[a-zA-Z]/g) || []).length;
+  const digitChars = (fullText.match(/\d/g) || []).length;
+  const hasPhone = /1[3-9]\d{9}/.test(fullText);
+  const hasEmail = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/.test(fullText);
+
+  // 有效简历文本：至少有少量中文字符，或有英文单词+数字（英文简历），或有手机/邮箱
+  const hasMeaningfulContent =
+    chineseChars >= 10 ||                              // 中文简历至少10个汉字
+    (alphaChars >= 30 && digitChars >= 3) ||           // 英文简历至少30个字母+数字
+    hasPhone ||                                        // 包含手机号
+    hasEmail;                                          // 包含邮箱
+
+  if (!hasMeaningfulContent) {
+    console.log(
+      `[resume-parser] PDF文本质量不足 (中文:${chineseChars}, 英文:${alphaChars}, 数字:${digitChars}, 手机:${hasPhone}, 邮箱:${hasEmail})，` +
+      `切换到服务端OCR处理`
+    );
+    throw new Error('该文件可能为扫描件（无可提取的文本层），自动切换到服务端OCR处理');
   }
 
   return fullText;
