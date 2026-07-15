@@ -59,7 +59,8 @@
           "type": "timer",
           "config": "*/2 * * * *"
         }
-      ]
+      ],
+      "comment": "环境变量(MASTER_SECRET/SALT_PEPPER/TENCENT_SECRET)已在云端配置，通过CloudBase控制台管理，切勿使用 tcb config update fn --overwrite 覆盖"
     },
     {
       "name": "email-scanner",
@@ -86,7 +87,7 @@
       "timeout": 30,
       "memorySize": 256,
       "runtime": "Nodejs20.19",
-      "comment": "用户认证代理 — 登录验证 + 账号管理（添加/删除/重置密码）"
+      "comment": "用户认证代理 — 登录验证 + 账号管理。MASTER_SECRET 已在云端配置，切勿使用 tcb config update fn 覆盖"
     },
     {
       "name": "get-file-url",
