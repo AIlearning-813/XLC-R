@@ -181,12 +181,20 @@ async function extractPdfText(file) {
   const hasPhone = /1[3-9]\d{9}/.test(fullText);
   const hasEmail = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/.test(fullText);
 
-  // 有效简历文本：至少有少量中文字符，或有英文单词+数字（英文简历），或有手机/邮箱
+  // 检测重复模式（图片型PDF常提取出重复的hash/ID串）
+  const lines = fullText.split('\n').filter(l => l.trim().length > 0);
+  let uniqueLineRatio = 1.0;
+  if (lines.length >= 3) {
+    const uniqueLines = new Set(lines.map(l => l.trim()));
+    uniqueLineRatio = uniqueLines.size / lines.length;
+  }
+
+  // 有效简历文本：中文≥10字 / 英文≥30字母且有数字且非高度重复 / 含手机或邮箱
   const hasMeaningfulContent =
-    chineseChars >= 10 ||                              // 中文简历至少10个汉字
-    (alphaChars >= 30 && digitChars >= 3) ||           // 英文简历至少30个字母+数字
-    hasPhone ||                                        // 包含手机号
-    hasEmail;                                          // 包含邮箱
+    chineseChars >= 10 ||
+    (alphaChars >= 30 && digitChars >= 3 && uniqueLineRatio >= 0.5) ||
+    hasPhone ||
+    hasEmail;
 
   if (!hasMeaningfulContent) {
     console.log(
