@@ -128,14 +128,14 @@ async function loadData(filters = {}) {
     const of = ownerFilter();
     if (of) conditions.ownerId = of.ownerId;
 
-    if (Object.keys(conditions).length > 0) {
-      query = query.where(conditions);
+    // 🆕 修复：CloudBase SDK 的 .where() 是替换语义，不能链式调用
+    // 必须将所有条件合并到同一个对象，只调用一次 .where()
+    if (filters.dateFrom) {
+      conditions.createdAt = dbInstance.command.gte(new Date(filters.dateFrom));
     }
 
-    if (filters.dateFrom) {
-      query = query.where({
-        createdAt: dbInstance.command.gte(new Date(filters.dateFrom)),
-      });
+    if (Object.keys(conditions).length > 0) {
+      query = query.where(conditions);
     }
 
     query = query.orderBy('updatedAt', 'desc');
