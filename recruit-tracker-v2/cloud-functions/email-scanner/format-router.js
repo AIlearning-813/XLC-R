@@ -372,7 +372,7 @@ async function callTencentOCR(imageBuffer) {
   const timestamp = Math.floor(Date.now() / 1000);
   const date = new Date(timestamp * 1000).toISOString().slice(0, 10);
 
-  const payload = JSON.stringify({ ImageBase64: imageBase64, LanguageType: 'zh' });
+  const payload = JSON.stringify({ ImageBase64: imageBase64, LanguageType: 'zh', IsPdf: true });
   const hashedPayload = crypto.createHash('sha256').update(payload).digest('hex');
 
   const canonicalRequest = [
