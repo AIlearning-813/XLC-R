@@ -1004,9 +1004,20 @@ async function handleExtractText(event) {
     console.log(`[email-scanner:extractText] 开始提取: ${fileName || fileId} (${mimeType || '未知类型'})`);
 
     // 1. 从云存储下载文件
-    const downloadResult = await app.downloadFile({ fileID: fileId });
-    const fileBuffer = Buffer.from(downloadResult.fileContent);
+    let downloadResult;
+    try {
+      downloadResult = await app.downloadFile({ fileID: fileId });
+    } catch (downloadErr) {
+      const msg = downloadErr?.message || downloadErr?.code || JSON.stringify(downloadErr).slice(0, 200);
+      console.error(`[email-scanner:extractText] 文件下载失败:`, msg);
+      return { success: false, error: `文件下载失败：${msg}` };
+    }
 
+    if (!downloadResult || !downloadResult.fileContent) {
+      return { success: false, error: '文件下载成功但内容为空，文件可能已被删除' };
+    }
+
+    const fileBuffer = Buffer.from(downloadResult.fileContent);
     console.log(`[email-scanner:extractText] 文件下载成功: ${fileBuffer.length} 字节`);
 
     // 2. 使用 format-router 提取文本
@@ -1024,10 +1035,11 @@ async function handleExtractText(event) {
       format: extractResult.format,
     };
   } catch (err) {
-    console.error(`[email-scanner:extractText] 提取失败:`, err.message);
+    const errMsg = err?.message || err?.code || String(err).slice(0, 200) || '未知错误';
+    console.error(`[email-scanner:extractText] 文本提取失败:`, errMsg);
     return {
       success: false,
-      error: `文本提取失败：${err.message}`,
+      error: `文本提取失败：${errMsg}`,
     };
   }
 }
