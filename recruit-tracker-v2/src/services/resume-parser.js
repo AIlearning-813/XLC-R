@@ -173,8 +173,7 @@ async function extractPdfText(file) {
   const fullText = texts.join('\n').trim();
 
   // 🆕 文本质量检查：不仅看长度，还看内容有效性
-  // 图片型PDF常能提取到元数据（创建者、日期等）超过20字符，
-  // 但这些垃圾数据对AI解析毫无价值，需要检测后触发服务端OCR兜底
+  // 图片型PDF常能提取到元数据或hash串，需要检测后触发服务端OCR兜底
   const chineseChars = (fullText.match(/[一-鿿]/g) || []).length;
   const alphaChars = (fullText.match(/[a-zA-Z]/g) || []).length;
   const digitChars = (fullText.match(/\d/g) || []).length;
@@ -182,24 +181,41 @@ async function extractPdfText(file) {
   const hasEmail = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/.test(fullText);
 
   // 检测重复模式（图片型PDF常提取出重复的hash/ID串）
+  // ⚠️ pdfjs-dist 用 join(' ') 把单页文字拼成一行，单页PDF的lines.length=1
+  //    默认uniqueLineRatio=0（未知→偏向拦截），有足够行数时才计算真实值
   const lines = fullText.split('\n').filter(l => l.trim().length > 0);
-  let uniqueLineRatio = 1.0;
+  let uniqueLineRatio = 0;
   if (lines.length >= 3) {
     const uniqueLines = new Set(lines.map(l => l.trim()));
     uniqueLineRatio = uniqueLines.size / lines.length;
   }
 
-  // 有效简历文本：中文≥10字 / 英文≥30字母且有数字且非高度重复 / 含手机或邮箱
+  // 🆕 垃圾文本检测（与 format-router.js extractPdf 保持一致）
+  const looksLikeGarbage =
+    (chineseChars < 5 && fullText.length < 300) ||
+    (uniqueLineRatio < 0.5 && chineseChars < 10) ||
+    (!hasPhone && !hasEmail && chineseChars < 5 && alphaChars < 100);
+
+  if (looksLikeGarbage) {
+    console.log(
+      `[resume-parser] 检测到PDF垃圾文本 (中文:${chineseChars}, 英文:${alphaChars}, ` +
+      `去重行比:${uniqueLineRatio.toFixed(2)})，切换到服务端OCR`
+    );
+    throw new Error('该文件为图片型/扫描件PDF，自动切换到服务端OCR处理');
+  }
+
+  // 有效简历文本：中文≥20字 / 英文≥50字母且有数字且非重复 / 含手机或邮箱
+  //（与服务端 format-router 阈值对齐）
   const hasMeaningfulContent =
-    chineseChars >= 10 ||
-    (alphaChars >= 30 && digitChars >= 3 && uniqueLineRatio >= 0.5) ||
+    chineseChars >= 20 ||
+    (alphaChars >= 50 && digitChars >= 2 && uniqueLineRatio >= 0.5) ||
     hasPhone ||
     hasEmail;
 
   if (!hasMeaningfulContent) {
     console.log(
-      `[resume-parser] PDF文本质量不足 (中文:${chineseChars}, 英文:${alphaChars}, 数字:${digitChars}, 手机:${hasPhone}, 邮箱:${hasEmail})，` +
-      `切换到服务端OCR处理`
+      `[resume-parser] PDF文本质量不足 (中文:${chineseChars}, 英文:${alphaChars}, 数字:${digitChars}, ` +
+      `手机:${hasPhone}, 邮箱:${hasEmail})，切换到服务端OCR处理`
     );
     throw new Error('该文件可能为扫描件（无可提取的文本层），自动切换到服务端OCR处理');
   }
