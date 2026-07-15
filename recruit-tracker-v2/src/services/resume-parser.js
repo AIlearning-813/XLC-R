@@ -84,44 +84,39 @@ async function extractTextBrowser(file) {
 /**
  * 🆕 服务端文本提取（浏览器端失败时的兜底）
  *
- * 将文件上传到 CloudBase 云存储，然后调用 email-scanner 云函数的
- * extractText 动作，使用服务端的 format-router 来提取文本。
+ * 将文件内容以 base64 直接传给 email-scanner 云函数，
+ * 使用服务端的 format-router 来提取文本。
  * 服务端 format-router 支持 PDF/DOCX/图片OCR/RTF/HTML/ZIP 等所有格式。
  *
  * @param {File} file - 简历文件
  * @returns {Promise<string>} 提取的纯文本
  */
 async function extractTextViaServer(file) {
-  const storage = cloudbase.storage();
-  if (!storage) {
-    throw new Error('云存储未初始化，无法使用服务端提取');
-  }
-
-  // 1. 上传文件到云存储
-  const cloudPath = `resumes/manual-fallback/${Date.now()}_${file.name}`;
-  let uploadResult;
+  // 1. 读取文件内容为 base64
+  let fileContent;
   try {
-    uploadResult = await storage.uploadFile({
-      cloudPath,
-      filePath: file,
-    });
-  } catch (uploadErr) {
-    throw new Error(`文件上传失败：${uploadErr.message}`);
+    const arrayBuffer = await file.arrayBuffer();
+    const uint8Array = new Uint8Array(arrayBuffer);
+    // 分块转 base64（防止大文件栈溢出）
+    let binary = '';
+    const chunkSize = 8192;
+    for (let i = 0; i < uint8Array.length; i += chunkSize) {
+      const chunk = uint8Array.subarray(i, i + chunkSize);
+      binary += String.fromCharCode.apply(null, chunk);
+    }
+    fileContent = btoa(binary);
+  } catch (readErr) {
+    throw new Error(`文件读取失败：${readErr.message}`);
   }
 
-  const fileId = uploadResult.fileID;
-  if (!fileId) {
-    throw new Error('文件上传成功但未获取到 fileID');
-  }
+  console.log('[resume-parser] 文件已读取为 base64:', (fileContent.length / 1024).toFixed(1), 'KB');
 
-  console.log('[resume-parser] 文件已上传到云存储:', fileId);
-
-  // 2. 调用 email-scanner 的 extractText 动作
+  // 2. 直接传文件内容给云函数（不经过云存储中转，避免 fileId 兼容问题）
   let extractResult;
   try {
     extractResult = await cloudbase.callFunction('email-scanner', {
       action: 'extractText',
-      fileId,
+      fileContent,
       fileName: file.name,
       mimeType: file.type || 'application/pdf',
     });

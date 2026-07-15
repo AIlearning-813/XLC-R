@@ -983,17 +983,18 @@ async function handleRefetch(event) {
  * 🆕 handleExtractText — 服务端提取简历文本
  *
  * 浏览器端 pdfjs-dist / mammoth 动态导入可能因缓存、网络代理、
- * 浏览器扩展等原因失败。此函数提供服务端兜底：从云存储下载文件，
- * 使用 format-router 提取文本后返回。
+ * 浏览器扩展等原因失败。此函数提供服务端兜底：
+ * 接收文件 base64 内容，使用 format-router 提取文本后返回。
  *
- * 入参：{ fileId, fileName, mimeType }
+ * 入参：{ fileContent, fileName, mimeType }
+ *   - fileContent: 文件的 base64 编码字符串
  * 返回：{ success, text, format } 或 { success: false, error }
  */
 async function handleExtractText(event) {
-  const { fileId, fileName, mimeType } = event;
+  const { fileContent, fileName, mimeType } = event;
 
-  if (!fileId) {
-    return { success: false, error: '缺少 fileId 参数' };
+  if (!fileContent) {
+    return { success: false, error: '缺少 fileContent 参数' };
   }
 
   if (!modules.formatRouter) {
@@ -1001,26 +1002,13 @@ async function handleExtractText(event) {
   }
 
   try {
-    console.log(`[email-scanner:extractText] 开始提取: ${fileName || fileId} (${mimeType || '未知类型'})`);
+    console.log(`[email-scanner:extractText] 开始提取: ${fileName || '(未知名)'} (${mimeType || '未知类型'}), base64: ${(fileContent.length / 1024).toFixed(1)}KB`);
 
-    // 1. 从云存储下载文件
-    let downloadResult;
-    try {
-      downloadResult = await app.downloadFile({ fileID: fileId });
-    } catch (downloadErr) {
-      const msg = downloadErr?.message || downloadErr?.code || JSON.stringify(downloadErr).slice(0, 200);
-      console.error(`[email-scanner:extractText] 文件下载失败:`, msg);
-      return { success: false, error: `文件下载失败：${msg}` };
-    }
+    // 将 base64 解码为 Buffer
+    const fileBuffer = Buffer.from(fileContent, 'base64');
+    console.log(`[email-scanner:extractText] 解码成功: ${fileBuffer.length} 字节`);
 
-    if (!downloadResult || !downloadResult.fileContent) {
-      return { success: false, error: '文件下载成功但内容为空，文件可能已被删除' };
-    }
-
-    const fileBuffer = Buffer.from(downloadResult.fileContent);
-    console.log(`[email-scanner:extractText] 文件下载成功: ${fileBuffer.length} 字节`);
-
-    // 2. 使用 format-router 提取文本
+    // 使用 format-router 提取文本
     const extractResult = await modules.formatRouter.route(
       fileBuffer,
       fileName || 'resume.pdf',
@@ -1037,6 +1025,10 @@ async function handleExtractText(event) {
   } catch (err) {
     const errMsg = err?.message || err?.code || String(err).slice(0, 200) || '未知错误';
     console.error(`[email-scanner:extractText] 文本提取失败:`, errMsg);
+    // 打印完整错误栈用于排查
+    if (err?.stack) {
+      console.error(`[email-scanner:extractText] 错误栈:`, err.stack);
+    }
     return {
       success: false,
       error: `文本提取失败：${errMsg}`,

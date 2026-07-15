@@ -175,20 +175,70 @@ async function extractPdf(buffer) {
   const data = await pdfParse(buffer);
   const fullText = (data.text || '').trim();
 
-  // 🆕 文本量过少（<100字符）→ 可能是扫描件/图片型PDF，尝试 OCR
-  if (fullText.length < 100) {
-    console.log(`[format-router] PDF 文本量过少 (${fullText.length} 字符)，可能是扫描件，尝试 OCR...`);
+  // 🆕 内容质量判断：不只是看长度，而是检查是否包含真实简历内容
+  const chineseCount = (fullText.match(/[一-鿿]/g) || []).length;
+  const alphaCount = (fullText.match(/[a-zA-Z]/g) || []).length;
+  const digitCount = (fullText.match(/\d/g) || []).length;
+  const hasPhone = /1[3-9]\d{9}/.test(fullText);
+  const hasEmail = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/.test(fullText);
 
+  // 检测重复模式（图片型PDF常提取出重复的hash/ID串）
+  const lines = fullText.split('\n').filter(l => l.trim().length > 0);
+  let uniqueLineRatio = 1.0;
+  if (lines.length >= 3) {
+    const uniqueLines = new Set(lines.map(l => l.trim()));
+    uniqueLineRatio = uniqueLines.size / lines.length;
+  }
+
+  // 有效简历文本判断：
+  const looksLikeResume =
+    chineseCount >= 20 ||
+    (alphaCount >= 50 && digitCount >= 2 && uniqueLineRatio >= 0.5) ||
+    hasPhone ||
+    hasEmail;
+
+  // 图片型PDF的典型特征：
+  const looksLikeGarbage =
+    (chineseCount < 5 && fullText.length < 300) ||
+    (uniqueLineRatio < 0.5 && chineseCount < 10) ||
+    (!hasPhone && !hasEmail && chineseCount < 5 && alphaCount < 100);
+
+  if (looksLikeGarbage || (!looksLikeResume && fullText.length < 500)) {
+    console.log(
+      `[format-router] 疑似图片型PDF (总长:${fullText.length}, 中文:${chineseCount}, ` +
+      `英文:${alphaCount}, 去重行比:${uniqueLineRatio.toFixed(2)}, 手机:${hasPhone}, 邮箱:${hasEmail})，尝试 OCR...`
+    );
+
+    // 尝试 OCR
+    let ocrFailed = false;
+    let ocrErrorMsg = '';
     try {
-      // 腾讯云 GeneralBasicOCR 支持 PDF base64 输入（最多识别第一页）
       const ocrText = await callTencentOCR(buffer);
-      if (ocrText && ocrText.trim().length > fullText.length) {
-        console.log(`[format-router] ✅ OCR 提取成功: ${ocrText.length} 字符`);
-        return ocrText.trim();
+      if (ocrText && ocrText.trim().length > 0) {
+        const ocrChinese = (ocrText.match(/[一-鿿]/g) || []).length;
+        if (ocrChinese >= 5 || ocrText.trim().length > fullText.length * 2) {
+          console.log(`[format-router] ✅ OCR 提取成功: ${ocrText.length} 字符, 中文:${ocrChinese}`);
+          return ocrText.trim();
+        }
+        console.log(`[format-router] OCR 质量不佳 (中文:${ocrChinese}, 总长:${ocrText.length})`);
+        ocrFailed = true;
+        ocrErrorMsg = 'OCR 识别结果质量不足，可能图片不清晰';
+      } else {
+        ocrFailed = true;
+        ocrErrorMsg = 'OCR 返回空结果';
       }
-      console.log(`[format-router] OCR 返回文本不多 (${ocrText?.length || 0} 字符)，使用原始文本提取结果`);
     } catch (ocrErr) {
-      console.warn(`[format-router] OCR 尝试失败: ${ocrErr.message}，使用原始文本提取结果`);
+      ocrFailed = true;
+      ocrErrorMsg = ocrErr.message || 'OCR 服务异常';
+      console.warn(`[format-router] OCR 尝试失败: ${ocrErrorMsg}`);
+    }
+
+    // OCR 失败时抛出明确错误，不要返回垃圾文本给 DeepSeek
+    if (ocrFailed) {
+      throw new Error(
+        `该PDF为图片型/扫描件，无法直接提取文本，且OCR文字识别失败：${ocrErrorMsg}。` +
+        `建议：1) 将PDF转换为Word格式后重新上传；2) 确保腾讯云OCR服务已开通且密钥已配置`
+      );
     }
   }
 
