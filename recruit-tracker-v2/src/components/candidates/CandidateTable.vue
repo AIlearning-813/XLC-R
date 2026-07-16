@@ -388,7 +388,7 @@ thead th {
   text-align: center;
 }
 
-.col-name { min-width: 140px; }
+.col-name { min-width: 200px; }
 .col-position { min-width: 120px; }
 .col-stage { min-width: 100px; }
 .col-source { min-width: 80px; }
@@ -436,12 +436,10 @@ tbody td {
 
 .name-email-subject {
   font-size: var(--font-size-xs);
-  color: var(--gray-400);
-  margin-top: 1px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 180px;
+  color: var(--gray-500);
+  margin-top: 2px;
+  line-height: 1.4;
+  word-break: break-all;
 }
 
 .pos-text {
