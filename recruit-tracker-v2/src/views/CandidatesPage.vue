@@ -252,8 +252,12 @@ async function loadUnassigned(dbInstance, filters = {}) {
 
     const assignedIds = new Set((allApps || []).map(a => a.candidateId).filter(Boolean));
 
-    // 2. 查询 Candidate 集合
+    // 2. 查询 Candidate 集合（🔒 先按 ownerId 过滤，再 limit）
+    const of = ownerFilter();
     let candidateQuery = dbInstance.collection('Candidate').orderBy('createdAt', 'desc').limit(200);
+    if (of) {
+      candidateQuery = candidateQuery.where({ ownerId: of.ownerId });
+    }
 
     const { data: candidates } = await candidateQuery.get();
     let unassigned = (candidates || []).filter(c => !assignedIds.has(c._id));
@@ -268,12 +272,7 @@ async function loadUnassigned(dbInstance, filters = {}) {
       );
     }
 
-    // 🔒 owner 过滤（修正：使用 ownerId 而非 createdBy）
-    const of = ownerFilter();
-    if (of) {
-      unassigned = unassigned.filter(c => c.ownerId === of.ownerId);
-    }
-
+    // 🔒 owner 过滤已在 DB 查询层完成，无需 JS 二次过滤
     totalCount.value = unassigned.length;
     const start = (page.value - 1) * pageSize;
     rows.value = unassigned.slice(start, start + pageSize).map(c => ({
