@@ -19,7 +19,6 @@ import CandidateFilter from '../components/candidates/CandidateFilter.vue';
 import CandidateTable from '../components/candidates/CandidateTable.vue';
 import StageTransitionDialog from '../components/pipeline/StageTransitionDialog.vue';
 import AssignDemandDialog from '../components/candidates/AssignDemandDialog.vue';
-import InputDialog from '../components/common/InputDialog.vue';
 
 const router = useRouter();
 const jobStore = useJobStore();
@@ -596,10 +595,11 @@ function handleTransitionCancel() {
 const batchActionOpen = ref(false);
 
 // P2-24：岗位名称输入弹窗（替代 prompt()）
-const jobNameDialog = ref({ visible: false, ids: [] });
+const jobSelectDialog = ref({ visible: false, ids: [] });
+const selectedJobId = ref('');
 
-function onJobNameConfirm(jobName) {
-  if (jobName) batchAssignJobs(jobNameDialog.value.ids, jobName);
+function onJobSelectConfirm() {
+  if (selectedJobId.value) batchAssignJobs(jobSelectDialog.value.ids, selectedJobId.value);
 }
 
 function batchAction(action) {
@@ -618,9 +618,9 @@ function batchAction(action) {
       break;
     }
     case 'batchAssignJob': {
-      // P2-24：使用弹窗替代 prompt() 输入岗位名称
       batchActionOpen.value = false;
-      jobNameDialog.value = { visible: true, ids };
+      selectedJobId.value = '';
+      jobSelectDialog.value = { visible: true, ids };
       break;
     }
     case 'selectAll':
@@ -648,13 +648,10 @@ async function batchEndApplications(ids, status) {
   toast.success(`已完成：${success}/${ids.length} 位候选人`);
 }
 
-async function batchAssignJobs(ids, jobTitle) {
-  // 查找匹配的岗位
-  const job = jobStore.activeJobs.find(j =>
-    (j.title || j.name || '').toLowerCase().includes(jobTitle.toLowerCase())
-  );
+async function batchAssignJobs(ids, jobId) {
+  const job = jobStore.getById(jobId);
   if (!job) {
-    toast.warning('未找到匹配的岗位，请确认岗位名称');
+    toast.warning('未找到该岗位，请重新选择');
     return;
   }
 
@@ -914,14 +911,42 @@ onMounted(async () => {
       @close="assignDemandVisible = false"
     />
 
-    <!-- P2-24：岗位名称输入弹窗（替代 prompt()） -->
-    <InputDialog
-      v-model:visible="jobNameDialog.visible"
-      title="批量分配岗位"
-      placeholder="请输入要分配的岗位名称（将自动匹配）"
-      confirmText="确认分配"
-      @confirm="onJobNameConfirm"
-    />
+    <!-- 批量分配岗位 — 下拉选择弹窗 -->
+    <Teleport to="body">
+      <Transition name="dialog">
+        <div v-if="jobSelectDialog.visible" class="dialog-overlay" @click.self="jobSelectDialog.visible = false">
+          <div class="dialog-card dialog-sm">
+            <div class="dialog-header">
+              <h3 class="dialog-title">批量分配岗位</h3>
+              <button class="dialog-close" @click="jobSelectDialog.visible = false">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+              </button>
+            </div>
+            <div class="dialog-body">
+              <p class="dialog-desc">已选择 <strong>{{ jobSelectDialog.ids.length }}</strong> 位候选人，请选择目标岗位：</p>
+              <div class="form-group">
+                <select v-model="selectedJobId" class="form-select">
+                  <option value="" disabled>— 请选择招聘需求 —</option>
+                  <option
+                    v-for="job in jobStore.activeJobs"
+                    :key="job._id"
+                    :value="job._id"
+                  >{{ job.title || job.name }}{{ job.department ? ' — ' + job.department : '' }}</option>
+                </select>
+              </div>
+            </div>
+            <div class="dialog-footer">
+              <button class="btn btn-secondary" @click="jobSelectDialog.visible = false">取消</button>
+              <button class="btn btn-primary" :disabled="!selectedJobId" @click="onJobSelectConfirm(); jobSelectDialog.visible = false;">
+                确认分配
+              </button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
 
     <!-- 重新激活弹窗 -->
     <Teleport to="body">
