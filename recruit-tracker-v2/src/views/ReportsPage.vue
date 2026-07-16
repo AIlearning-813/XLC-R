@@ -201,6 +201,14 @@ function renderFunnelChart() {
           title: { display: true, text: '候选人数量', color: '#999' },
           ticks: { stepSize: 1 },
         },
+        y: {
+          ticks: {
+            autoSkip: false,
+            font: { size: 13 },
+            padding: 8,
+            color: '#555',
+          },
+        },
       },
     },
   });
@@ -319,7 +327,7 @@ onMounted(async () => {
       <div class="charts-grid">
         <!-- 漏斗图 -->
         <div class="card chart-card">
-          <canvas ref="funnelCanvas" height="300"></canvas>
+          <canvas ref="funnelCanvas" height="520"></canvas>
         </div>
 
       </div>
@@ -500,7 +508,7 @@ onMounted(async () => {
 .chart-card {
   padding: var(--spacing-lg);
   position: relative;
-  min-height: 360px;
+  min-height: 580px;
 }
 
 .chart-card canvas {
