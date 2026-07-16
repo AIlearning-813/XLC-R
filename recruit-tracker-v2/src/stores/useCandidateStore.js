@@ -23,7 +23,11 @@ export const useCandidateStore = defineStore('candidate', () => {
   // ===== 操作 =====
 
   /**
-   * 根据 ID 获取候选人详情（🔒 含归属校验）
+   * 根据 ID 获取候选人详情（🔒 含归属校验——通过关联 Application 判断）
+   *
+   * 权限模型：Candidate 的 ownerId 可能与 Application 的 ownerId 不一致
+   * （例如管理员导入简历后专员接手）。因此不直接按 Candidate.ownerId 过滤，
+   * 而是查询该 Candidate 是否有当前用户拥有的 Application。
    */
   async function fetchById(id) {
     const db = cloudbase.db();
@@ -36,31 +40,33 @@ export const useCandidateStore = defineStore('candidate', () => {
     error.value = '';
 
     try {
-      // 🔒 数据隔离：附加 ownerId 过滤
-      const auth = useAuthStore();
-      const conditions = {};
-      if (!auth.isAdmin) {
-        conditions.ownerId = auth.currentUsername;
-      }
-
-      let data;
-      if (Object.keys(conditions).length > 0) {
-        const result = await db.collection('Candidate')
-          .where({ _id: id, ...conditions })
-          .get();
-        data = result.data?.[0] || null;
-      } else {
-        const result = await db.collection('Candidate').doc(id).get();
-        data = result.data?.[0] || null;
-      }
+      const result = await db.collection('Candidate').doc(id).get();
+      const data = result.data?.[0] || null;
 
       if (data) {
-        // 🔒 二次校验：非管理员不能访问别人的候选人
-        if (!auth.isAdmin && data.ownerId && data.ownerId !== auth.currentUsername) {
-          console.warn('[useCandidateStore] 权限拒绝：尝试访问非本人候选人');
-          error.value = '无权访问此候选人';
-          return null;
+        const auth = useAuthStore();
+
+        // 🔒 权限校验：
+        // 1. Admin 可访问所有
+        // 2. Candidate.ownerId 匹配当前用户 → 允许
+        // 3. 存在一条当前用户拥有的 Application 关联此 Candidate → 允许
+        if (!auth.isAdmin && data.ownerId !== auth.currentUsername) {
+          const { data: apps } = await db.collection('Application')
+            .where({
+              candidateId: id,
+              ownerId: auth.currentUsername,
+            })
+            .limit(1)
+            .get();
+
+          if (!apps || apps.length === 0) {
+            console.warn('[useCandidateStore] 权限拒绝：Candidate ownerId 不匹配且无关联 Application');
+            error.value = '无权访问此候选人';
+            loading.value = false;
+            return null;
+          }
         }
+
         currentCandidate.value = data;
         // 更新缓存
         const idx = candidates.value.findIndex(c => c._id === id);

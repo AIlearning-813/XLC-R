@@ -138,13 +138,6 @@ async function loadCandidate() {
       loading.value = false;
       return;
     }
-
-    // 🔒 数据隔离：二次校验（fetchById 已做，此处兜底）
-    if (!auth.isAdmin && data.ownerId && data.ownerId !== auth.currentUsername) {
-      error.value = '无权访问此候选人';
-      loading.value = false;
-      return;
-    }
     candidate.value = data;
   } catch (err) {
     error.value = '加载候选人失败：' + err.message;
