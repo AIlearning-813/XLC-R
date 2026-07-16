@@ -133,7 +133,7 @@ function renderFunnelChart() {
     invite_confirmed: '确认面试', first_interview: '初试', first_pass: '初试通过',
     second_interview: '复试', second_pass: '复试通过',
     final_interview: '终试', final_pass: '终试通过',
-    offer: 'Offer', onboard: '入职',
+    offer: 'Offer', background_check: '背景调查', onboard: '入职',
   };
 
   funnelChart = new Chart(funnelCanvas.value, {
@@ -148,6 +148,7 @@ function renderFunnelChart() {
             '#E8E0F0', '#C4B5D8', '#A8D8EA', '#7EC8E3',
             '#AAE0C8', '#6ECB99', '#FFE5A3', '#FFD06B',
             '#FFB5B5', '#FF8989', '#B8D0F0', '#7BA8E0',
+            '#D4E6C3',
           ];
           return colors[i % colors.length];
         }),
@@ -156,6 +157,7 @@ function renderFunnelChart() {
             '#C4B5D8', '#A085B8', '#7EC8E3', '#5BA8CC',
             '#6ECB99', '#3DAF6E', '#FFD06B', '#F0B828',
             '#FF8989', '#EE5A5A', '#7BA8E0', '#5A8ACC',
+            '#9DC47A',
           ];
           return borders[i % borders.length];
         }),
@@ -213,7 +215,7 @@ async function handleExportCSV() {
     invite_confirmed: '确认面试', first_interview: '初试', first_pass: '初试通过',
     second_interview: '复试', second_pass: '复试通过',
     final_interview: '终试', final_pass: '终试通过',
-    offer: 'Offer', onboard: '入职',
+    offer: 'Offer', background_check: '背景调查', onboard: '入职',
   };
 
   const rows = [

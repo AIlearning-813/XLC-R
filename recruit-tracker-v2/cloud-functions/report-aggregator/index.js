@@ -120,6 +120,28 @@ function getStagesForJob(jobType) {
 }
 
 /**
+ * 阶段 key → funnel 时间戳字段名（与前端 pipeline-engine.js 保持一致）
+ */
+function stageToFunnelKey(stage) {
+  const map = {
+    resume: 'resumeAt',
+    valid_resume: 'validAt',
+    invite: 'inviteAt',
+    invite_confirmed: 'inviteConfirmedAt',
+    first_interview: 'interview1At',
+    first_pass: 'interview1PassAt',
+    second_interview: 'interview2At',
+    second_pass: 'interview2PassAt',
+    final_interview: 'interview3At',
+    final_pass: 'interview3PassAt',
+    offer: 'offerAt',
+    background_check: 'backgroundCheckAt',
+    onboard: 'onboardAt',
+  };
+  return map[stage] || null;
+}
+
+/**
  * 本月起止时间
  */
 function currentMonthRange() {
@@ -239,7 +261,10 @@ async function aggregateJobFunnel(jobId, jobType, ownerId) {
     }
   }
 
-  // 按阶段分组
+  // 按阶段累积计数（使用 funnel 时间戳，支持跳阶段回填）
+  // 🆕 修复：漏斗图应展示"到达过该阶段的候选人总数"，而非"当前正在该阶段的人数"
+  //   — 候选人到达 onboard 时，前面所有阶段（resume/valid_resume/...）都应 +1
+  //   — 跳阶段回填的 funnel 时间戳也会被正确计入
   const stages = getStagesForJob(jobType);
   const stageMap = {};
   for (const s of stages) {
@@ -250,18 +275,30 @@ async function aggregateJobFunnel(jobId, jobType, ownerId) {
   let backfillCount = 0;
 
   for (const app of allApps) {
+    // 统计结束状态
     if (app.status === 'rejected') {
       rejectedCount++;
-      // 仍然记录到对应阶段
-      if (app.stage && stageMap[app.stage]) {
-        stageMap[app.stage].count++;
-      }
     } else if (app.status === 'withdrawn') {
       withdrawnCount++;
-      if (app.stage && stageMap[app.stage]) {
-        stageMap[app.stage].count++;
+    }
+
+    // 累积计数：遍历所有阶段，检查候选人是否已到达该阶段
+    // 判断依据：funnel 中有对应时间戳 OR 当前正在该阶段
+    let hasReachedAny = false;
+    for (const s of stages) {
+      const funnelKey = stageToFunnelKey(s.key);
+      const hasReached = (funnelKey && app.funnel && app.funnel[funnelKey])  // 有漏斗时间戳
+        || (app.stage === s.key);                                            // 当前正在该阶段
+
+      if (hasReached) {
+        stageMap[s.key].count++;
+        hasReachedAny = true;
       }
-    } else if (app.stage && stageMap[app.stage]) {
+    }
+
+    // 极端兜底：如果 funnel 和 stage 都没有匹配到任何阶段，
+    // 至少计入当前 stage（例如新建候选人尚未设置任何 funnel 时间戳）
+    if (!hasReachedAny && app.stage && stageMap[app.stage]) {
       stageMap[app.stage].count++;
     }
   }
@@ -648,9 +685,24 @@ async function aggregateConversionRates(params = {}) {
     if (data.length < 500) hasMore = false; else cursor = data[data.length - 1]._id;
   }
 
+  // 🆕 累积计数：使用 funnel 时间戳，与 aggregateJobFunnel 保持一致
   const stageMap = {};
   for (const app of allApps) {
-    if (app.status === 'active' && app.stage) {
+    if (app.status !== 'active') continue;
+
+    // 遍历所有漏斗阶段，检查候选人是否已到达该阶段
+    for (const s of FUNNEL_STAGES) {
+      const funnelKey = stageToFunnelKey(s.key);
+      const hasReached = (funnelKey && app.funnel && app.funnel[funnelKey])
+        || (app.stage === s.key);
+
+      if (hasReached) {
+        stageMap[s.key] = (stageMap[s.key] || 0) + 1;
+      }
+    }
+
+    // 兜底：至少计入当前 stage
+    if (app.stage && !stageMap[app.stage]) {
       stageMap[app.stage] = (stageMap[app.stage] || 0) + 1;
     }
   }
