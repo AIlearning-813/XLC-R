@@ -190,6 +190,7 @@ function getAvailableStages(row) {
           <td class="col-name">
             <div class="name-cell">
               <span class="name-text">{{ row.name || '未命名' }}</span>
+              <span class="name-email-subject" v-if="row.sourceEmailSubject" :title="row.sourceEmailSubject">{{ row.sourceEmailSubject }}</span>
               <span class="name-phone" v-if="row.phone">{{ row.phone }}</span>
             </div>
           </td>
@@ -431,6 +432,16 @@ tbody td {
   font-size: var(--font-size-xs);
   color: var(--gray-400);
   margin-top: 1px;
+}
+
+.name-email-subject {
+  font-size: var(--font-size-xs);
+  color: var(--gray-400);
+  margin-top: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 180px;
 }
 
 .pos-text {

@@ -16,6 +16,15 @@ const props = defineProps({
 const emit = defineEmits(['click', 'quick-move', 'toggle-select']);
 
 const name = computed(() => props.candidate?.name || '未命名');
+
+// 邮箱来源的邮件标题（作为备注显示在名字下方）
+const emailSubject = computed(() => {
+  const subject = props.candidate?.sourceEmailSubject;
+  if (!subject) return '';
+  // 截断过长标题，保留前 50 字
+  return subject.length > 50 ? subject.slice(0, 50) + '...' : subject;
+});
+
 const position = computed(() => {
   return props.candidate?.expectedPosition
     || props.job?.title
@@ -192,7 +201,10 @@ function handleToggleSelect(event) {
         <polyline points="20 6 9 17 4 12"/>
       </svg>
     </button>
-    <span class="compact-name">{{ name }}</span>
+    <div class="compact-name-wrap">
+      <span class="compact-name">{{ name }}</span>
+      <span v-if="emailSubject" class="compact-email-subject" :title="candidate.sourceEmailSubject">{{ emailSubject }}</span>
+    </div>
     <span v-if="endInfo" class="compact-end-badge" :class="application.status === 'rejected' ? 'end-reject' : 'end-withdraw'">
       {{ endInfo.typeLabel }}于 {{ endInfo.stageLabel }}
     </span>
@@ -213,7 +225,10 @@ function handleToggleSelect(event) {
     @click="handleClick"
   >
     <div class="card-top">
-      <span class="card-name">{{ name }}</span>
+      <div class="card-name-wrap">
+        <span class="card-name">{{ name }}</span>
+        <span v-if="emailSubject" class="card-email-subject" :title="candidate.sourceEmailSubject">{{ emailSubject }}</span>
+      </div>
       <div class="card-top-right">
         <span class="card-source badge" :class="sourceBadgeClass">{{ sourceLabel }}</span>
         <div class="quick-move-wrap" @click.stop>
@@ -293,14 +308,28 @@ function handleToggleSelect(event) {
   box-shadow: var(--shadow);
 }
 
+.compact-name-wrap {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .compact-name {
   font-weight: 500;
   color: var(--gray-700);
-  flex: 1;
-  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.compact-email-subject {
+  font-size: 9px;
+  color: var(--gray-400);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 1px;
 }
 
 .compact-badge {
@@ -414,15 +443,29 @@ function handleToggleSelect(event) {
   margin-bottom: 2px;
 }
 
+.card-name-wrap {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .card-name {
   font-weight: 600;
   font-size: var(--font-size-sm);
   color: var(--gray-700);
-  flex: 1;
-  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.card-email-subject {
+  font-size: 10px;
+  color: var(--gray-400);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 1px;
 }
 
 .card-top-right {
