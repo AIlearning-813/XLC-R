@@ -134,7 +134,14 @@ async function loadCandidate() {
   try {
     const data = await candidateStore.fetchById(candidateId.value);
     if (!data) {
-      error.value = '候选人不存在';
+      error.value = '候选人不存在或无权访问';
+      loading.value = false;
+      return;
+    }
+
+    // 🔒 数据隔离：二次校验（fetchById 已做，此处兜底）
+    if (!auth.isAdmin && data.ownerId && data.ownerId !== auth.currentUsername) {
+      error.value = '无权访问此候选人';
       loading.value = false;
       return;
     }

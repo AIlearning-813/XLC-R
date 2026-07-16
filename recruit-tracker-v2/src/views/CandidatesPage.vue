@@ -160,9 +160,12 @@ async function loadData(filters = {}) {
       for (let i = 0; i < candidateIds.length; i += batchSize) {
         const batch = candidateIds.slice(i, i + batchSize);
         try {
+          // 🔒 数据隔离：附加 ownerId 过滤
+          const candidateConditions = { _id: dbInstance.command.in(batch) };
+          if (of) candidateConditions.ownerId = of.ownerId;
           const { data: candidates } = await dbInstance
             .collection('Candidate')
-            .where({ _id: dbInstance.command.in(batch) })
+            .where(candidateConditions)
             .get();
 
           for (const c of (candidates || [])) {
@@ -268,10 +271,10 @@ async function loadUnassigned(dbInstance, filters = {}) {
       );
     }
 
-    // owner 过滤
+    // 🔒 owner 过滤（修正：使用 ownerId 而非 createdBy）
     const of = ownerFilter();
     if (of) {
-      unassigned = unassigned.filter(c => c.createdBy === of.ownerId);
+      unassigned = unassigned.filter(c => c.ownerId === of.ownerId);
     }
 
     totalCount.value = unassigned.length;

@@ -170,8 +170,13 @@ export async function getDuplicateCandidates() {
   if (!db) return [];
 
   try {
+    // 🔒 数据隔离：附加 ownerId 过滤
+    const conditions = { phone: db.command.neq(null) };
+    const of = ownerFilter();
+    if (of) conditions.ownerId = of.ownerId;
+
     const { data: candidates } = await db.collection('Candidate')
-      .where({ phone: db.command.neq(null) })
+      .where(conditions)
       .field({ phone: true, name: true, _id: true })
       .limit(200)
       .get();

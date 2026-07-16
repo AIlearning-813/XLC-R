@@ -17,7 +17,15 @@ export const useJobStore = defineStore('job', () => {
   const error = ref('');
 
   // ===== 计算属性 =====
-  const activeJobs = computed(() => jobs.value.filter(j => j.status === 'active'));
+  // 🔒 数据隔离：activeJobs 必须同时过滤 status 和 ownerId
+  const activeJobs = computed(() => {
+    const auth = useAuthStore();
+    return jobs.value.filter(j => {
+      if (j.status !== 'active') return false;
+      if (auth.isAdmin) return true;
+      return j.ownerId === auth.currentUsername;
+    });
+  });
   const jobsByDepartment = computed(() => {
     const map = {};
     for (const job of activeJobs.value) {
@@ -74,10 +82,14 @@ export const useJobStore = defineStore('job', () => {
   }
 
   /**
-   * 根据 ID 获取岗位
+   * 根据 ID 获取岗位（🔒 含归属校验：非管理员只能获取自己的岗位）
    */
   function getById(id) {
-    return jobs.value.find(j => j._id === id) || null;
+    const job = jobs.value.find(j => j._id === id) || null;
+    if (!job) return null;
+    const auth = useAuthStore();
+    if (!auth.isAdmin && job.ownerId !== auth.currentUsername) return null;
+    return job;
   }
 
   /**
@@ -165,6 +177,11 @@ export const useJobStore = defineStore('job', () => {
 
     const auth = useAuthStore();
 
+    // 🔒 数据隔离：非管理员只能更新自己的岗位
+    if (!auth.isAdmin && current.ownerId !== auth.currentUsername) {
+      throw new Error('无权修改此岗位');
+    }
+
     // Recruiter：走审批流程
     if (!auth.isAdmin) {
       const pendingStore = usePendingChangeStore();
@@ -217,6 +234,11 @@ export const useJobStore = defineStore('job', () => {
     if (!current) throw new Error('岗位不存在');
 
     const auth = useAuthStore();
+
+    // 🔒 数据隔离：非管理员只能更新自己的岗位
+    if (!auth.isAdmin && current.ownerId !== auth.currentUsername) {
+      throw new Error('无权修改此岗位');
+    }
 
     // Recruiter：走审批流程
     if (!auth.isAdmin) {

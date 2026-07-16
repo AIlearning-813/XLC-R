@@ -180,9 +180,12 @@ async function loadUnassigned() {
       for (let i = 0; i < candidateIds.length; i += batchSize) {
         const batch = candidateIds.slice(i, i + batchSize);
         try {
+          // 🔒 数据隔离：附加 ownerId 过滤
+          const candidateConditions = { _id: dbInstance.command.in(batch) };
+          if (of) candidateConditions.ownerId = of.ownerId;
           const { data: candidates } = await dbInstance
             .collection('Candidate')
-            .where({ _id: dbInstance.command.in(batch) })
+            .where(candidateConditions)
             .get();
 
           for (const c of (candidates || [])) {
@@ -262,11 +265,12 @@ async function loadApplications() {
       for (let i = 0; i < candidateIds.length; i += batchSize) {
         const batch = candidateIds.slice(i, i + batchSize);
         try {
+          // 🔒 数据隔离：附加 ownerId 过滤
+          const candidateConditions = { _id: dbInstance.command.in(batch) };
+          if (of) candidateConditions.ownerId = of.ownerId;
           const { data: candidates } = await dbInstance
             .collection('Candidate')
-            .where({
-              _id: dbInstance.command.in(batch),
-            })
+            .where(candidateConditions)
             .get();
 
           for (const c of (candidates || [])) {

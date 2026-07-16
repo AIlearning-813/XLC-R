@@ -23,7 +23,7 @@ export const useCandidateStore = defineStore('candidate', () => {
   // ===== 操作 =====
 
   /**
-   * 根据 ID 获取候选人详情
+   * 根据 ID 获取候选人详情（🔒 含归属校验）
    */
   async function fetchById(id) {
     const db = cloudbase.db();
@@ -36,10 +36,31 @@ export const useCandidateStore = defineStore('candidate', () => {
     error.value = '';
 
     try {
-      const result = await db.collection('Candidate').doc(id).get();
-      const data = result.data?.[0] || null;
+      // 🔒 数据隔离：附加 ownerId 过滤
+      const auth = useAuthStore();
+      const conditions = {};
+      if (!auth.isAdmin) {
+        conditions.ownerId = auth.currentUsername;
+      }
+
+      let data;
+      if (Object.keys(conditions).length > 0) {
+        const result = await db.collection('Candidate')
+          .where({ _id: id, ...conditions })
+          .get();
+        data = result.data?.[0] || null;
+      } else {
+        const result = await db.collection('Candidate').doc(id).get();
+        data = result.data?.[0] || null;
+      }
 
       if (data) {
+        // 🔒 二次校验：非管理员不能访问别人的候选人
+        if (!auth.isAdmin && data.ownerId && data.ownerId !== auth.currentUsername) {
+          console.warn('[useCandidateStore] 权限拒绝：尝试访问非本人候选人');
+          error.value = '无权访问此候选人';
+          return null;
+        }
         currentCandidate.value = data;
         // 更新缓存
         const idx = candidates.value.findIndex(c => c._id === id);
@@ -97,7 +118,7 @@ export const useCandidateStore = defineStore('candidate', () => {
   }
 
   /**
-   * 更新候选人
+   * 更新候选人（🔒 含归属校验）
    */
   async function update(id, data) {
     const db = cloudbase.db();
@@ -112,6 +133,13 @@ export const useCandidateStore = defineStore('candidate', () => {
     }
 
     const doc = candidates.value.find(c => c._id === id) || currentCandidate.value;
+
+    // 🔒 数据隔离：非管理员只能更新自己的候选人
+    const auth = useAuthStore();
+    if (!auth.isAdmin && doc?.ownerId && doc.ownerId !== auth.currentUsername) {
+      throw new Error('无权修改此候选人');
+    }
+
     const expectedVersion = typeof doc?._version === 'number' ? doc._version : 0;
 
     // P1-9：将顶层字段变更同步回 parsedData，防止双源数据不一致
@@ -271,6 +299,12 @@ export const useCandidateStore = defineStore('candidate', () => {
     }
 
     const auth = useAuthStore();
+
+    // 🔒 数据隔离：非管理员只能删除自己的候选人
+    if (!auth.isAdmin && current?.ownerId && current.ownerId !== auth.currentUsername) {
+      throw new Error('无权删除此候选人');
+    }
+
     const isAdmin = skipApproval || auth.isAdmin;
 
     // Recruiter：走审批流程
@@ -381,6 +415,12 @@ export const useCandidateStore = defineStore('candidate', () => {
     } catch { /* fallback */ }
     if (!candidate) throw new Error('候选人不存在');
 
+    // 🔒 数据隔离：非管理员只能恢复自己的候选人
+    const auth = useAuthStore();
+    if (!auth.isAdmin && candidate.ownerId && candidate.ownerId !== auth.currentUsername) {
+      throw new Error('无权恢复此候选人');
+    }
+
     const previousStatus = candidate.previousStatus || 'active';
 
     // 恢复 Candidate
@@ -425,6 +465,19 @@ export const useCandidateStore = defineStore('candidate', () => {
   async function permanentDelete(id) {
     const db = cloudbase.db();
     if (!db) throw new Error('数据库未初始化');
+
+    // 🔒 数据隔离：先获取文档验证归属
+    let candidate;
+    try {
+      const { data } = await db.collection('Candidate').doc(id).get();
+      candidate = data?.[0] || null;
+    } catch { /* fallback */ }
+    if (!candidate) throw new Error('候选人不存在');
+
+    const auth = useAuthStore();
+    if (!auth.isAdmin && candidate.ownerId && candidate.ownerId !== auth.currentUsername) {
+      throw new Error('无权永久删除此候选人');
+    }
 
     // 删除 Candidate
     await db.collection('Candidate').doc(id).remove();

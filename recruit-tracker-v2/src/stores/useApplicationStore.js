@@ -106,15 +106,25 @@ export const useApplicationStore = defineStore('application', () => {
   }
 
   /**
-   * 根据 ID 获取单个申请详情
+   * 根据 ID 获取单个申请详情（🔒 含归属校验）
    */
   async function fetchById(id) {
     const db = cloudbase.db();
     if (!db) return null;
 
     try {
-      const result = await db.collection('Application').doc(id).get();
-      const data = result.data?.[0] || null;
+      // 🔒 数据隔离：附加 ownerId 过滤
+      const auth = useAuthStore();
+      let data;
+      if (!auth.isAdmin) {
+        const result = await db.collection('Application')
+          .where({ _id: id, ownerId: auth.currentUsername })
+          .get();
+        data = result.data?.[0] || null;
+      } else {
+        const result = await db.collection('Application').doc(id).get();
+        data = result.data?.[0] || null;
+      }
       if (data) currentApplication.value = data;
       return data;
     } catch (err) {
@@ -176,6 +186,12 @@ export const useApplicationStore = defineStore('application', () => {
     // 获取当前状态（确保有最新版本号）
     const current = await fetchById(id);
     if (!current) throw new Error('申请记录不存在');
+
+    // 🔒 数据隔离：非管理员只能操作自己的申请
+    const auth = useAuthStore();
+    if (!auth.isAdmin && current.ownerId && current.ownerId !== auth.currentUsername) {
+      throw new Error('无权操作此申请');
+    }
 
     const oldStage = current.stage;
     const currentStatus = current.status || 'active';
@@ -292,6 +308,12 @@ export const useApplicationStore = defineStore('application', () => {
     const current = applications.value.find(a => a._id === id)
       || await fetchById(id);
     if (!current) throw new Error('申请记录不存在');
+
+    // 🔒 数据隔离：非管理员只能操作自己的申请
+    const auth = useAuthStore();
+    if (!auth.isAdmin && current.ownerId && current.ownerId !== auth.currentUsername) {
+      throw new Error('无权操作此申请');
+    }
 
     const expectedVersion = typeof current._version === 'number' ? current._version : 0;
 
