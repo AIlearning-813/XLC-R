@@ -155,12 +155,11 @@ async function loadUnassigned() {
   loadingUnassigned.value = true;
   try {
     const dbInstance = db();
-    const of = ownerFilter();
+    // 待分配池不限制 ownerId——所有未分配候选人应对团队全员可见
     const unassignedFilter = {
       jobId: '',
       status: 'active',
       isArchived: dbInstance.command.neq(true),
-      ...(of || {}),
     };
     const { data: apps } = await dbInstance
       .collection('Application')

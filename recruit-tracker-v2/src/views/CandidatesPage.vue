@@ -248,7 +248,7 @@ async function loadData(filters = {}) {
 
 async function loadUnassigned(dbInstance, filters = {}) {
   try {
-    const of = ownerFilter();
+    // 待分配池不限制 ownerId——所有未分配候选人应对团队全员可见，方便分配
 
     // 1. 获取已分配到实际岗位的 candidateId（jobId 不为空才算真正分配）
     const { data: assignedApps } = await dbInstance.collection('Application')
@@ -281,13 +281,11 @@ async function loadUnassigned(dbInstance, filters = {}) {
       }
     }
 
-    // 3. 查询 Candidate 集合
-    let candidateQuery = dbInstance.collection('Candidate').orderBy('createdAt', 'desc').limit(200);
-    if (of) {
-      candidateQuery = candidateQuery.where({ ownerId: of.ownerId });
-    }
-
-    const { data: candidates } = await candidateQuery.get();
+    // 3. 查询 Candidate 集合（不加 ownerFilter——待分配池全团队共享）
+    const { data: candidates } = await dbInstance.collection('Candidate')
+      .orderBy('createdAt', 'desc')
+      .limit(200)
+      .get();
 
     // 4. 筛选未分配：不在 assignedIds 中的（包括无 Application 和 Application.jobId 为空的）
     let unassigned = (candidates || []).filter(c => !assignedIds.has(c._id));

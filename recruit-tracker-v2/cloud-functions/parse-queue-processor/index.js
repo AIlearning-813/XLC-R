@@ -567,6 +567,7 @@ async function processOneEntry(db, entry, summary) {
       fileId: entry.fileId || '',
       fileName: entry.fileName || '',
       createdBy: entry.userId || 'system',
+      ownerId: entry.userId || 'system',
       _version: 0,
       createdAt: new Date(),
       updatedAt: new Date(),
