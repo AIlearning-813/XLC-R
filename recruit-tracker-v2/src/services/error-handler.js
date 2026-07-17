@@ -10,7 +10,7 @@
  *   }
  */
 
-import { safeErrorMsg } from './error-messages';
+import { safeErrorMsg, toChineseError } from './error-messages';
 
 /**
  * 统一错误处理：日志 + Toast 通知
@@ -23,23 +23,22 @@ import { safeErrorMsg } from './error-messages';
  * @param {boolean} options.silent - 是否只记日志不弹通知
  */
 export function handleError(err, options = {}) {
-  const { context = '操作', toast = null, onConflict = null, silent = false } = options;
-  const message = safeErrorMsg(err);
+  const { context = '操作', toast, silent = false, onConflict } = options;
+  const msg = toChineseError(err);
 
-  // 总是输出调试日志
-  console.error(`[${context}] 失败:`, err);
-
-  // 用户提示（除非静默模式）
-  if (toast && !silent) {
-    toast.error(`${context}失败：${message}`);
-  }
+  console.error(`[${context}] 失败：${msg}`);
 
   // 版本冲突特殊处理
   if (onConflict && err?.name === 'VersionConflictError') {
     onConflict(err);
   }
 
-  return message;
+  // 用户提示（除非静默模式）
+  if (!silent && toast && typeof toast.error === 'function') {
+    toast.error(`${context}失败：${msg}`);
+  }
+
+  return msg;
 }
 
 /**
@@ -50,7 +49,7 @@ export function handleError(err, options = {}) {
  * @returns {Function} 包装后的函数
  */
 export function withErrorHandler(fn, options = {}) {
-  return async (...args) => {
+  return async function (...args) {
     try {
       return await fn(...args);
     } catch (err) {
