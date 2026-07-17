@@ -145,6 +145,11 @@ async function loadData(filters = {}) {
     // isArchived 在 JS 端过滤（避免与 status 条件一起放 CloudBase where 时被忽略）
     appList = appList.filter(a => a.isArchived !== true);
 
+    // 🆕 活跃 Tab：排除未分配岗位的候选人（jobId 为空），它们应出现在"待分配"Tab
+    if (activeTab.value === 'active') {
+      appList = appList.filter(a => a.jobId && a.jobId !== '');
+    }
+
     if (filters.dateTo) {
       const toDate = new Date(filters.dateTo);
       toDate.setHours(23, 59, 59, 999);
@@ -243,23 +248,48 @@ async function loadData(filters = {}) {
 
 async function loadUnassigned(dbInstance, filters = {}) {
   try {
-    // 1. 获取所有已创建 Application 的 candidateId
-    const { data: allApps } = await dbInstance.collection('Application')
+    const of = ownerFilter();
+
+    // 1. 获取已分配到实际岗位的 candidateId（jobId 不为空才算真正分配）
+    const { data: assignedApps } = await dbInstance.collection('Application')
       .field({ candidateId: true })
-      .where({ isArchived: dbInstance.command.neq(true) })
+      .where({
+        isArchived: dbInstance.command.neq(true),
+        jobId: dbInstance.command.neq(''),
+      })
       .limit(500)
       .get();
 
-    const assignedIds = new Set((allApps || []).map(a => a.candidateId).filter(Boolean));
+    const assignedIds = new Set((assignedApps || []).map(a => a.candidateId).filter(Boolean));
 
-    // 2. 查询 Candidate 集合（🔒 先按 ownerId 过滤，再 limit）
-    const of = ownerFilter();
+    // 2. 获取有 Application 但 jobId 为空的候选人（邮箱导入自动匹配失败等场景）
+    //    这些候选人"半分配"——有 Application 记录但没挂到具体岗位
+    const { data: joblessApps } = await dbInstance.collection('Application')
+      .where({
+        jobId: '',
+        status: 'active',
+        isArchived: dbInstance.command.neq(true),
+      })
+      .limit(100)
+      .get();
+
+    // 构建 candidateId → Application 映射（一个候选人只保留一条）
+    const joblessAppMap = {};
+    for (const app of (joblessApps || [])) {
+      if (!joblessAppMap[app.candidateId]) {
+        joblessAppMap[app.candidateId] = app;
+      }
+    }
+
+    // 3. 查询 Candidate 集合
     let candidateQuery = dbInstance.collection('Candidate').orderBy('createdAt', 'desc').limit(200);
     if (of) {
       candidateQuery = candidateQuery.where({ ownerId: of.ownerId });
     }
 
     const { data: candidates } = await candidateQuery.get();
+
+    // 4. 筛选未分配：不在 assignedIds 中的（包括无 Application 和 Application.jobId 为空的）
     let unassigned = (candidates || []).filter(c => !assignedIds.has(c._id));
 
     // 搜索过滤
@@ -272,34 +302,38 @@ async function loadUnassigned(dbInstance, filters = {}) {
       );
     }
 
-    // 🔒 owner 过滤已在 DB 查询层完成，无需 JS 二次过滤
+    // 5. 转换为行数据（保留 joblessApp 信息以便后续关联需求时复用 Application）
     totalCount.value = unassigned.length;
     const start = (page.value - 1) * pageSize;
-    rows.value = unassigned.slice(start, start + pageSize).map(c => ({
-      _id: c._id,
-      candidateId: c._id,
-      name: c.name,
-      phone: c.phone,
-      email: c.email,
-      sourceEmailSubject: c.sourceEmailSubject || '',
-      expectedPosition: c.expectedPosition || '',
-      jobTitle: '',
-      jobName: '',
-      jobId: '',
-      stage: '',
-      source: c.source || 'email',
-      status: 'unassigned',
-      ownerId: c.ownerId,
-      createdBy: c.createdBy,
-      createdAt: c.createdAt,
-      updatedAt: c.updatedAt,
-      _candidate: c,
-      _application: null,
-      _job: null,
-    }));
+    rows.value = unassigned.slice(start, start + pageSize).map(c => {
+      const joblessApp = joblessAppMap[c._id] || null;
+      return {
+        _id: joblessApp?._id || c._id,
+        candidateId: c._id,
+        appId: joblessApp?._id || '',
+        name: c.name,
+        phone: c.phone,
+        email: c.email,
+        sourceEmailSubject: c.sourceEmailSubject || '',
+        expectedPosition: c.expectedPosition || '',
+        jobTitle: '',
+        jobName: '',
+        jobId: '',
+        stage: joblessApp?.stage || '',
+        source: joblessApp?.funnelMeta?.entrySource || c.source || 'email',
+        status: 'unassigned',
+        ownerId: c.ownerId,
+        createdBy: c.createdBy,
+        createdAt: joblessApp?.createdAt || c.createdAt,
+        updatedAt: c.updatedAt,
+        _candidate: c,
+        _application: joblessApp,  // 保留已有 Application，供 AssignDemandDialog 复用
+        _job: null,
+      };
+    });
   } catch (err) {
-    console.error('[CandidatesPage] 加载未分配失败:', err.message);
-    error.value = '加载未分配候选人失败：' + err.message;
+    handleError(err, { context: '加载待分配候选人' });
+    error.value = '加载待分配候选人失败：' + err.message;
   } finally {
     loading.value = false;
   }

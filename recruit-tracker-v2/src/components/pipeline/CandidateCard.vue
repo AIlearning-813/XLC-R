@@ -61,6 +61,11 @@ const sourceBadgeClass = computed(() => {
   return 'badge-info';
 });
 
+// 是否未分配岗位（jobId 为空或没有关联的 job）
+const isUnassigned = computed(() => {
+  return !props.application?.jobId || !props.job;
+});
+
 // 停留天数
 const stayDays = computed(() => {
   const entered = props.application?.stageEnteredAt;
@@ -205,6 +210,7 @@ function handleToggleSelect(event) {
       <span class="compact-name">{{ name }}</span>
       <span v-if="emailSubject" class="compact-email-subject" :title="candidate.sourceEmailSubject">{{ emailSubject }}</span>
     </div>
+    <span v-if="isUnassigned && !endInfo" class="compact-unassigned-badge">未分配</span>
     <span v-if="endInfo" class="compact-end-badge" :class="application.status === 'rejected' ? 'end-reject' : 'end-withdraw'">
       {{ endInfo.typeLabel }}于 {{ endInfo.stageLabel }}
     </span>
@@ -269,7 +275,10 @@ function handleToggleSelect(event) {
         </div>
       </div>
     </div>
-    <div class="card-position">{{ position }}</div>
+    <div class="card-position">
+      {{ position }}
+      <span v-if="isUnassigned" class="card-unassigned-badge">未分配岗位</span>
+    </div>
     <div class="card-meta">
       <span class="card-stay" :class="{ 'stay-warn': isStale }">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -367,6 +376,18 @@ function handleToggleSelect(event) {
   background: var(--gray-50);
   color: #9B8B7C;
   border: 1px solid var(--gray-200);
+}
+
+.compact-unassigned-badge {
+  font-size: 9px;
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+  white-space: nowrap;
+  background: var(--warning-bg);
+  color: var(--warning);
+  border: 1px solid #FDE68A;
+  font-weight: 500;
 }
 
 .candidate-card-compact.is-ended {
@@ -600,6 +621,21 @@ function handleToggleSelect(event) {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.card-unassigned-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+  white-space: nowrap;
+  background: var(--warning-bg);
+  color: var(--warning);
+  border: 1px solid #FDE68A;
+  font-weight: 500;
 }
 
 .card-meta {

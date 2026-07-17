@@ -676,12 +676,14 @@ onMounted(() => {
 
 /* === 未分配候选人提示 === */
 .unassigned-banner {
-  background: var(--warning-bg);
-  border: 1px solid var(--warning);
+  background: #FFFDF5;
+  border: 1px solid #FCD34D;
+  border-left: 4px solid #F59E0B;
   border-radius: var(--radius);
-  padding: var(--spacing-sm) var(--spacing-md);
+  padding: var(--spacing-md);
   margin-bottom: var(--spacing-md);
   flex-shrink: 0;
+  box-shadow: 0 1px 3px rgba(245, 158, 11, 0.1);
 }
 
 .unassigned-header {
@@ -693,7 +695,12 @@ onMounted(() => {
   align-items: center;
   gap: var(--spacing-xs);
   font-size: var(--font-size-sm);
-  color: var(--gray-700);
+  color: #92400E;
+}
+
+.unassigned-title svg {
+  color: #F59E0B;
+  flex-shrink: 0;
 }
 
 .unassigned-hint {
