@@ -358,15 +358,15 @@ function handleToggleSelect(event) {
 }
 
 .compact-end-badge.end-reject {
-  background: #FEF2F2;
-  color: #DC4C4C;
+  background: var(--danger-bg);
+  color: var(--danger);
   border: 1px solid #FECACA;
 }
 
 .compact-end-badge.end-withdraw {
-  background: #FAFAF8;
+  background: var(--gray-50);
   color: #9B8B7C;
-  border: 1px solid #E8E4E0;
+  border: 1px solid var(--gray-200);
 }
 
 .candidate-card-compact.is-ended {

@@ -18,6 +18,7 @@ import { captureError } from './error-capture';
  * @param {string[]} entityIds - 实体 ID 列表
  * @param {Object} detail - 操作详情
  * @param {string} [operatorId='system'] - 操作者
+ * @returns {Promise<void>} 不阻塞主流程，失败静默捕获
  */
 export async function writeAuditLog(storeName, action, entityType, entityIds, detail = {}, operatorId = 'system') {
   try {

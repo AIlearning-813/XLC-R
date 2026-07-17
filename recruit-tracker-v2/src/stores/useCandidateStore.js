@@ -287,6 +287,10 @@ export const useCandidateStore = defineStore('candidate', () => {
    * 软删除候选人
    * Admin（skipApproval=true）：直接标记 status:'deleted'
    * Recruiter（skipApproval=false/未传）：提交 PendingChanges 审批
+   * @param {string} id - Candidate ID
+   * @param {Object} [options] - 可选参数
+   * @param {boolean} [options.skipApproval=false] - 是否跳过审批（Admin 直接删除）
+   * @returns {Promise<{ pending: boolean, changeId: string }|void>} Recruiter 模式下返回审批信息，Admin 模式下无返回值
    */
   async function softDelete(id, { skipApproval = false } = {}) {
     const db = cloudbase.db();
@@ -365,6 +369,7 @@ export const useCandidateStore = defineStore('candidate', () => {
 
   /**
    * 查询已删除候选人（回收站）
+   * @returns {Promise<Array>} 已删除的候选人列表（status === 'deleted'）
    */
   async function fetchDeleted() {
     const db = cloudbase.db();
@@ -395,6 +400,8 @@ export const useCandidateStore = defineStore('candidate', () => {
    * 恢复已删除候选人
    * - Candidate status → previousStatus（删除前的状态）
    * - 关联 Application status: 'withdrawn' → 'active'
+   * @param {string} id - Candidate ID
+   * @returns {Promise<void>}
    */
   async function restore(id) {
     const db = cloudbase.db();
@@ -442,6 +449,8 @@ export const useCandidateStore = defineStore('candidate', () => {
    * 永久删除候选人（硬删除）
    * - 删除 Candidate 文档
    * - 删除关联 Application 文档
+   * @param {string} id - Candidate ID
+   * @returns {Promise<void>}
    */
   async function permanentDelete(id) {
     const db = cloudbase.db();

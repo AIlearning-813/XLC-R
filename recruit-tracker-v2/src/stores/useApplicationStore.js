@@ -89,6 +89,8 @@ export const useApplicationStore = defineStore('application', () => {
 
   /**
    * 根据岗位 ID 获取所有申请
+   * @param {string} jobId - 岗位 ID
+   * @returns {Promise<Array>} 该岗位下所有申请记录
    */
   async function fetchByJob(jobId) {
     const db = cloudbase.db();
@@ -189,6 +191,8 @@ export const useApplicationStore = defineStore('application', () => {
 
   /**
    * 新增申请记录
+   * @param {Object} applicationData - 申请数据（含 candidateId、jobId、stage、status 等）
+   * @returns {Promise<{ id: string, doc: Object }>} 创建成功的申请 ID 和完整文档
    */
   async function add(applicationData) {
     const db = cloudbase.db();
@@ -337,6 +341,12 @@ export const useApplicationStore = defineStore('application', () => {
 
   /**
    * 结束申请流程（淘汰或放弃）
+   * @param {string} id - Application ID
+   * @param {string} status - 结束状态（'rejected' | 'withdrawn'）
+   * @param {string} reason - 淘汰/放弃原因
+   * @param {Object} [options] - 可选参数
+   * @param {string} [options.endStage] - 淘汰阶段（默认使用当前阶段）
+   * @param {string} [options.operatorId] - 操作者 ID
    */
   async function endApplication(id, status, reason, options = {}) {
     const db = cloudbase.db();

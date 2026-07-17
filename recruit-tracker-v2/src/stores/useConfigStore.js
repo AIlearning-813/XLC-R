@@ -114,6 +114,10 @@ export const useConfigStore = defineStore('config', () => {
     } catch { /* 忽略 */ }
   }
 
+  /**
+   * 从 CloudBase 加载系统配置，优先使用 localStorage 缓存
+   * @returns {Promise<void>}
+   */
   async function loadConfig() {
     if (loaded.value) return;
 
@@ -223,6 +227,11 @@ export const useConfigStore = defineStore('config', () => {
     return false;
   }
 
+  /**
+   * 向部门树中添加子节点
+   * @param {string|null} parentId - 父节点 ID（null 表示添加到根层级）
+   * @param {string} name - 新部门名称
+   */
   function addDepartmentNode(parentId, name) {
     const node = { id: 'dept_' + Date.now(), name, level: 1, children: [] };
     if (!parentId) {
@@ -239,11 +248,20 @@ export const useConfigStore = defineStore('config', () => {
     saveToCloudBase();
   }
 
+  /**
+   * 更新部门树中节点的名称
+   * @param {string} id - 节点 ID
+   * @param {string} newName - 新部门名称
+   */
   function updateDepartmentNode(id, newName) {
     const node = findNode(id);
     if (node) { node.name = newName; departments.value = flattenTree(departmentTree.value); saveToCloudBase(); }
   }
 
+  /**
+   * 从部门树中移除节点
+   * @param {string} id - 节点 ID
+   */
   function removeDepartmentNode(id) {
     if (removeFromTree(id, departmentTree.value)) {
       departments.value = flattenTree(departmentTree.value);
@@ -251,7 +269,11 @@ export const useConfigStore = defineStore('config', () => {
     }
   }
 
-  /** 获取节点的完整层级路径 */
+  /**
+   * 获取节点的完整层级路径
+   * @param {string} id - 节点 ID
+   * @returns {Array<{ level: number, name: string }>|null} 从根到目标节点的路径数组，未找到返回 null
+   */
   function getNodePath(id) {
     function walk(nodes, path) {
       for (const n of nodes) {
@@ -323,6 +345,10 @@ export const useConfigStore = defineStore('config', () => {
   }
 
   // ===== 持久化 =====
+  /**
+   * 将配置持久化到 CloudBase（upsert）并同步更新本地缓存
+   * @returns {Promise<void>}
+   */
   async function saveToCloudBase() {
     const db = cloudbase.db();
     if (!db) return;
