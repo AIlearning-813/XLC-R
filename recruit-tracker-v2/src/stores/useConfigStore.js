@@ -83,7 +83,11 @@ export const useConfigStore = defineStore('config', () => {
       const raw = localStorage.getItem(LS_KEY);
       if (!raw) return false;
       const cached = JSON.parse(raw);
-      if (!cached || !cached.departmentTree) return false;
+      if (!cached) return false;
+      // 检查是否有任何有效数据（不强制要求 departmentTree，避免 jobTypes 等数据被连带丢弃）
+      const hasAnyData = cached.departmentTree?.length || cached.departments?.length
+        || Object.keys(cached.jobTypes || {}).length || cached.cities?.length;
+      if (!hasAnyData) return false;
       // 缓存有效期 24 小时（过期后强制从云端刷新）
       if (cached._ts && Date.now() - cached._ts > 86400000) return false;
       // 立即应用缓存数据

@@ -5,7 +5,7 @@
  * 管理岗位类型（key、名称、面试轮次、职责、资格要求），
  * 新建招聘需求时自动关联。
  */
-import { ref } from 'vue';
+import { ref, onMounted } from 'vue';
 import { useConfigStore } from '../../stores/useConfigStore';
 import { useAuthStore } from '../../stores/useAuthStore';
 import { usePendingChangeStore } from '../../stores/usePendingChangeStore';
@@ -13,6 +13,9 @@ import { usePendingChangeStore } from '../../stores/usePendingChangeStore';
 const config = useConfigStore();
 const auth = useAuthStore();
 const pendingStore = usePendingChangeStore();
+
+// 挂载时加载配置（确保 CloudBase 数据同步到本地）
+onMounted(() => { config.loadConfig(); });
 
 // ===== Toast =====
 const submitMsg = ref('');
