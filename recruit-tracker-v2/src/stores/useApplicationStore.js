@@ -9,6 +9,7 @@ import { useAuthStore } from './useAuthStore';
 import { ownerFilter } from '../services/data-filter';
 import { versionedUpdate, initialVersion, isVersionConflict, conflictMessage } from '../services/optimistic-lock';
 import { canTransition, buildTransitionPayload, stageToFunnelKey } from '../services/pipeline-engine';
+import { writeAuditLog } from '../services/audit-log';
 
 export const useApplicationStore = defineStore('application', () => {
   // ===== 状态 =====
@@ -305,24 +306,7 @@ export const useApplicationStore = defineStore('application', () => {
     // 带版本锁更新
     const newVersion = await versionedUpdate('Application', id, expectedVersion, payload);
 
-    // 写入审计日志（异步，不阻塞主流程）
-    try {
-      await cloudbase.callFunction('write-audit-log', {
-        action: validation.isReactivation ? 'reactivate_candidate' : 'move_stage',
-        entityType: 'Application',
-        entityIds: [id],
-        detail: {
-          fromStage: oldStage,
-          toStage: newStage,
-          note,
-          isReactivation: validation.isReactivation || false,
-        },
-        operator: operatorId || 'system',
-      });
-    } catch (err) {
-      console.warn('[useApplicationStore] 审计日志写入失败:', err.message);
-      captureError('application_store', '审计日志写入失败', { message: err.message, context: 'move_stage' });
-    }
+    writeAuditLog('application_store', 'move_stage', 'Application', [id], { fromStage: oldStage, toStage: newStage, note }, operatorId || 'system');
 
     // 更新本地缓存（注意：payload 中的 funnel/history 已是 command 对象，需用纯数据覆盖）
     const idx = applications.value.findIndex(a => a._id === id);
@@ -384,22 +368,8 @@ export const useApplicationStore = defineStore('application', () => {
     // 带版本锁更新
     const newVersion = await versionedUpdate('Application', id, expectedVersion, updateData);
 
-    // 写入审计日志（异步，不阻塞主流程）
-    try {
-      await cloudbase.callFunction('write-audit-log', {
-        action: status === 'rejected' ? 'reject_candidate' : 'withdraw_candidate',
-        entityType: 'Application',
-        entityIds: [id],
-        detail: {
-          endStage,
-          reason,
-        },
-        operator: options.operatorId || 'system',
-      });
-    } catch (err) {
-      console.warn('[useApplicationStore] 审计日志写入失败:', err.message);
-      captureError('application_store', '审计日志写入失败', { message: err.message, context: 'end_application' });
-    }
+    const action = status === 'rejected' ? 'reject_candidate' : 'withdraw_candidate';
+    writeAuditLog('application_store', action, 'Application', [id], { fromStage: current.stage, toStage: status, reason }, options.operatorId || 'system');
 
     // 更新本地缓存
     const idx = applications.value.findIndex(a => a._id === id);

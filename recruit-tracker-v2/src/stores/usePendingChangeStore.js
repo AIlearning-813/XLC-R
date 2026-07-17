@@ -10,6 +10,8 @@ import cloudbase from '../services/cloudbase';
 import { useAuthStore } from './useAuthStore';
 import { captureError } from '../services/error-capture';
 import { handleError } from '../services/error-handler';
+import { writeAuditLog } from '../services/audit-log';
+import { createJobFromDemand } from '../services/demand-job-bridge';
 
 export const usePendingChangeStore = defineStore('pendingChange', () => {
   // ===== 状态 =====
@@ -68,24 +70,7 @@ export const usePendingChangeStore = defineStore('pendingChange', () => {
     const newChange = { ...doc, _id: result.id };
     pendingChanges.value.unshift(newChange);
 
-    // 异步写审计日志
-    try {
-      await cloudbase.callFunction('write-audit-log', {
-        action: 'change_submitted',
-        entityType: 'PendingChanges',
-        entityIds: [result.id],
-        detail: {
-          type: params.type,
-          action: params.action,
-          entityType: params.entityType,
-          entityId: params.entityId,
-        },
-        operator: auth.currentUsername || 'system',
-      });
-    } catch (e) {
-      console.warn('[usePendingChangeStore] 审计日志写入失败:', e.message);
-      captureError('pending_change', '审计日志写入失败', { message: e.message, context: 'addChange' });
-    }
+    writeAuditLog('pending_change', 'change_submitted', 'PendingChanges', [result.id], { type: params.type, action: params.action, entityType: params.entityType, entityId: params.entityId }, auth.currentUsername);
 
     return { id: result.id, doc: newChange };
   }
@@ -183,25 +168,8 @@ export const usePendingChangeStore = defineStore('pendingChange', () => {
       };
     }
 
-    // 异步审计日志
-    try {
-      await cloudbase.callFunction('write-audit-log', {
-        action: decision === 'approved' ? 'change_approved' : 'change_rejected',
-        entityType: 'PendingChanges',
-        entityIds: [id],
-        detail: {
-          type: change.type,
-          action: change.action,
-          entityType: change.entityType,
-          entityId: change.entityId,
-          comment,
-        },
-        operator: auth.currentUsername || 'system',
-      });
-    } catch (e) {
-      console.warn('[usePendingChangeStore] 审计日志写入失败:', e.message);
-      captureError('pending_change', '审批审计日志写入失败', { message: e.message, context: 'approveChange' });
-    }
+    const auditAction = decision === 'approved' ? 'change_approved' : 'change_rejected';
+    writeAuditLog('pending_change', auditAction, 'PendingChanges', [id], { type: change.type, action: change.action, entityType: change.entityType, entityId: change.entityId, comment }, auth.currentUsername);
 
     return { success: true };
   }
@@ -265,39 +233,20 @@ export const usePendingChangeStore = defineStore('pendingChange', () => {
 
         case 'recruitmentDemand': {
           if (change.action === 'create' && change.after) {
-            // 🔧 修复：先创建 Job，成功后再创建 Demand（避免 Job 失败导致孤儿需求 linkedJobId=null）
-            const { useConfigStore } = await import('./useConfigStore');
-            const configStore = useConfigStore();
-            await configStore.loadConfig();
-            const jobTypeConfig = configStore.jobTypes[change.after.jobType] || {};
-
-            // 拼接部门 displayName（兜底：如果 department 对象没有 displayName，从 level1-4 拼接）
-            const dept = change.after.department || {};
-            const deptName = dept.displayName
-              || [dept.level1, dept.level2, dept.level3, dept.level4].filter(Boolean).join(' / ')
-              || '';
-
-            // 先创建 Job（如果失败直接抛出，不创建需求，审批状态保持 pending 可重试）
-            const { useJobStore } = await import('./useJobStore');
-            const jobResult = await useJobStore().add({
+            const linkedJobId = await createJobFromDemand({
               title: change.after.title,
-              type: change.after.jobType || 'CC',
-              department: deptName,
-              headcount: change.after.headcount || 1,
-              requirements: jobTypeConfig.requirements || change.after.jobRequirements || '',
-              responsibilities: jobTypeConfig.responsibilities || '',
+              jobType: change.after.jobType,
+              department: change.after.department,
+              headcount: change.after.headcount,
+              jobRequirements: change.after.jobRequirements,
               ownerId: change.after.ownerId,
-              createdBy: change.after.ownerId,
-              status: 'active',
             });
-
-            const jobId = jobResult._id || jobResult.id;
 
             // Job 创建成功后再创建 Demand，直接带 linkedJobId
             const doc = {
               ...change.after,
               status: 'recruiting',
-              linkedJobId: jobId,
+              linkedJobId,
               updatedAt: new Date(),
             };
             if (change.entityId) {

@@ -13,6 +13,7 @@ import cloudbase from '../services/cloudbase';
 import { handleError } from '../services/error-handler';
 import { useAuthStore } from './useAuthStore';
 import { captureError } from '../services/error-capture';
+import { writeAuditLog } from '../services/audit-log';
 
 // 知识库 9 种分类
 export const KNOWLEDGE_CATEGORIES = [
@@ -136,16 +137,7 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
     const newEntry = { ...doc, _id: result.id };
     entries.value.unshift(newEntry);
 
-    // 异步审计
-    try {
-      await cloudbase.callFunction('write-audit-log', {
-        action: 'kb_entry_created',
-        entityType: 'KnowledgeBase',
-        entityIds: [result.id],
-        detail: { title: entry.title, category: entry.category },
-        operator: auth.currentUsername || 'system',
-      });
-    } catch (e) { captureError('knowledge_store', 'KB条目创建审计日志写入失败', { message: e.message, context: 'quickAdd' }); }
+    writeAuditLog('knowledge_store', 'kb_entry_created', 'KnowledgeBase', [result.id], { title: entry.title, category: entry.category }, auth.currentUsername);
 
     return newEntry;
   }

@@ -7,6 +7,7 @@ import { initialVersion } from '../services/optimistic-lock';
 import { useAuthStore } from './useAuthStore';
 import { ownerFilter } from '../services/data-filter';
 import { captureError } from '../services/error-capture';
+import { createJobFromDemand } from '../services/demand-job-bridge';
 
 export const useRecruitmentDemandStore = defineStore('recruitmentDemand', () => {
   const demands = ref([]);
@@ -84,35 +85,18 @@ export const useRecruitmentDemandStore = defineStore('recruitmentDemand', () => 
     }
 
     // Admin direct: 先创建 Job，成功后创建 Demand（避免 Job 失败导致孤儿需求）
-    const { useConfigStore } = await import('./useConfigStore');
-    const configStore = useConfigStore();
-    await configStore.loadConfig();
-    const jobTypeConfig = configStore.jobTypes[demandData.jobType] || {};
-
-    const dept = demandData.department || {};
-    const deptName = dept.displayName
-      || [dept.level1, dept.level2, dept.level3, dept.level4].filter(Boolean).join(' / ')
-      || '';
-
-    // 先创建 Job
-    const { useJobStore } = await import('./useJobStore');
-    const jobResult = await useJobStore().add({
+    const linkedJobId = await createJobFromDemand({
       title: normalized.title,
-      department: deptName,
-      type: demandData.jobType || 'CC',
-      headcount: normalized.headcount || 1,
-      requirements: jobTypeConfig.requirements || '',
-      responsibilities: jobTypeConfig.responsibilities || '',
+      jobType: demandData.jobType,
+      department: demandData.department,
+      headcount: normalized.headcount,
+      jobRequirements: demandData.jobRequirements,
       ownerId: normalized.ownerId,
-      createdBy: normalized.ownerId,
-      status: 'active',
     });
-
-    const jobId = jobResult._id || jobResult.id;
 
     // Job 创建成功后创建 Demand，直接带 linkedJobId
     normalized.status = 'recruiting';
-    normalized.linkedJobId = jobId;
+    normalized.linkedJobId = linkedJobId;
     const result = await db.collection('RecruitmentDemand').add(normalized);
     demands.value.unshift({ ...normalized, _id: result.id });
     return { id: result.id, doc: normalized };

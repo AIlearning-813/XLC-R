@@ -10,6 +10,7 @@ import { normalizeJobData, validateJobData } from '../config/constants';
 import { useAuthStore } from './useAuthStore';
 import { usePendingChangeStore } from './usePendingChangeStore';
 import { ownerFilter } from '../services/data-filter';
+import { writeAuditLog } from '../services/audit-log';
 
 export const useJobStore = defineStore('job', () => {
   // ===== 状态 =====
@@ -148,16 +149,7 @@ export const useJobStore = defineStore('job', () => {
     const newJob = { ...doc, _id: result.id };
     jobs.value.unshift(newJob);
 
-    // P2-2：审计日志
-    try {
-      await cloudbase.callFunction('write-audit-log', {
-        action: 'job_created',
-        entityType: 'Job',
-        entityIds: [result.id],
-        detail: { title: jobData.title || jobData.name, type: jobData.type, department: jobData.department },
-        operator: jobData.createdBy || 'system',
-      });
-    } catch (e) { console.warn('[useJobStore] 审计日志写入失败:', e.message); captureError('job_store', '审计日志写入失败', { message: e.message, context: 'add' }); }
+    writeAuditLog('job_store', 'job_created', 'Job', [result.id], { title: jobData.title || jobData.name, department: jobData.department }, jobData.createdBy || 'system');
 
     return newJob;
   }
@@ -274,16 +266,7 @@ export const useJobStore = defineStore('job', () => {
     // 带版本锁更新
     const newVersion = await versionedUpdate('Job', id, expectedVersion, updateData);
 
-    // P2-2：审计日志
-    try {
-      await cloudbase.callFunction('write-audit-log', {
-        action: 'job_deleted',
-        entityType: 'Job',
-        entityIds: [id],
-        detail: { title: current.title || current.name, type: current.type },
-        operator: 'system',
-      });
-    } catch (e) { console.warn('[useJobStore] 审计日志写入失败:', e.message); captureError('job_store', '审计日志写入失败', { message: e.message, context: 'remove' }); }
+    writeAuditLog('job_store', 'job_deleted', 'Job', [id], { title: current?.title }, auth.currentUsername);
 
     // 更新本地缓存
     const idx = jobs.value.findIndex(j => j._id === id);
