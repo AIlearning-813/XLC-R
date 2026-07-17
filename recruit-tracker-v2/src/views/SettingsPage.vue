@@ -17,6 +17,7 @@ import InsightsTab from '../components/settings/InsightsTab.vue';
 import SystemConfigTab from '../components/settings/SystemConfigTab.vue';
 import DepartmentManageTab from '../components/settings/DepartmentManageTab.vue';
 import JobTypeManageTab from '../components/settings/JobTypeManageTab.vue';
+import StorageUsageTab from '../components/settings/StorageUsageTab.vue';
 
 const activeTab = ref('email');
 
@@ -28,6 +29,7 @@ const tabs = [
   { key: 'dept', label: '部门管理', icon: '🏗️' },
   { key: 'jobtype', label: '岗位配置', icon: '💼' },
   { key: 'system', label: '系统配置', icon: '⚙️' },
+  { key: 'storage', label: '存储用量', icon: '📦' },
 ];
 </script>
 
@@ -61,6 +63,7 @@ const tabs = [
       <DepartmentManageTab v-else-if="activeTab === 'dept'" />
       <JobTypeManageTab v-else-if="activeTab === 'jobtype'" />
       <SystemConfigTab v-else-if="activeTab === 'system'" />
+      <StorageUsageTab v-else-if="activeTab === 'storage'" />
     </div>
   </div>
 </template>
