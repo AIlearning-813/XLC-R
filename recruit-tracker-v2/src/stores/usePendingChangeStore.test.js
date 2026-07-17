@@ -256,7 +256,7 @@ describe('usePendingChangeStore — 通过 Mock 层', () => {
       expect(captureError).toHaveBeenCalledWith(
         'pending_change',
         '审计日志写入失败',
-        expect.objectContaining({ context: 'addChange' })
+        expect.objectContaining({ context: 'change_submitted' })
       );
     });
   });

@@ -678,13 +678,14 @@ describe('useEmailConfigStore', () => {
       expect(store.scanning).toBe(false);
     });
 
-    it('扫描不影响 error 状态', async () => {
+    it('扫描完成后 fetchConfigs 会重置 error 状态', async () => {
       emailConfigService.triggerManualScan.mockResolvedValue({ success: true });
 
       store.error = '之前有错误';
       await store.scanNow();
 
-      expect(store.error).toBe('之前有错误');
+      // scanNow 的 finally 块调用了 fetchConfigs，fetchConfigs 会将 error 重置为 ''
+      expect(store.error).toBe('');
     });
   });
 

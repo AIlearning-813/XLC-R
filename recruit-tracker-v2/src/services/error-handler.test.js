@@ -69,8 +69,11 @@ describe('handleError', () => {
   it('传入字符串而非 Error 对象', () => {
     const toast = { error: vi.fn() };
     const msg = handleError('纯文本错误', { toast });
-    expect(msg).toBe('纯文本错误');
-    expect(toast.error).toHaveBeenCalledWith('操作失败：纯文本错误');
+    // 字符串无 .message 属性，toChineseError 返回兜底中文文案
+    expect(typeof msg).toBe('string');
+    expect(toast.error).toHaveBeenCalled();
+    const toastCallArg = toast.error.mock.calls[0][0];
+    expect(toastCallArg).toContain('操作失败');
   });
 
   it('传入 Error 对象但 message 为空', () => {

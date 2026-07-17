@@ -340,7 +340,7 @@ describe('useJobStore — 通过 Mock 层', () => {
     it('Recruiter：提交到 PendingChanges', async () => {
       authState.isAdmin = false;
       authState.currentUsername = 'recruiter1';
-      store.jobs = [{ _id: 'job_rec', title: '旧', _version: 0, status: 'active' }];
+      store.jobs = [{ _id: 'job_rec', title: '旧', _version: 0, status: 'active', ownerId: 'recruiter1' }];
 
       const result = await store.update('job_rec', { title: '新' });
 
@@ -383,7 +383,7 @@ describe('useJobStore — 通过 Mock 层', () => {
     it('Recruiter：提交到 PendingChanges', async () => {
       authState.isAdmin = false;
       authState.currentUsername = 'recruiter1';
-      store.jobs = [{ _id: 'job_rec_del', title: '待删', status: 'active', _version: 0 }];
+      store.jobs = [{ _id: 'job_rec_del', title: '待删', status: 'active', _version: 0, ownerId: 'recruiter1' }];
 
       const result = await store.remove('job_rec_del');
 

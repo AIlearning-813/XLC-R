@@ -258,12 +258,18 @@ describe('useCandidateStore — 通过 Mock 层', () => {
     });
 
     it('本地缓存同步移除', async () => {
+      cloudbase.__setCollectionData('Candidate', [
+        { _id: 'c_local_p1', name: '本地删除' },
+      ]);
       store.candidates = [{ _id: 'c_local_p1', name: '本地删除' }];
       await store.permanentDelete('c_local_p1');
       expect(store.candidates.length).toBe(0);
     });
 
     it('删除当前候选人时清空 currentCandidate', async () => {
+      cloudbase.__setCollectionData('Candidate', [
+        { _id: 'c_current', name: '当前' },
+      ]);
       store.candidates = [{ _id: 'c_current', name: '当前' }];
       store.currentCandidate = { _id: 'c_current', name: '当前' };
       await store.permanentDelete('c_current');

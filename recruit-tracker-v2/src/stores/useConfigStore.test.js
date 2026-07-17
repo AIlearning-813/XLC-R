@@ -43,6 +43,8 @@ let store;
 beforeEach(() => {
   setActivePinia(createPinia());
   cloudbase.__resetAll();
+  // 清除 localStorage 缓存，防止 loadFromCache() 污染测试初始状态
+  localStorage.clear();
   store = useConfigStore();
 });
 

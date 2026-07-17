@@ -128,11 +128,11 @@ describe('demand-report — getDemandAlerts（纯函数）', () => {
     expect(alerts).toHaveLength(1);
   });
 
-  it('低完成率 (<30%) → 筛选出来', () => {
+  it('高缺口 (isHighGap) → 筛选出来', () => {
     const data = {
       demands: [
-        { id: 'd1', title: '低完成率', isOverdue: false, isNearDeadline: false, completionRate: 15 },
-        { id: 'd2', title: '正常', isOverdue: false, isNearDeadline: false, completionRate: 80 },
+        { id: 'd1', title: '高缺口', isOverdue: false, isNearDeadline: false, isHighGap: true },
+        { id: 'd2', title: '正常', isOverdue: false, isNearDeadline: false, isHighGap: false },
       ],
     };
     const alerts = getDemandAlerts(data);
@@ -143,24 +143,23 @@ describe('demand-report — getDemandAlerts（纯函数）', () => {
   it('所有预警类型同时命中', () => {
     const data = {
       demands: [
-        { id: 'd1', title: '过期+低完成', isOverdue: true, isNearDeadline: false, completionRate: 10 },
-        { id: 'd2', title: '临近+低完成', isOverdue: false, isNearDeadline: true, completionRate: 20 },
-        { id: 'd3', title: '仅低完成', isOverdue: false, isNearDeadline: false, completionRate: 25 },
-        { id: 'd4', title: '正常', isOverdue: false, isNearDeadline: false, completionRate: 90 },
+        { id: 'd1', title: '过期+高缺口', isOverdue: true, isNearDeadline: false, isHighGap: true },
+        { id: 'd2', title: '临近+高缺口', isOverdue: false, isNearDeadline: true, isHighGap: true },
+        { id: 'd3', title: '仅高缺口', isOverdue: false, isNearDeadline: false, isHighGap: true },
+        { id: 'd4', title: '正常', isOverdue: false, isNearDeadline: false, isHighGap: false },
       ],
     };
     const alerts = getDemandAlerts(data);
     expect(alerts).toHaveLength(3);
   });
 
-  it('精准边界值：completionRate=30 不算预警', () => {
+  it('isHighGap=false 不算预警', () => {
     const data = {
       demands: [
-        { id: 'd1', completionRate: 30, isOverdue: false, isNearDeadline: false },
+        { id: 'd1', isHighGap: false, isOverdue: false, isNearDeadline: false },
       ],
     };
     const alerts = getDemandAlerts(data);
-    // completionRate < 30 才预警，30 不算
     expect(alerts).toHaveLength(0);
   });
 });
