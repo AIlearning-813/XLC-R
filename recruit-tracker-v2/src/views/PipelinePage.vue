@@ -9,7 +9,7 @@ import { useAuthStore } from '../stores/useAuthStore';
 import cloudbase from '../services/cloudbase';
 import { FUNNEL_STAGES } from '../config/constants';
 import { ownerFilter } from '../services/data-filter';
-import { safeErrorMsg } from '../services/error-messages';
+import { handleError } from '../services/error-handler';
 import { isVersionConflict } from '../services/optimistic-lock';
 import { getInterviewRounds, getStagesForJob } from '../services/pipeline-engine';
 import { useBatchSelection } from '../composables/useBatchSelection';
@@ -308,7 +308,7 @@ async function quickAssignToJob(appId, candidateId) {
     // 刷新看板
     await refreshBoard();
   } catch (err) {
-    toast.error('分配失败：' + safeErrorMsg(err));
+    handleError(err, { context: '分配岗位', toast });
   }
 }
 
@@ -393,7 +393,7 @@ async function handleTransitionConfirm({ note, reason }) {
     if (isVersionConflict(err)) {
       toast.error('操作冲突：数据已被其他用户修改，页面将自动刷新获取最新数据。');
     } else {
-      toast.error('流转失败：' + safeErrorMsg(err));
+      handleError(err, { context: '流转候选人', toast });
     }
     refreshBoard();
   }

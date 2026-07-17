@@ -5,7 +5,7 @@ import { ref, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useCandidateStore } from '../stores/useCandidateStore';
 import { useAuthStore } from '../stores/useAuthStore';
-import { safeErrorMsg } from '../services/error-messages';
+import { handleError } from '../services/error-handler';
 import { useToast } from '../composables/useToast';
 import { formatDateTime } from '../services/format-utils';
 
@@ -23,7 +23,7 @@ async function load() {
   try {
     await store.fetchDeleted();
   } catch (err) {
-    toast.error('加载回收站失败：' + safeErrorMsg(err));
+    handleError(err, { context: '加载回收站', toast });
   } finally {
     loading.value = false;
   }
@@ -35,7 +35,7 @@ async function handleRestore(row) {
     await store.restore(row._id);
     toast.success(`已恢复「${row.name || '未命名'}」`);
   } catch (err) {
-    toast.error('恢复失败：' + safeErrorMsg(err));
+    handleError(err, { context: '恢复候选人', toast });
   }
 }
 
@@ -47,7 +47,7 @@ async function handlePermanentDelete(row) {
     await store.permanentDelete(row._id);
     toast.success(`已永久删除「${name}」`);
   } catch (err) {
-    toast.error('永久删除失败：' + safeErrorMsg(err));
+    handleError(err, { context: '永久删除', toast });
   }
 }
 

@@ -8,6 +8,7 @@ import { useToast } from '../composables/useToast';
 import cloudbase from '../services/cloudbase';
 import { extractText, parseWithDeepSeek, computeFileHash } from '../services/resume-parser';
 import { safeErrorMsg } from '../services/error-messages';
+import { handleError } from '../services/error-handler';
 import { detectDuplicates } from '../services/duplicate-detector';
 import ResumeUploader from '../components/resume/ResumeUploader.vue';
 import ParseResultView from '../components/resume/ParseResultView.vue';
@@ -299,7 +300,7 @@ async function onCreateCandidate(data) {
   } catch (err) {
     console.error('[ResumeImport] 创建候选人失败:', err);
     // 错误已由 error-capture.js 全局捕获，这里额外提示
-    toast.error('创建失败：' + safeErrorMsg(err), 0);
+    handleError(err, { context: '创建候选人', toast });
   } finally {
     submitting.value = false;
   }

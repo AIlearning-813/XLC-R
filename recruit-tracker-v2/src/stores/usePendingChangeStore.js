@@ -9,6 +9,7 @@ import { ref, computed } from 'vue';
 import cloudbase from '../services/cloudbase';
 import { useAuthStore } from './useAuthStore';
 import { captureError } from '../services/error-capture';
+import { handleError } from '../services/error-handler';
 
 export const usePendingChangeStore = defineStore('pendingChange', () => {
   // ===== 状态 =====
@@ -123,7 +124,7 @@ export const usePendingChangeStore = defineStore('pendingChange', () => {
       pendingChanges.value = all;
       return all;
     } catch (err) {
-      console.error('[usePendingChangeStore] 获取审批列表失败:', err.message);
+      handleError(err, { context: '获取审批列表' });
       error.value = err.message;
       return [];
     } finally {
@@ -341,7 +342,7 @@ export const usePendingChangeStore = defineStore('pendingChange', () => {
         .get();
       return data || [];
     } catch (err) {
-      console.error('[usePendingChangeStore] 获取我的提交失败:', err.message);
+      handleError(err, { context: '获取我的提交' });
       return [];
     }
   }

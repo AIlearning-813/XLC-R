@@ -6,6 +6,8 @@ import cloudbase from '../services/cloudbase';
 import { attachHashes } from '../services/hash';
 import { versionedUpdate, initialVersion, isVersionConflict, conflictMessage } from '../services/optimistic-lock';
 import { syncToParsedData } from '../services/candidate-sync';
+import { captureError } from '../services/error-capture';
+import { handleError } from '../services/error-handler';
 import { useAuthStore } from './useAuthStore';
 import { ownerFilter } from '../services/data-filter';
 import { DATA_RETENTION_DAYS_DEFAULT, CONSENT_STATUS, DELETION_REQUEST_STATUS } from '../config/constants';
@@ -79,7 +81,7 @@ export const useCandidateStore = defineStore('candidate', () => {
 
       return data;
     } catch (err) {
-      console.error('[useCandidateStore] 获取候选人详情失败:', err.message);
+      handleError(err, { context: '获取候选人详情' });
       error.value = err.message;
       return null;
     } finally {

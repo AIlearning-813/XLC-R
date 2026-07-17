@@ -10,7 +10,7 @@ import { useAuthStore } from '../stores/useAuthStore';
 import { ownerFilter } from '../services/data-filter';
 import cloudbase from '../services/cloudbase';
 import { END_REASONS, FUNNEL_STAGES } from '../config/constants';
-import { safeErrorMsg } from '../services/error-messages';
+import { handleError } from '../services/error-handler';
 import { captureError } from '../services/error-capture';
 import { isVersionConflict } from '../services/optimistic-lock';
 import { getAvailableTargets } from '../services/pipeline-engine';
@@ -361,7 +361,7 @@ async function deleteCandidate(row) {
       toast.success('简历已删除');
     }
   } catch (err) {
-    toast.error(`删除失败：${safeErrorMsg(err)}`);
+    handleError(err, { context: '删除简历', toast });
   }
 }
 
@@ -427,7 +427,7 @@ async function confirmReactivate() {
     if (isVersionConflict(err)) {
       toast.error('操作冲突：数据已被其他用户修改，请刷新后重试。');
     } else {
-      toast.error('重新激活失败：' + safeErrorMsg(err));
+      handleError(err, { context: '重新激活', toast });
     }
     loadData(currentFilters.value);
   }
@@ -477,7 +477,7 @@ async function saveEdit() {
     editTarget.value = null;
     loadData(currentFilters.value);
   } catch (err) {
-    toast.error('保存失败：' + safeErrorMsg(err));
+    handleError(err, { context: '保存候选人', toast });
   }
 }
 
@@ -511,7 +511,7 @@ async function confirmAssignJob() {
     assignTarget.value = null;
     loadData(currentFilters.value);
   } catch (err) {
-    toast.error('分配岗位失败：' + safeErrorMsg(err));
+    handleError(err, { context: '分配岗位', toast });
   }
 }
 
@@ -577,7 +577,7 @@ async function handleTransitionConfirm({ note, reason }) {
 
     await loadData(currentFilters.value);
   } catch (err) {
-    toast.error('流转失败：' + safeErrorMsg(err));
+    handleError(err, { context: '流转候选人', toast });
     loadData(currentFilters.value);
   }
 }

@@ -4,6 +4,7 @@ import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import cloudbase from '../services/cloudbase';
 import { captureError } from '../services/error-capture';
+import { handleError } from '../services/error-handler';
 import { versionedUpdate, initialVersion, isVersionConflict, conflictMessage } from '../services/optimistic-lock';
 import { normalizeJobData, validateJobData } from '../config/constants';
 import { useAuthStore } from './useAuthStore';
@@ -73,7 +74,7 @@ export const useJobStore = defineStore('job', () => {
 
       return fetched;
     } catch (err) {
-      console.error('[useJobStore] 拉取岗位失败:', err.message);
+      handleError(err, { context: '拉取岗位列表' });
       error.value = err.message;
       return [];
     } finally {

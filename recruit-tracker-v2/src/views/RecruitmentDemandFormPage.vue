@@ -5,6 +5,7 @@ import { useRecruitmentDemandStore } from '../stores/useRecruitmentDemandStore';
 import { useConfigStore } from '../stores/useConfigStore';
 import { useAuthStore } from '../stores/useAuthStore';
 import { safeErrorMsg } from '../services/error-messages';
+import { handleError } from '../services/error-handler';
 import TreeCascader from '../components/common/TreeCascader.vue';
 
 const router = useRouter(); const route = useRoute();
@@ -37,7 +38,7 @@ async function submitForm() {
     } else {
       router.push('/demands');
     }
-  } catch (err) { error.value = safeErrorMsg(err); }
+  } catch (err) { handleError(err, { context: '提交需求' }); error.value = safeErrorMsg(err); }
   finally { loading.value = false; }
 }
 </script>

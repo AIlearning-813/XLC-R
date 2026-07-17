@@ -11,6 +11,7 @@
  */
 
 import { safeErrorMsg, toChineseError } from './error-messages';
+import { notifyError } from './error-notification';
 
 /**
  * 统一错误处理：日志 + Toast 通知
@@ -34,8 +35,13 @@ export function handleError(err, options = {}) {
   }
 
   // 用户提示（除非静默模式）
-  if (!silent && toast && typeof toast.error === 'function') {
-    toast.error(`${context}失败：${msg}`);
+  if (!silent) {
+    if (toast && typeof toast.error === 'function') {
+      toast.error(`${context}失败：${msg}`);
+    } else {
+      // Store/Service 层兜底：通过全局通知通道
+      notifyError(`${context}失败：${msg}`);
+    }
   }
 
   return msg;

@@ -5,6 +5,7 @@
  */
 
 import cloudbase from './cloudbase';
+import { handleError } from './error-handler';
 
 const db = cloudbase.db;
 
@@ -25,7 +26,7 @@ export async function getCommunications(candidateId) {
       .get();
     return result.data || [];
   } catch (err) {
-    console.error('[communication] 获取沟通记录失败:', err.message);
+    handleError(err, { context: '获取沟通记录', silent: true });
     return [];
   }
 }

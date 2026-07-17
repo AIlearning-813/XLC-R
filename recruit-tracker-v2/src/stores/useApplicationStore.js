@@ -4,6 +4,7 @@ import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import cloudbase from '../services/cloudbase';
 import { captureError } from '../services/error-capture';
+import { handleError } from '../services/error-handler';
 import { useAuthStore } from './useAuthStore';
 import { ownerFilter } from '../services/data-filter';
 import { versionedUpdate, initialVersion, isVersionConflict, conflictMessage } from '../services/optimistic-lock';
@@ -77,7 +78,7 @@ export const useApplicationStore = defineStore('application', () => {
       _fetchCache.set(candidateId, { data, time: Date.now() });
       return data;
     } catch (err) {
-      console.error('[useApplicationStore] 获取申请列表失败:', err.message);
+      handleError(err, { context: '获取申请列表' });
       error.value = err.message;
       return [];
     } finally {
@@ -100,7 +101,7 @@ export const useApplicationStore = defineStore('application', () => {
         .get();
       return result.data || [];
     } catch (err) {
-      console.error('[useApplicationStore] 获取岗位申请失败:', err.message);
+      handleError(err, { context: '获取岗位申请' });
       return [];
     }
   }
@@ -128,7 +129,7 @@ export const useApplicationStore = defineStore('application', () => {
       if (data) currentApplication.value = data;
       return data;
     } catch (err) {
-      console.error('[useApplicationStore] 获取申请详情失败:', err.message);
+      handleError(err, { context: '获取申请详情' });
       return null;
     }
   }

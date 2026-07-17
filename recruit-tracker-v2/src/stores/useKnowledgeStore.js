@@ -10,6 +10,7 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import cloudbase from '../services/cloudbase';
+import { handleError } from '../services/error-handler';
 import { useAuthStore } from './useAuthStore';
 import { captureError } from '../services/error-capture';
 
@@ -99,7 +100,7 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
 
       return entries.value;
     } catch (err) {
-      console.error('[useKnowledgeStore] 查询失败:', err.message);
+      handleError(err, { context: '查询知识库' });
       error.value = err.message;
       return [];
     } finally {

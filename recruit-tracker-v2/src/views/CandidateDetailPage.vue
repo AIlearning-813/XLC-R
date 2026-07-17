@@ -10,7 +10,7 @@ import { useAuthStore } from '../stores/useAuthStore';
 import cloudbase from '../services/cloudbase';
 import { captureError } from '../services/error-capture';
 import { getCommunications } from '../services/communication';
-import { safeErrorMsg } from '../services/error-messages';
+import { handleError } from '../services/error-handler';
 import { formatDateISO } from '../services/format-utils';
 import { isVersionConflict } from '../services/optimistic-lock';
 import { useToast } from '../composables/useToast';
@@ -284,7 +284,7 @@ async function saveEdit() {
       candidate.value = await candidateStore.fetchById(candidateId.value);
       editing.value = false;
     } else {
-      toast.error('保存失败：' + safeErrorMsg(err));
+      handleError(err, { context: '保存候选人', toast });
     }
   } finally {
     saving.value = false;

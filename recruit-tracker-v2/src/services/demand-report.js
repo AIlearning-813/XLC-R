@@ -7,6 +7,7 @@
 
 import cloudbase from './cloudbase';
 import { ownerFilter } from './data-filter';
+import { handleError } from './error-handler';
 
 const FUNCTION_NAME = 'report-aggregator';
 
@@ -20,7 +21,7 @@ async function callAggregator(type, params = {}) {
     }
     return result.data;
   } catch (err) {
-    console.error(`[demand-report] ${type} 调用异常:`, err.message);
+    handleError(err, { context: `需求报表-${type}`, silent: true });
     return null;
   }
 }
