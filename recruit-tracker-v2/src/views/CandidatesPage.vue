@@ -248,47 +248,74 @@ async function loadData(filters = {}) {
 
 async function loadUnassigned(dbInstance, filters = {}) {
   try {
-    // 待分配池不限制 ownerId——所有未分配候选人应对团队全员可见，方便分配
+    const of = ownerFilter();
 
-    // 1. 获取已分配到实际岗位的 candidateId（jobId 不为空才算真正分配）
-    const { data: assignedApps } = await dbInstance.collection('Application')
-      .field({ candidateId: true })
-      .where({
-        isArchived: dbInstance.command.neq(true),
-        jobId: dbInstance.command.neq(''),
-      })
-      .limit(500)
-      .get();
+    // 1. 以 Application 集合为数据隔离依据——只查当前用户的申请记录
+    //    这样 email-imported 的候选人即使 Candidate.ownerId 缺失也能正确筛选
+    let appQuery = dbInstance.collection('Application')
+      .where({ isArchived: dbInstance.command.neq(true) });
+    if (of) appQuery = appQuery.where({ ownerId: of.ownerId });
 
-    const assignedIds = new Set((assignedApps || []).map(a => a.candidateId).filter(Boolean));
+    const { data: myApps } = await appQuery.limit(500).get();
 
-    // 2. 获取有 Application 但 jobId 为空的候选人（邮箱导入自动匹配失败等场景）
-    //    这些候选人"半分配"——有 Application 记录但没挂到具体岗位
-    const { data: joblessApps } = await dbInstance.collection('Application')
-      .where({
-        jobId: '',
-        status: 'active',
-        isArchived: dbInstance.command.neq(true),
-      })
-      .limit(100)
-      .get();
-
-    // 构建 candidateId → Application 映射（一个候选人只保留一条）
+    const assignedIds = new Set();
     const joblessAppMap = {};
-    for (const app of (joblessApps || [])) {
-      if (!joblessAppMap[app.candidateId]) {
-        joblessAppMap[app.candidateId] = app;
+    const myCandidateIds = new Set();
+
+    for (const app of (myApps || [])) {
+      if (!app.candidateId) continue;
+      myCandidateIds.add(app.candidateId);
+
+      if (app.jobId && app.jobId !== '') {
+        // 已分配到实际岗位
+        assignedIds.add(app.candidateId);
+      } else if (app.status === 'active') {
+        // jobId 为空 → 待分配，保留 Application 信息供后续使用
+        if (!joblessAppMap[app.candidateId]) {
+          joblessAppMap[app.candidateId] = app;
+        }
       }
     }
 
-    // 3. 查询 Candidate 集合（不加 ownerFilter——待分配池全团队共享）
-    const { data: candidates } = await dbInstance.collection('Candidate')
-      .orderBy('createdAt', 'desc')
-      .limit(200)
-      .get();
+    // 2. 查询 Candidate——两个来源合并
+    const candidates = [];
+    const seenIds = new Set();
 
-    // 4. 筛选未分配：不在 assignedIds 中的（包括无 Application 和 Application.jobId 为空的）
-    let unassigned = (candidates || []).filter(c => !assignedIds.has(c._id));
+    // 2a. 通过 Application 关联的候选人（数据隔离通过 Application.ownerId 保证）
+    if (myCandidateIds.size > 0) {
+      const idsArray = [...myCandidateIds];
+      for (let i = 0; i < idsArray.length; i += 100) {
+        const batch = idsArray.slice(i, i + 100);
+        const { data } = await dbInstance.collection('Candidate')
+          .where({ _id: dbInstance.command.in(batch) })
+          .orderBy('createdAt', 'desc')
+          .get();
+        for (const c of (data || [])) {
+          if (!seenIds.has(c._id)) {
+            seenIds.add(c._id);
+            candidates.push(c);
+          }
+        }
+      }
+    }
+
+    // 2b. 孤儿兜底：ownerId 匹配但无 Application 的候选人（手动录入未创建申请等异常情况）
+    if (of) {
+      const { data: orphanData } = await dbInstance.collection('Candidate')
+        .where({ ownerId: of.ownerId })
+        .orderBy('createdAt', 'desc')
+        .limit(200)
+        .get();
+      for (const c of (orphanData || [])) {
+        if (!seenIds.has(c._id)) {
+          seenIds.add(c._id);
+          candidates.push(c);
+        }
+      }
+    }
+
+    // 3. 筛选未分配：不在 assignedIds 中
+    let unassigned = candidates.filter(c => !assignedIds.has(c._id));
 
     // 搜索过滤
     if (filters.search) {
@@ -300,7 +327,7 @@ async function loadUnassigned(dbInstance, filters = {}) {
       );
     }
 
-    // 5. 转换为行数据（保留 joblessApp 信息以便后续关联需求时复用 Application）
+    // 4. 转换为行数据
     totalCount.value = unassigned.length;
     const start = (page.value - 1) * pageSize;
     rows.value = unassigned.slice(start, start + pageSize).map(c => {
@@ -320,12 +347,12 @@ async function loadUnassigned(dbInstance, filters = {}) {
         stage: joblessApp?.stage || '',
         source: joblessApp?.funnelMeta?.entrySource || c.source || 'email',
         status: 'unassigned',
-        ownerId: c.ownerId,
+        ownerId: c.ownerId || of?.ownerId || '',
         createdBy: c.createdBy,
         createdAt: joblessApp?.createdAt || c.createdAt,
         updatedAt: c.updatedAt,
         _candidate: c,
-        _application: joblessApp,  // 保留已有 Application，供 AssignDemandDialog 复用
+        _application: joblessApp,
         _job: null,
       };
     });
