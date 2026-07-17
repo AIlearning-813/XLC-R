@@ -135,6 +135,58 @@ export const useApplicationStore = defineStore('application', () => {
   }
 
   /**
+   * 根据候选人ID查找关联的Application（供 useCandidateStore 权限校验用）
+   * @param {string} candidateId
+   * @returns {Promise<Array>}
+   */
+  async function findByCandidateId(candidateId) {
+    const db = cloudbase.db();
+    if (!db) return [];
+    try {
+      const result = await db.collection('Application')
+        .where({ candidateId })
+        .limit(100)
+        .get();
+      return result.data || [];
+    } catch (err) {
+      handleError(err, { context: '查询候选人关联申请' });
+      return [];
+    }
+  }
+
+  /**
+   * 批量更新关联申请状态（供 useCandidateStore 软删除/恢复用）
+   * @param {string} candidateId
+   * @param {string} status - 'withdrawn' | 'active'
+   */
+  async function batchUpdateStatusByCandidate(candidateId, status) {
+    const apps = await findByCandidateId(candidateId);
+    if (apps.length === 0) return;
+    const db = cloudbase.db();
+    await Promise.allSettled(
+      apps.map(app =>
+        db.collection('Application').doc(app._id).update({
+          status,
+          updatedAt: new Date(),
+        })
+      )
+    );
+  }
+
+  /**
+   * 批量删除关联申请（供 useCandidateStore 永久删除用）
+   * @param {string} candidateId
+   */
+  async function batchRemoveByCandidate(candidateId) {
+    const apps = await findByCandidateId(candidateId);
+    if (apps.length === 0) return;
+    const db = cloudbase.db();
+    await Promise.allSettled(
+      apps.map(app => db.collection('Application').doc(app._id).remove())
+    );
+  }
+
+  /**
    * 新增申请记录
    */
   async function add(applicationData) {
@@ -369,6 +421,9 @@ export const useApplicationStore = defineStore('application', () => {
     fetchByCandidate,
     fetchByJob,
     fetchById,
+    findByCandidateId,
+    batchUpdateStatusByCandidate,
+    batchRemoveByCandidate,
     add,
     moveStage,
     endApplication,

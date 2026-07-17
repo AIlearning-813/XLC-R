@@ -9,6 +9,7 @@ import { syncToParsedData } from '../services/candidate-sync';
 import { captureError } from '../services/error-capture';
 import { handleError } from '../services/error-handler';
 import { useAuthStore } from './useAuthStore';
+import { useApplicationStore } from './useApplicationStore';
 import { ownerFilter } from '../services/data-filter';
 import { DATA_RETENTION_DAYS_DEFAULT, CONSENT_STATUS, DELETION_REQUEST_STATUS } from '../config/constants';
 
@@ -53,15 +54,11 @@ export const useCandidateStore = defineStore('candidate', () => {
         // 2. Candidate.ownerId 匹配当前用户 → 允许
         // 3. 存在一条当前用户拥有的 Application 关联此 Candidate → 允许
         if (!auth.isAdmin && data.ownerId !== auth.currentUsername) {
-          const { data: apps } = await db.collection('Application')
-            .where({
-              candidateId: id,
-              ownerId: auth.currentUsername,
-            })
-            .limit(1)
-            .get();
+          const appStore = useApplicationStore();
+          const apps = await appStore.findByCandidateId(id);
+          const hasAccess = apps.some(a => a.ownerId === auth.currentUsername);
 
-          if (!apps || apps.length === 0) {
+          if (!hasAccess) {
             console.warn('[useCandidateStore] 权限拒绝：Candidate ownerId 不匹配且无关联 Application');
             error.value = '无权访问此候选人';
             loading.value = false;
@@ -348,22 +345,10 @@ export const useCandidateStore = defineStore('candidate', () => {
 
     await db.collection('Candidate').doc(id).update(updateData);
 
-    // 同时将关联的 Application 标记为 withdrawn，否则列表刷新后候选人会重新出现
+    // 同时将关联的 Application 标记为 withdrawn（委派给 useApplicationStore）
     try {
-      const { data: apps } = await db.collection('Application')
-        .where({ candidateId: id })
-        .limit(100)
-        .get();
-      if (apps && apps.length > 0) {
-        await Promise.allSettled(
-          apps.map(app =>
-            db.collection('Application').doc(app._id).update({
-              status: 'withdrawn',
-              updatedAt: new Date(),
-            })
-          )
-        );
-      }
+      const appStore = useApplicationStore();
+      await appStore.batchUpdateStatusByCandidate(id, 'withdrawn');
     } catch (e) {
       console.warn('[useCandidateStore] 关联Application更新失败:', e.message);
     }
@@ -441,22 +426,10 @@ export const useCandidateStore = defineStore('candidate', () => {
     };
     await db.collection('Candidate').doc(id).update(updateData);
 
-    // 恢复关联 Application
+    // 恢复关联 Application（委派给 useApplicationStore）
     try {
-      const { data: apps } = await db.collection('Application')
-        .where({ candidateId: id, status: 'withdrawn' })
-        .limit(100)
-        .get();
-      if (apps && apps.length > 0) {
-        await Promise.allSettled(
-          apps.map(app =>
-            db.collection('Application').doc(app._id).update({
-              status: 'active',
-              updatedAt: new Date(),
-            })
-          )
-        );
-      }
+      const appStore = useApplicationStore();
+      await appStore.batchUpdateStatusByCandidate(id, 'active');
     } catch (e) {
       console.warn('[useCandidateStore] 恢复关联Application失败:', e.message);
     }
@@ -490,17 +463,10 @@ export const useCandidateStore = defineStore('candidate', () => {
     // 删除 Candidate
     await db.collection('Candidate').doc(id).remove();
 
-    // 删除关联 Application
+    // 删除关联 Application（委派给 useApplicationStore）
     try {
-      const { data: apps } = await db.collection('Application')
-        .where({ candidateId: id })
-        .limit(100)
-        .get();
-      if (apps && apps.length > 0) {
-        await Promise.allSettled(
-          apps.map(app => db.collection('Application').doc(app._id).remove())
-        );
-      }
+      const appStore = useApplicationStore();
+      await appStore.batchRemoveByCandidate(id);
     } catch (e) {
       console.warn('[useCandidateStore] 永久删除关联Application失败:', e.message);
     }
