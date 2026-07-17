@@ -3,16 +3,21 @@
  * StorageUsageTab.vue — 云存储用量展示 Tab
  *
  * 从 CloudBase 云函数 get-storage-usage 获取存储统计数据并展示。
- * 配额基于 19.9 元/月个人版（3GB），如升级套餐需更新 quotaBytes。
+ * CloudBase 采用资源点计费：存储 3.94 点/GB/天，无硬容量上限。
+ * 19.9 元/月个人版含 40,000 资源点，超限按 1000 点=1 元扣费。
  */
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import cloudbase from '../../services/cloudbase';
 
 const loading = ref(false);
 const error = ref('');
 const data = ref(null);
 
-const QUOTA_BYTES = 3 * 1024 * 1024 * 1024; // 19.9元/月个人版：3GB
+// 资源点计费参数
+const STORAGE_POINTS_PER_GB_DAY = 3.94;  // 存储：3.94 点/GB/天
+const POINTS_PER_YUAN = 1000;             // 1000 点 = 1 元
+const MONTHLY_POINTS = 40000;             // 个人版每月资源点
+const MONTHLY_COST = 19.9;                // 个人版月费
 
 function formatSize(bytes) {
   if (!bytes || bytes === 0) return '0 B';
@@ -20,6 +25,32 @@ function formatSize(bytes) {
   const i = Math.floor(Math.log(bytes) / Math.log(1024));
   return (bytes / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0) + ' ' + units[i];
 }
+
+// 已用存储（GB）
+const storageGB = computed(() => {
+  if (!data.value) return 0;
+  return data.value.totalSize / (1024 * 1024 * 1024);
+});
+
+// 每日存储资源点消耗
+const dailyPoints = computed(() => {
+  return (storageGB.value * STORAGE_POINTS_PER_GB_DAY).toFixed(1);
+});
+
+// 预估月存储资源点消耗（30天）
+const monthlyPoints = computed(() => {
+  return (storageGB.value * STORAGE_POINTS_PER_GB_DAY * 30).toFixed(0);
+});
+
+// 存储月费估算（元）
+const monthlyStorageCost = computed(() => {
+  return (monthlyPoints.value / POINTS_PER_YUAN).toFixed(2);
+});
+
+// 存储资源点占套餐比重
+const pointsPercent = computed(() => {
+  return Math.min((monthlyPoints.value / MONTHLY_POINTS) * 100, 100).toFixed(1);
+});
 
 function percentClass(pct) {
   const n = parseFloat(pct);
@@ -87,32 +118,46 @@ onMounted(() => { refresh(); });
             <span class="stat-value">{{ data.totalSizeFormatted || '0 B' }}</span>
           </div>
           <div class="overview-stat">
-            <span class="stat-label">套餐配额</span>
-            <span class="stat-value">{{ data.quotaFormatted || '3 GB' }}</span>
-          </div>
-          <div class="overview-stat">
             <span class="stat-label">文件数量</span>
             <span class="stat-value">{{ data.totalFiles || 0 }} 个</span>
           </div>
+          <div class="overview-stat">
+            <span class="stat-label">月存储费估算</span>
+            <span class="stat-value cost">{{ monthlyStorageCost }} 元</span>
+          </div>
         </div>
 
-        <!-- 进度条 -->
+        <!-- 资源点信息 -->
+        <div class="resource-info">
+          <div class="resource-row">
+            <span class="resource-label">📊 每日资源点消耗（存储）</span>
+            <span class="resource-value">{{ dailyPoints }} 点/天</span>
+          </div>
+          <div class="resource-row">
+            <span class="resource-label">📅 预估月消耗（30天）</span>
+            <span class="resource-value">{{ monthlyPoints }} 点（约 {{ monthlyStorageCost }} 元）</span>
+          </div>
+          <div class="resource-row">
+            <span class="resource-label">🎯 占套餐比重（40,000点）</span>
+            <span class="resource-value">{{ pointsPercent }}%</span>
+          </div>
+        </div>
+
+        <!-- 进度条：存储资源点占套餐比重 -->
         <div class="progress-section">
           <div class="progress-header">
-            <span>使用进度</span>
-            <span :class="['progress-pct', percentClass(data.usagePercent)]">
-              {{ data.usagePercent }}%
-            </span>
+            <span>存储月消耗占套餐资源点</span>
+            <span :class="['progress-pct', percentClass(pointsPercent)]">{{ pointsPercent }}%</span>
           </div>
           <div class="progress-bar-track">
             <div
               class="progress-bar-fill"
-              :class="percentClass(data.usagePercent)"
-              :style="{ width: Math.min(parseFloat(data.usagePercent), 100) + '%' }"
+              :class="percentClass(pointsPercent)"
+              :style="{ width: pointsPercent + '%' }"
             ></div>
           </div>
           <div class="progress-footer">
-            <span>剩余 {{ formatSize(Math.max(0, QUOTA_BYTES - (data.totalSize || 0))) }}</span>
+            <span>存储消耗占比很小，大头在数据库读写和云函数调用</span>
           </div>
         </div>
       </div>
@@ -256,6 +301,25 @@ onMounted(() => { refresh(); });
   font-weight: 600;
   color: var(--text-primary, #333);
 }
+
+.stat-value.cost { color: #52c41a; }
+
+/* 资源点信息 */
+.resource-info {
+  background: var(--bg-page, #f8f9fa);
+  border-radius: 6px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+.resource-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+}
+.resource-row + .resource-row { border-top: 1px solid rgba(0,0,0,0.04); }
+.resource-label { font-size: 0.85rem; color: var(--text-secondary, #666); }
+.resource-value { font-size: 0.85rem; font-weight: 500; color: var(--text-primary, #333); }
 
 /* 进度条 */
 .progress-section { margin-top: 4px; }
