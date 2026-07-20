@@ -152,6 +152,7 @@ export const useApplicationStore = defineStore('application', () => {
         .get();
       return result.data || [];
     } catch (err) {
+      console.error('[useApplicationStore] findByCandidateId 查询失败:', err.message, err);
       handleError(err, { context: '查询候选人关联申请' });
       return [];
     }

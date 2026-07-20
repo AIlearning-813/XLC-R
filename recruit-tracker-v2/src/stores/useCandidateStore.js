@@ -53,13 +53,33 @@ export const useCandidateStore = defineStore('candidate', () => {
         // 1. Admin 可访问所有
         // 2. Candidate.ownerId 匹配当前用户 → 允许
         // 3. 存在一条当前用户拥有的 Application 关联此 Candidate → 允许
+        //    使用与列表页一致的 ownerId 过滤，避免 findByCandidateId 静默失败
         if (!auth.isAdmin && data.ownerId !== auth.currentUsername) {
           const appStore = useApplicationStore();
           const apps = await appStore.findByCandidateId(id);
-          const hasAccess = apps.some(a => a.ownerId === auth.currentUsername);
+          let hasAccess = apps.some(a => a.ownerId === auth.currentUsername);
+
+          // fallback：如果 findByCandidateId 返回空（可能查询异常），
+          // 直接用 ownerId 过滤查询，与 CandidatesPage 列表页保持一致
+          if (!hasAccess && apps.length === 0) {
+            try {
+              const fbResult = await db.collection('Application')
+                .where({ candidateId: id, ownerId: auth.currentUsername })
+                .limit(5)
+                .get();
+              hasAccess = (fbResult.data || []).length > 0;
+            } catch (fbErr) {
+              console.error('[useCandidateStore] fallback 权限查询失败:', fbErr.message);
+            }
+          }
 
           if (!hasAccess) {
-            console.warn('[useCandidateStore] 权限拒绝：Candidate ownerId 不匹配且无关联 Application');
+            console.warn('[useCandidateStore] 权限拒绝：Candidate ownerId 不匹配且无关联 Application', {
+              candidateId: id,
+              candidateOwnerId: data.ownerId,
+              currentUser: auth.currentUsername,
+              appCount: apps.length,
+            });
             error.value = '无权访问此候选人';
             loading.value = false;
             return null;
