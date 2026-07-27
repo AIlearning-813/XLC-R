@@ -159,9 +159,9 @@ async function fetchNewResumes(config) {
       console.warn(`[imap-client] SEARCH 失败:`, err.message);
     }
 
-    // 同时拉最近 10 封（序号倒序），防止测试邮件被之前的扫描标为已读
+    // 同时拉最近 30 封（序号倒序），适配 3 小时扫描间隔
     const recentSeqs = [];
-    for (let i = mailbox.exists; i >= Math.max(1, mailbox.exists - 9); i--) {
+    for (let i = mailbox.exists; i >= Math.max(1, mailbox.exists - 29); i--) {
       recentSeqs.push(i);
     }
 
@@ -169,8 +169,8 @@ async function fetchNewResumes(config) {
     const seqSet = new Set([...unseenSeqs, ...recentSeqs]);
     let allSeqs = Array.from(seqSet).sort((a, b) => a - b);
 
-    // 最多处理 8 封（防超时：每封下载+提取+上传可能耗时数十秒）
-    const MAX_EMAILS_PER_SCAN = 8;
+    // 最多处理 20 封（3小时间隔约 3-5 封邮件，20 封留有充足余量；300s 超时约 15s/封）
+    const MAX_EMAILS_PER_SCAN = 20;
     if (allSeqs.length > MAX_EMAILS_PER_SCAN) {
       console.log(`[imap-client] ${config.email}：合并后 ${allSeqs.length} 封，只处理最近 ${MAX_EMAILS_PER_SCAN} 封`);
       allSeqs = allSeqs.slice(-MAX_EMAILS_PER_SCAN);

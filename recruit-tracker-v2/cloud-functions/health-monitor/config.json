@@ -1,12 +1,12 @@
 {
   "runtime": "Nodejs20.19",
   "timeout": 60,
-  "memorySize": 256,
+  "memorySize": 128,
   "triggers": [
     {
       "name": "health-check",
       "type": "timer",
-      "config": "*/30 * * * *"
+      "config": "0 */6 * * *"
     }
   ]
 }

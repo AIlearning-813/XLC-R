@@ -1,12 +1,12 @@
 {
   "timeout": 180,
   "runtime": "Nodejs20.19",
-  "memorySize": 512,
+  "memorySize": 256,
   "triggers": [
     {
       "name": "parse-queue-trigger",
       "type": "timer",
-      "config": "*/2 * * * *"
+      "config": "*/30 * * * *"
     }
   ]
 }
