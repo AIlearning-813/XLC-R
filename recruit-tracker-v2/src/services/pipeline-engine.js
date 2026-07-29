@@ -211,64 +211,99 @@ export function getIntermediateStages(fromStage, toStage, jobType = null) {
 /**
  * 检查进入目标阶段的前置条件
  *
+ * 🐛 修复（P2-25）：支持跳阶段回填机制——
+ *   当 fromStage 到 targetStage 之间包含前置阶段时，回填会自动补充漏斗时间戳，
+ *   此时不应报告"缺少前置条件"。
+ *
  * @param {string} targetStage - 目标阶段
  * @param {Object} application - 申请记录
  * @param {Object} job - 岗位信息
+ * @param {string} [fromStage] - 当前阶段（用于判断是否通过跳阶段回填满足前置条件）
  * @returns {{ valid: boolean, missing?: string[] }}
  */
-export function checkPreconditions(targetStage, application = {}, job = null) {
+export function checkPreconditions(targetStage, application = {}, job = null, fromStage = null) {
   const missing = [];
+
+  // 计算跳阶段回填的阶段集合：这些阶段的时间戳会在流转时自动填充
+  const jobType = job?.type || job?.jobType || null;
+  const skippedSet = fromStage
+    ? new Set(getIntermediateStages(fromStage, targetStage, jobType))
+    : new Set();
+
+  // 辅助函数：检查前置阶段是否在回填范围内
+  function isBackfilled(preStageKey) {
+    return skippedSet.has(preStageKey);
+  }
 
   // 面试阶段：检查是否已邀约
   const interviewStages = ['first_interview', 'second_interview', 'final_interview'];
   if (interviewStages.includes(targetStage)) {
     if (!application.funnel?.inviteAt && !application.funnel?.inviteConfirmedAt) {
-      missing.push('尚未发邀约');
+      // 如果 invite 或 invite_confirmed 正在被回填，则不报警告
+      if (!isBackfilled('invite') && !isBackfilled('invite_confirmed')) {
+        missing.push('尚未发邀约');
+      }
     }
   }
 
   // 通过阶段：检查是否经过对应面试
   if (targetStage === 'first_pass') {
     if (!application.funnel?.interview1At) {
-      missing.push('尚未进行初试');
+      if (!isBackfilled('first_interview')) {
+        missing.push('尚未进行初试');
+      }
     }
   }
   if (targetStage === 'second_pass') {
     if (!application.funnel?.interview2At) {
-      missing.push('尚未进行复试');
+      if (!isBackfilled('second_interview')) {
+        missing.push('尚未进行复试');
+      }
     }
   }
   if (targetStage === 'final_pass') {
     if (!application.funnel?.interview3At) {
-      missing.push('尚未进行终试');
+      if (!isBackfilled('final_interview')) {
+        missing.push('尚未进行终试');
+      }
     }
   }
 
   // Offer 阶段：检查是否已通过面试
   if (targetStage === 'offer') {
-    const rounds = getInterviewRounds(job?.type || job?.jobType);
+    const rounds = getInterviewRounds(jobType);
     const hasPassed = rounds >= 3
       ? application.funnel?.interview3PassAt
       : application.funnel?.interview2PassAt;
     if (!hasPassed) {
-      missing.push('尚未通过最终面试');
+      // 3轮：需要 final_pass 通过；2轮：需要 second_pass 通过
+      const neededPass = rounds >= 3 ? 'final_pass' : 'second_pass';
+      if (!isBackfilled(neededPass)) {
+        missing.push('尚未通过最终面试');
+      }
     }
   }
 
   // P2-20：背景调查阶段 — 检查是否已发 Offer
   if (targetStage === 'background_check') {
     if (!application.funnel?.offerAt) {
-      missing.push('尚未发放 Offer');
+      if (!isBackfilled('offer')) {
+        missing.push('尚未发放 Offer');
+      }
     }
   }
 
   // 入职阶段：检查是否已发 Offer 且完成背景调查
   if (targetStage === 'onboard') {
     if (!application.funnel?.offerAt) {
-      missing.push('尚未发放 Offer');
+      if (!isBackfilled('offer')) {
+        missing.push('尚未发放 Offer');
+      }
     }
     if (!application.funnel?.backgroundCheckAt) {
-      missing.push('尚未完成背景调查');
+      if (!isBackfilled('background_check')) {
+        missing.push('尚未完成背景调查');
+      }
     }
   }
 

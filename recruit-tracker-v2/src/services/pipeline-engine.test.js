@@ -249,6 +249,23 @@ describe('checkPreconditions', () => {
     expect(r.valid).toBe(true);
   });
 
+  // 🐛 修复：跳阶段回填时应跳过前置条件检查
+  it('跳阶段 resume→first_pass：first_interview 会被回填，不报警告', () => {
+    const r = checkPreconditions('first_pass', { funnel: {} }, null, 'resume');
+    expect(r.valid).toBe(true);
+  });
+
+  it('跳阶段 valid_resume→first_pass：first_interview 会被回填，不报警告', () => {
+    const r = checkPreconditions('first_pass', { funnel: {} }, null, 'valid_resume');
+    expect(r.valid).toBe(true);
+  });
+
+  it('不跳阶段 first_interview→first_pass：没有被回填的初试，仍报警告', () => {
+    const r = checkPreconditions('first_pass', { funnel: {} }, null, 'first_interview');
+    expect(r.valid).toBe(false);
+    expect(r.missing).toContain('尚未进行初试');
+  });
+
   it('offer 阶段需通过最终面试', () => {
     const r = checkPreconditions('offer', { funnel: {} }, null);
     expect(r.valid).toBe(false);

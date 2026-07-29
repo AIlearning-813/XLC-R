@@ -86,9 +86,10 @@ const backfillStages = computed(() => {
 const hasBackfill = computed(() => backfillStages.value.length > 0);
 
 // 前置条件检查（P1-1：防止跳过必经过的阶段）
+// 🐛 修复：传入 fromStage，支持跳阶段回填机制——被跳过的阶段会自动补充时间戳
 const preconditionResult = computed(() => {
   if (isEnding.value) return { valid: true, missing: [] };
-  return checkPreconditions(props.toStage, props.application || {}, props.job);
+  return checkPreconditions(props.toStage, props.application || {}, props.job, props.fromStage);
 });
 
 const hasPreconditionWarnings = computed(() => !preconditionResult.value.valid);
