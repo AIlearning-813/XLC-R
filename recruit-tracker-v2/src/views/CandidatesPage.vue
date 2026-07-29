@@ -259,6 +259,7 @@ async function loadUnassigned(dbInstance, filters = {}) {
     const { data: myApps } = await appQuery.limit(500).get();
 
     const assignedIds = new Set();
+    const endedIds = new Set();  // 🆕 已结束（淘汰/放弃）且未分配岗位的候选人
     const joblessAppMap = {};
     const myCandidateIds = new Set();
 
@@ -273,6 +274,13 @@ async function loadUnassigned(dbInstance, filters = {}) {
         // jobId 为空 → 待分配，保留 Application 信息供后续使用
         if (!joblessAppMap[app.candidateId]) {
           joblessAppMap[app.candidateId] = app;
+        }
+      } else if (app.status === 'rejected' || app.status === 'withdrawn') {
+        // 🐛 修复：已淘汰/放弃且未分配岗位的候选人，不应出现在待分配中
+        // 但如果该候选人同时有另一个 active 的待分配申请（joblessAppMap），
+        // 则以 joblessAppMap 为准——下面 filter 中会优先判断
+        if (!joblessAppMap[app.candidateId]) {
+          endedIds.add(app.candidateId);
         }
       }
     }
@@ -314,8 +322,14 @@ async function loadUnassigned(dbInstance, filters = {}) {
       }
     }
 
-    // 3. 筛选未分配：不在 assignedIds 中
-    let unassigned = candidates.filter(c => !assignedIds.has(c._id));
+    // 3. 筛选未分配：不在 assignedIds 中，且不在 endedIds 中（已淘汰/放弃的排除）
+    //    joblessAppMap 优先——如果有 active 待分配申请，即使另一申请已结束也算待分配
+    let unassigned = candidates.filter(c => {
+      if (assignedIds.has(c._id)) return false;
+      if (joblessAppMap[c._id]) return true;
+      if (endedIds.has(c._id)) return false;
+      return true;  // 孤儿候选人（无 Application）→ 待分配
+    });
 
     // 搜索过滤
     if (filters.search) {
