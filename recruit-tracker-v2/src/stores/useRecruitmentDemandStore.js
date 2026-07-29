@@ -102,9 +102,28 @@ export const useRecruitmentDemandStore = defineStore('recruitmentDemand', () => 
     return { id: result.id, doc: normalized };
   }
 
-  async function updateStatus(id, status) {
+  async function updateStatus(id, status, { skipApproval = false } = {}) {
     const db = cloudbase.db();
     if (!db) throw new Error('数据库未初始化');
+    const auth = useAuthStore();
+    const isAdmin = skipApproval || auth.isAdmin;
+
+    // 🆕 专员操作：提交审批，管理员审批通过后由 executeChange 执行状态变更
+    if (!isAdmin) {
+      const { usePendingChangeStore } = await import('./usePendingChangeStore');
+      const demand = demands.value.find(d => d._id === id) || {};
+      return usePendingChangeStore().submitChange({
+        type: 'recruitmentDemand',
+        action: 'update',
+        entityType: 'recruitmentDemand',
+        entityId: id,
+        entityLabel: demand.title || id,
+        before: { status: demand.status || '' },
+        after: { status },
+      });
+    }
+
+    // 管理员：直接更新
     await db.collection('RecruitmentDemand').doc(id).update({ status, updatedAt: new Date() });
     const idx = demands.value.findIndex(d => d._id === id);
     if (idx !== -1) demands.value[idx].status = status;

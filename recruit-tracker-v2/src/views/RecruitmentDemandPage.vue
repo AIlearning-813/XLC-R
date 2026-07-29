@@ -34,7 +34,11 @@ function toggleView(mode) {
 }
 
 async function changeStatus(demand, newStatus) {
-  try { await store.updateStatus(demand._id, newStatus); msg.value = '已更新'; setTimeout(() => msg.value = '', 2000); }
+  try {
+    const r = await store.updateStatus(demand._id, newStatus, { skipApproval: auth.isAdmin });
+    msg.value = r?.pending ? `已提交${newStatus === 'completed' ? '完成' : newStatus === 'closed' ? '关闭' : newStatus === 'recruiting' ? '通过' : '状态变更'}审批` : '已更新';
+    load(); setTimeout(() => msg.value = '', 3000);
+  }
   catch (e) { msg.value = safeErrorMsg(e); }
 }
 async function handleDelete(demand) {
@@ -95,9 +99,9 @@ async function handleDelete(demand) {
           <td><span class="status-tag" :class="'status-' + d.status">{{ store.STATUS_LABELS[d.status] || d.status }}</span></td>
           <td>{{ d.submittedAt ? new Date(d.submittedAt).toLocaleDateString() : '—' }}</td>
           <td @click.stop>
-            <button v-if="auth.isAdmin && d.status==='pending'" class="btn btn-xs btn-success" @click="changeStatus(d,'recruiting')">通过</button>
-            <button v-if="auth.isAdmin && d.status==='recruiting'" class="btn btn-xs" @click="changeStatus(d,'completed')">完成</button>
-            <button v-if="auth.isAdmin && d.status==='recruiting'" class="btn btn-xs" @click="changeStatus(d,'closed')">关闭</button>
+            <button v-if="d.status==='pending'" class="btn btn-xs btn-success" @click="changeStatus(d,'recruiting')">通过</button>
+            <button v-if="d.status==='recruiting'" class="btn btn-xs" @click="changeStatus(d,'completed')">完成</button>
+            <button v-if="d.status==='recruiting'" class="btn btn-xs" @click="changeStatus(d,'closed')">关闭</button>
             <button class="btn btn-xs btn-danger" @click="handleDelete(d)">删除</button>
           </td>
         </tr>

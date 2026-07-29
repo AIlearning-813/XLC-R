@@ -35,8 +35,8 @@ const rows = ref([]);
 const selectedIds = ref(new Set());
 const currentFilters = ref({});
 
-// Tab 切换：活跃 vs 已结束 vs 待分配
-const activeTab = ref('active'); // 'active' | 'ended' | 'unassigned'
+// Tab 切换：活跃 vs 流程中 vs 待分配 vs 已结束
+const activeTab = ref('active'); // 'active' | 'in-progress' | 'unassigned' | 'ended'
 
 // 分页
 const page = ref(1);
@@ -145,9 +145,14 @@ async function loadData(filters = {}) {
     // isArchived 在 JS 端过滤（避免与 status 条件一起放 CloudBase where 时被忽略）
     appList = appList.filter(a => a.isArchived !== true);
 
-    // 🆕 活跃 Tab：排除未分配岗位的候选人（jobId 为空），它们应出现在"待分配"Tab
-    if (activeTab.value === 'active') {
+    // 🆕 活跃/流程中 Tab：排除未分配岗位的候选人（jobId 为空），它们应出现在"待分配"Tab
+    if (activeTab.value === 'active' || activeTab.value === 'in-progress') {
       appList = appList.filter(a => a.jobId && a.jobId !== '');
+    }
+
+    // 🆕 流程中 Tab：额外排除简历阶段和入职阶段（流程首尾端点不算"流程中"）
+    if (activeTab.value === 'in-progress') {
+      appList = appList.filter(a => a.stage !== 'resume' && a.stage !== 'onboard');
     }
 
     if (filters.dateTo) {
@@ -832,6 +837,14 @@ onMounted(async () => {
         @click="switchTab('active')"
       >
         活跃候选人
+      </button>
+      <button
+        class="tab-btn"
+        :class="{ active: activeTab === 'in-progress' }"
+        @click="switchTab('in-progress')"
+      >
+        流程中
+        <span v-if="activeTab === 'in-progress'" class="tab-badge">{{ totalCount }}</span>
       </button>
       <button
         class="tab-btn"

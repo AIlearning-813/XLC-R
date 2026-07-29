@@ -20,7 +20,10 @@ onMounted(async () => {
 });
 
 async function changeStatus(s) {
-  await store.updateStatus(demand.value._id, s);
+  const r = await store.updateStatus(demand.value._id, s, { skipApproval: auth.isAdmin });
+  if (r?.pending) {
+    alert(`已提交${s === 'completed' ? '完成' : s === 'closed' ? '关闭' : s === 'recruiting' ? '审批通过' : '状态变更'}审批，请等待管理员审核`);
+  }
   demand.value = await store.fetchById(route.params.id);
 }
 </script>
@@ -54,9 +57,9 @@ async function changeStatus(s) {
         <p>{{ demand.jobType }}</p>
       </div>
       <div class="detail-actions">
-        <button v-if="auth.isAdmin && demand.status==='pending'" class="btn btn-success" @click="changeStatus('recruiting')">审批通过</button>
-        <button v-if="auth.isAdmin && demand.status==='recruiting'" class="btn" @click="changeStatus('completed')">标记完成</button>
-        <button v-if="auth.isAdmin && demand.status==='recruiting'" class="btn" @click="changeStatus('closed')">关闭需求</button>
+        <button v-if="demand.status==='pending'" class="btn btn-success" @click="changeStatus('recruiting')">审批通过</button>
+        <button v-if="demand.status==='recruiting'" class="btn" @click="changeStatus('completed')">标记完成</button>
+        <button v-if="demand.status==='recruiting'" class="btn" @click="changeStatus('closed')">关闭需求</button>
       </div>
     </div>
   </div>
