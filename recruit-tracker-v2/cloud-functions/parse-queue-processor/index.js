@@ -9,7 +9,7 @@
  *   5. 失败处理：指数退避重试 / 标记 failed
  *   6. 超时保护：剩余 < 30s 时停止取新条目
  *
- * 触发方式：定时触发器（每 5 分钟）
+ * 触发方式：定时触发器（每 30 分钟兜底；主链路为 email-scanner 扫描到简历后链式触发）
  */
 
 const cloudbase = require('@cloudbase/node-sdk');
