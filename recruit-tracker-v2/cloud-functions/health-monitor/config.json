@@ -6,7 +6,7 @@
     {
       "name": "health-check",
       "type": "timer",
-      "config": "0 */6 * * *"
+      "config": "0 0 */6 * * * *"
     }
   ]
 }

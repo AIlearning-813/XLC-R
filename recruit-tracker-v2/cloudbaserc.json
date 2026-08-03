@@ -31,13 +31,13 @@
     {
       "name": "health-monitor",
       "timeout": 60,
-      "memorySize": 256,
+      "memorySize": 128,
       "runtime": "Nodejs20.19",
       "triggers": [
         {
           "name": "health-check",
           "type": "timer",
-          "config": "0 * * * *"
+          "config": "0 0 */6 * * * *"
         }
       ]
     },
@@ -51,13 +51,13 @@
     {
       "name": "parse-queue-processor",
       "timeout": 180,
-      "memorySize": 512,
+      "memorySize": 256,
       "runtime": "Nodejs20.19",
       "triggers": [
         {
           "name": "parse-queue-trigger",
           "type": "timer",
-          "config": "*/2 * * * *"
+          "config": "0 */30 * * * * *"
         }
       ],
       "comment": "环境变量(MASTER_SECRET/SALT_PEPPER/TENCENT_SECRET)已在云端配置，通过CloudBase控制台管理，切勿使用 tcb config update fn --overwrite 覆盖"
@@ -65,13 +65,13 @@
     {
       "name": "email-scanner",
       "timeout": 300,
-      "memorySize": 1024,
+      "memorySize": 512,
       "runtime": "Nodejs20.19",
       "triggers": [
         {
           "name": "email-scan-trigger",
           "type": "timer",
-          "config": "*/10 * * * *"
+          "config": "0 0 */3 * * * *"
         }
       ],
       "comment": "MASTER_SECRET/SALT_PEPPER/DEDUP_HMAC_KEY/TENCENT_SECRET 已部署到云函数环境变量，在 CloudBase 控制台管理"
