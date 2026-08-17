@@ -4,6 +4,8 @@
  * 定时/手动触发，扫描启用的邮箱配置，拉取招聘平台邮件附件，
  * 提取文本后写入 ParseQueue，由 parse-queue-processor 消费。
  * 定时触发：工作日 09:00/12:00/15:00/18:00 各一次，周末不触发（cron: 0 0 9,12,15,18 * * 1-5 *）
+ * 手动触发：传 userId 时只扫该专员自己的邮箱；管理员/定时器不传则扫全部
+ * 超时设计：函数 900s，单邮箱 60s 预算，8 个邮箱全部轮流扫描
  *
  * 动作：
  *   - scan：扫描所有启用的邮箱
@@ -140,9 +142,12 @@ exports.main = async (event, context) => {
 
     try {
       // 1. 查询启用的邮箱配置
+      // 手动扫描按 userId 过滤：专员只扫自己的邮箱；管理员/定时器不传 userId 扫全部
+      const scanWhere = { enabled: true };
+      if (event?.userId) scanWhere.userId = event.userId;
       const { data: configs } = await db
         .collection('EmailConfig')
-        .where({ enabled: true })
+        .where(scanWhere)
         .get();
 
       if (!configs || configs.length === 0) {
@@ -164,9 +169,9 @@ exports.main = async (event, context) => {
 
       // 2. 逐个邮箱处理
       for (const config of configs) {
-        // 超时保护：剩余 < 90 秒则停止（给当前邮箱留足处理时间）
+        // 超时保护：剩余 < 60 秒则停止（配合单邮箱 60s 预算，保证所有邮箱轮流扫）
         const elapsed = Date.now() - startTime;
-        const timeoutMs = (context.timeout || 300000) - 90000;
+        const timeoutMs = (context.timeout || 900000) - 60000;
         if (elapsed > timeoutMs) {
           scanResult.message = `超时保护：已用 ${Math.round(elapsed / 1000)}s，剩余 ${Math.round((context.timeout - elapsed) / 1000)}s，停止扫描剩余邮箱`;
           scanResult.skippedMailboxes = configs.length - configs.indexOf(config);

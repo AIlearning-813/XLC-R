@@ -186,7 +186,7 @@ async function fetchNewResumes(config) {
     // 逐封 FETCH（避免批量 for-await 卡死在某封邮件上）
     let msgCount = 0;
     const fetchStart = Date.now();
-    const MAILBOX_TIMEOUT_MS = 90000; // 单个邮箱最多处理 90 秒
+    const MAILBOX_TIMEOUT_MS = 60000; // 单个邮箱最多处理 60 秒（8邮箱×60s=480s，配合函数超时900s保证全部轮到）
 
     for (const seq of allSeqs) {
       // 邮箱级时间预算：超时则停止，剩余邮件下次扫描再处理

@@ -123,7 +123,9 @@ export const useEmailConfigStore = defineStore('emailConfig', () => {
   async function scanNow(force = false) {
     scanning.value = true;
     try {
-      const result = await triggerManualScan(force);
+      // 专员手动扫描只扫自己的邮箱；管理员扫全部
+      const scanUserId = auth.isAdmin ? '' : auth.currentUsername || '';
+      const result = await triggerManualScan(force, scanUserId);
       if (result.success) {
         if (result.inProgress) {
           // 云函数超时但在后台继续运行

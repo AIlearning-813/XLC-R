@@ -64,7 +64,7 @@
     },
     {
       "name": "email-scanner",
-      "timeout": 300,
+      "timeout": 900,
       "memorySize": 512,
       "runtime": "Nodejs20.19",
       "triggers": [

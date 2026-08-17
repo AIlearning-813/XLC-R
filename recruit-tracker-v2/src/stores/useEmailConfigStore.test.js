@@ -585,7 +585,7 @@ describe('useEmailConfigStore', () => {
       const result = await store.scanNow();
 
       expect(result).toEqual(scanResult);
-      expect(emailConfigService.triggerManualScan).toHaveBeenCalledWith(false);
+      expect(emailConfigService.triggerManualScan).toHaveBeenCalledWith(false, '');
       expect(store.scanning).toBe(false);
       expect(mockToast.success).toHaveBeenCalledWith(
         '扫描完成：发现 10 封邮件，新增 3 份简历'
@@ -598,7 +598,7 @@ describe('useEmailConfigStore', () => {
 
       await store.scanNow(true);
 
-      expect(emailConfigService.triggerManualScan).toHaveBeenCalledWith(true);
+      expect(emailConfigService.triggerManualScan).toHaveBeenCalledWith(true, '');
     });
 
     it('扫描过程中 scanning 为 true', async () => {

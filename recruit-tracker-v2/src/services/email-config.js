@@ -169,14 +169,18 @@ export async function testImapConnection(config) {
 /**
  * 触发手动邮箱扫描
  * @param {boolean} force - 是否强制重扫（清除去重记录）
+ * @param {string} userId - 当前登录专员名，非空时只扫该专员的邮箱（管理员传空扫全部）
  * @returns {Promise<object>}
  */
-export async function triggerManualScan(force = false) {
+export async function triggerManualScan(force = false, userId = '') {
   try {
+    const payload = { action: 'scan', force };
+    // 专员手动扫描只扫自己的邮箱；管理员不传 userId 扫全部
+    if (userId) payload.userId = userId;
     const result = await cloudbase.callFunction(
       'email-scanner',
-      { action: 'scan', force },
-      { timeout: 120000 }  // HTTP 超时 120s（云函数端单邮箱 90s 预算 + 余量）
+      payload,
+      { timeout: userId ? 60000 : 300000 }  // 专员自己的邮箱快（60s）；管理员全局扫描留 300s
     );
     return result || { success: false };
   } catch (err) {
