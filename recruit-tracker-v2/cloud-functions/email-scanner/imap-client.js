@@ -113,9 +113,12 @@ function isRecruitmentSender(from) {
  * @param {string} config.imapUser - IMAP 登录用户名
  * @param {string} config.imapPassword - 加密存储的密码（Base64）
  * @param {object} config.filterRules - 过滤规则（可选）
+ * @param {object} [options] - 可选参数
+ * @param {Function} [options.isDuplicateMessage] - 下载附件前的 Message-ID 去重回调（async），
+ *   返回 true 表示该邮件已处理，跳过附件下载（避免旧邮件浪费预算）
  * @returns {Promise<Array<{messageId, from, subject, date, attachments: Array}>>}
  */
-async function fetchNewResumes(config) {
+async function fetchNewResumes(config, options = {}) {
   const { ImapFlow } = require('imapflow');
 
   // 解密密码
@@ -167,13 +170,15 @@ async function fetchNewResumes(config) {
 
     // 合并去重
     const seqSet = new Set([...unseenSeqs, ...recentSeqs]);
-    let allSeqs = Array.from(seqSet).sort((a, b) => a - b);
+    // 降序排列（新→旧）：保证最新邮件最先处理，避免 60s 预算被旧邮件耗尽后轮不到新邮件
+    let allSeqs = Array.from(seqSet).sort((a, b) => b - a);
 
     // 最多处理 20 封（3小时间隔约 3-5 封邮件，20 封留有充足余量；300s 超时约 15s/封）
+    // 数组已降序（新→旧），取前 20 封即最新 20 封
     const MAX_EMAILS_PER_SCAN = 20;
     if (allSeqs.length > MAX_EMAILS_PER_SCAN) {
       console.log(`[imap-client] ${config.email}：合并后 ${allSeqs.length} 封，只处理最近 ${MAX_EMAILS_PER_SCAN} 封`);
-      allSeqs = allSeqs.slice(-MAX_EMAILS_PER_SCAN);
+      allSeqs = allSeqs.slice(0, MAX_EMAILS_PER_SCAN);
     }
 
     console.log(`[imap-client] ${config.email}：共 ${allSeqs.length} 封待查（未读 ${unseenSeqs.length} + 最近 ${recentSeqs.length}，合并去重后）`);
@@ -219,6 +224,27 @@ async function fetchNewResumes(config) {
 
       const messageId = msg.envelope?.messageId || '';
       const date = msg.envelope?.date || new Date();
+
+      // 下载前 Message-ID 去重：已处理的旧邮件不重复下载附件（把预算留给新邮件）
+      // 去重只需信封里的 messageId，无需下载附件内容
+      if (messageId && typeof options.isDuplicateMessage === 'function') {
+        let alreadyProcessed = false;
+        try {
+          alreadyProcessed = await options.isDuplicateMessage(messageId);
+        } catch (err) {
+          console.warn(`[imap-client]   Message-ID 去重检查失败，继续处理: ${err.message}`);
+        }
+        if (alreadyProcessed) {
+          console.log(`[imap-client]   跳过已处理邮件（Message-ID 去重）: ${subject.slice(0, 40)}`);
+          // 标记已读，避免下轮扫描再次进入待查列表
+          try {
+            await client.messageFlagsAdd({ uid: msg.uid }, ['\\Seen']);
+          } catch (_) {
+            // 忽略标记失败
+          }
+          continue;
+        }
+      }
 
       // 提取附件元数据
       const attachmentMetas = extractAttachments(msg, seq);

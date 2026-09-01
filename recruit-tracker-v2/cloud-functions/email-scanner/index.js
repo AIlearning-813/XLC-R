@@ -103,6 +103,11 @@ exports.main = async (event, context) => {
     return handleDiagnose(event);
   }
 
+  // ---- 诊断邮箱结构（临时排查工具：不下载附件，秒级返回）----
+  if (action === 'debugInbox') {
+    return handleDebugInbox(event);
+  }
+
   // ---- P0-1 密钥轮换（一次性迁移）----
   if (action === 'rotateKeys') {
     return handleRotateKeys(event);
@@ -369,6 +374,93 @@ async function handleDiagnose(event) {
   };
 }
 
+// ===== 诊断邮箱结构（临时排查工具：不下载附件，秒级返回）=====
+async function handleDebugInbox(event) {
+  const { configId } = event;
+  if (!configId) return { success: false, message: '缺少 configId' };
+
+  const { ImapFlow } = require('imapflow');
+  const { decrypt } = require('./crypto');
+
+  try {
+    const { data: configs } = await db.collection('EmailConfig').where({ _id: configId }).get();
+    if (!configs || configs.length === 0) {
+      return { success: false, message: `配置不存在：${configId}` };
+    }
+    const config = configs[0];
+
+    let plainPassword;
+    try {
+      plainPassword = decrypt(config.imapPassword);
+    } catch (e) {
+      return { success: false, message: `密码解密失败：${e.message}` };
+    }
+
+    const client = new ImapFlow({
+      host: config.imapHost || 'imap.qq.com',
+      port: config.imapPort || 993,
+      secure: true,
+      auth: { user: config.imapUser || config.email, pass: plainPassword },
+      logger: false,
+      tls: { rejectUnauthorized: true },
+    });
+
+    await client.connect();
+    const mailbox = await client.mailboxOpen('INBOX');
+    const total = mailbox.exists;
+
+    // 未读数
+    let unseenCount = 0;
+    try {
+      unseenCount = (await client.search({ unseen: true })).length;
+    } catch {
+      unseenCount = -1;
+    }
+
+    // 各招聘域 SEARCH 命中数
+    const DOMAINS = [
+      'zhipin.com', 'bosszhipin.com', 'kanzhun.com',
+      'zhaopin.com.cn', 'liepin.com', '51job.com', 'xlczg.com',
+    ];
+    const domainCounts = {};
+    for (const domain of DOMAINS) {
+      try {
+        domainCounts[domain] = (await client.search({ from: domain })).length;
+      } catch (e) {
+        domainCounts[domain] = `ERR:${e.message}`;
+      }
+    }
+
+    // 最新 30 封的发件人/主题/时间（最新在前）
+    const startSeq = Math.max(1, mailbox.exists - 29);
+    const recent = [];
+    for await (const msg of client.fetch(`${startSeq}:${mailbox.exists}`, { envelope: true })) {
+      const from = msg.envelope?.from?.[0]?.address || '';
+      recent.push({
+        seq: msg.seq,
+        from,
+        subject: String(msg.envelope?.subject || '').slice(0, 60),
+        date: msg.envelope?.date ? new Date(msg.envelope.date).toISOString() : '',
+      });
+    }
+    recent.reverse();
+
+    await client.logout();
+
+    return {
+      success: true,
+      email: config.email,
+      userId: config.userId,
+      totalEmails: total,
+      unseenCount,
+      domainCounts,
+      recentSenders: recent,
+    };
+  } catch (err) {
+    return { success: false, message: `诊断异常：${err.message}` };
+  }
+}
+
 // ===== 密钥轮换迁移（P0-1，一次性操作）=====
 
 async function handleRotateKeys(event) {
@@ -481,7 +573,13 @@ async function processMailbox(config, scanResult, forceRescan = false) {
   }
 
   // 拉取新简历邮件
-  const messages = await modules.imapClient.fetchNewResumes(config);
+  // 传入下载前 Message-ID 去重回调：已处理的旧邮件在 imap-client 层直接跳过，不下载附件、不耗预算
+  const messages = await modules.imapClient.fetchNewResumes(config, {
+    isDuplicateMessage: (messageId) =>
+      modules.deduplicator
+        ? modules.deduplicator.isMessageIdDuplicate(db, messageId)
+        : Promise.resolve(false),
+  });
 
   if (messages.length === 0) {
     return stats;
