@@ -81,6 +81,12 @@ const routes = [
     meta: { title: '回收站', icon: 'trash', requireAdmin: true },
   },
   {
+    path: '/login-attendance',
+    name: 'LoginAttendance',
+    component: () => import('../views/LoginAttendancePage.vue'),
+    meta: { title: '登录考勤', icon: 'attendance', requireAdmin: true },
+  },
+  {
     path: '/demands',
     name: 'RecruitmentDemands',
     component: () => import('../views/RecruitmentDemandPage.vue'),

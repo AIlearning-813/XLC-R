@@ -45,6 +45,9 @@ const THREE_ROUND_STAGES = ['final_interview', 'final_pass'];
 // 缓存 TTL（秒）
 const CACHE_TTL = 30 * 60; // 30 分钟
 
+// 🆕 实时类聚合：登录考勤要求实时，绕过 30 分钟 ReportCache
+const NO_CACHE_TYPES = ['login_attendance'];
+
 // ========== 缓存工具 ==========
 
 /**
@@ -1085,6 +1088,90 @@ async function aggregateE2ECycle(params = {}) {
   };
 }
 
+// ===== 登录考勤（管理员看板：行=专员，列=当月每天）=====
+
+/**
+ * 登录考勤聚合（实时，绕过 ReportCache）
+ * 入参：{ year?, month? }（month 1-12，缺省为当前北京时区月）
+ * 输出：{ year, month, daysInMonth, recruiters:[{ username, name, totalLogins, activeDays,
+ *         daily:[{ day, logins, active }, ...] }], computedAt }
+ * daily 长度恒等于 daysInMonth（1..N 天），前端可零计算渲染日历网格
+ */
+async function aggregateLoginAttendance(params = {}) {
+  const now = new Date();
+  let y = params.year || now.getFullYear();
+  let m = params.month !== undefined ? params.month : now.getMonth() + 1;
+  // 月份合法性保护（1-12），非法则回退当月
+  if (!Number.isInteger(m) || m < 1 || m > 12) m = now.getMonth() + 1;
+  if (!Number.isInteger(y) || y < 2000 || y > 2100) y = now.getFullYear();
+
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const prefix = `${y}-${String(m).padStart(2, '0')}`;
+  const startKey = `${prefix}-01`;
+  const endKey = `${prefix}-${String(daysInMonth).padStart(2, '0')}`;
+
+  // 1) 全部招聘专员
+  let users = [];
+  try {
+    const { data } = await db.collection('Users')
+      .where({ role: 'recruiter' }).field({ username: true, name: true }).get();
+    users = data || [];
+  } catch (err) {
+    console.warn('[report-aggregator] 登录考勤：拉取专员列表失败:', err.message);
+  }
+
+  // 2) 按专员拉当月 LoginLog（dateKey 范围 + 游标分页），并行
+  const rowsByUser = {};
+  await Promise.all(users.map(async (u) => {
+    const rows = [];
+    try {
+      let cursor = null;
+      while (true) {
+        let query = db.collection('LoginLog')
+          .where({ username: u.username, dateKey: _.and(_.gte(startKey), _.lte(endKey)) })
+          .field({ dateKey: true, type: true })
+          .orderBy('_id', 'asc').limit(500);
+        if (cursor) query = query.where({ _id: _.gt(cursor) });
+        const { data } = await query.get();
+        if (!data || data.length === 0) break;
+        rows.push(...data);
+        if (data.length < 500) break;
+        cursor = data[data.length - 1]._id;
+      }
+    } catch (err) {
+      // LoginLog 集合尚不存在等情况 → 该专员无记录，不中断整体聚合
+      console.warn(`[report-aggregator] 登录考勤：${u.username} 查询失败:`, err.message);
+    }
+    rowsByUser[u.username] = rows;
+  }));
+
+  // 3) 内存按日归并：type='login' 计数，type='active' 记为活跃日（distinct）
+  const recruiters = users.map((u) => {
+    const perDay = {};
+    const activeSet = new Set();
+    for (const r of (rowsByUser[u.username] || [])) {
+      const dayStr = r.dateKey ? String(r.dateKey).slice(8, 10) : '';
+      const day = parseInt(dayStr, 10);
+      if (!day || day > daysInMonth) continue;
+      if (r.type === 'login') perDay[day] = (perDay[day] || 0) + 1;
+      else if (r.type === 'active') activeSet.add(day);
+    }
+    const daily = Array.from({ length: daysInMonth }, (_, i) => {
+      const day = i + 1;
+      return { day, logins: perDay[day] || 0, active: activeSet.has(day) };
+    });
+    return {
+      username: u.username,
+      name: u.name || u.username,
+      totalLogins: daily.reduce((s, d) => s + d.logins, 0),
+      activeDays: activeSet.size,
+      daily,
+    };
+  });
+
+  return { year: y, month: m, daysInMonth, recruiters, computedAt: new Date().toISOString() };
+}
+
 exports.main = async (event, context) => {
   const { type, params = {} } = event;
 
@@ -1093,12 +1180,15 @@ exports.main = async (event, context) => {
   try {
     let result;
     const ck = cacheKey(type, params);
+    const skipCache = NO_CACHE_TYPES.includes(type); // 🆕 实时类型（如登录考勤）跳过缓存
 
-    // 尝试读缓存
-    const cached = await readCache(ck);
-    if (cached) {
-      console.log(`[report-aggregator] 缓存命中: ${ck}`);
-      return { success: true, data: cached, fromCache: true };
+    // 尝试读缓存（实时类型跳过）
+    if (!skipCache) {
+      const cached = await readCache(ck);
+      if (cached) {
+        console.log(`[report-aggregator] 缓存命中: ${ck}`);
+        return { success: true, data: cached, fromCache: true };
+      }
     }
 
     // 根据类型执行聚合
@@ -1152,6 +1242,11 @@ exports.main = async (event, context) => {
         result = await aggregateE2ECycle(params);
         break;
 
+      // 🆕 管理员登录考勤看板（实时，绕过 ReportCache）
+      case 'login_attendance':
+        result = await aggregateLoginAttendance(params);
+        break;
+
       // P0-5：返回服务器时间用于客户端时钟校准
       case 'ping':
         return { success: true, data: null, serverTime: new Date().toISOString(), fromCache: false };
@@ -1159,12 +1254,12 @@ exports.main = async (event, context) => {
       default:
         return {
           success: false,
-          error: `不支持的聚合类型: ${type}，支持的类型: overview, job_funnel, trend, dept_monthly, demand_metrics, recruiter_efficiency, conversion_rates, dept_onboard_overview, source_onboard_overview, demand_vs_onboard, demand_tracking, e2e_cycle`,
+          error: `不支持的聚合类型: ${type}，支持的类型: overview, job_funnel, trend, dept_monthly, demand_metrics, recruiter_efficiency, conversion_rates, dept_onboard_overview, source_onboard_overview, demand_vs_onboard, demand_tracking, e2e_cycle, login_attendance`,
         };
     }
 
-    // 写入缓存
-    await writeCache(ck, result);
+    // 写入缓存（实时类型跳过）
+    if (!skipCache) await writeCache(ck, result);
 
     console.log(`[report-aggregator] 聚合完成: ${type}, 耗时: ${Date.now() - context?.startTime || '未知'}ms`);
     return { success: true, data: result, fromCache: false };

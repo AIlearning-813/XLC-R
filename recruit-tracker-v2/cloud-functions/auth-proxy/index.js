@@ -146,6 +146,72 @@ function verifySessionToken(token) {
   }
 }
 
+// ===== 登录考勤埋点（管理员登录看板数据源：记录专员登录/活跃到 LoginLog）=====
+
+/** 北京时区的 YYYY-MM-DD（不依赖进程 TZ：显式 +8h 平移后取 UTC getter） */
+function formatDateKeyBeijing(ts = Date.now()) {
+  const d = new Date(ts + 8 * 3600 * 1000);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+}
+
+/** 安静写入 LoginLog：集合不存在则懒创建后重试；写入失败仅告警，绝不抛出 */
+async function addLoginLog(doc) {
+  try {
+    await db.collection('LoginLog').add(doc);
+  } catch (err) {
+    const m = (err && (err.message || '')).toLowerCase();
+    if (m.includes('not exist') || m.includes('不存在')) {
+      try {
+        await db.createCollection('LoginLog');
+      } catch (_) { /* 已存在则忽略 */ }
+      try {
+        await db.collection('LoginLog').add(doc);
+      } catch (e2) {
+        console.warn('[auth-proxy] LoginLog 写入失败:', e2.message);
+      }
+    } else {
+      console.warn('[auth-proxy] LoginLog 写入失败:', err.message);
+    }
+  }
+}
+
+/** 记录一次手动登录成功（仅专员，每次成功登录写一条 type:'login'） */
+async function recordLogin(user) {
+  if (!user || user.role !== 'recruiter') return;
+  const now = new Date();
+  await addLoginLog({
+    username: user.username,
+    role: user.role,
+    type: 'login',
+    dateKey: formatDateKeyBeijing(now.getTime()),
+    eventAt: now,
+    createdAt: now,
+  });
+}
+
+/** 记录当天首条会话活跃（仅专员；同天同账号已有 type:'active' 则不重复写） */
+async function recordActiveIfNew(username, role) {
+  if (!username || role !== 'recruiter') return;
+  const now = new Date();
+  const dateKey = formatDateKeyBeijing(now.getTime());
+  try {
+    const res = await db.collection('LoginLog')
+      .where({ username, type: 'active', dateKey })
+      .count();
+    if (res && res.total > 0) return; // 当天已标记过活跃
+    await addLoginLog({
+      username,
+      role,
+      type: 'active',
+      dateKey,
+      eventAt: now,
+      createdAt: now,
+    });
+  } catch (err) {
+    console.warn('[auth-proxy] 活跃去重查询失败:', err.message);
+  }
+}
+
 // ===== 管理员权限校验 =====
 
 /** 验证调用者是否为管理员 */
@@ -239,6 +305,9 @@ async function handleLogin(params) {
 
     // P1-5：生成服务端签名会话令牌（防 localStorage 篡改）
     const sessionToken = generateSessionToken(user.username, user.role, user.name);
+
+    // 🆕 登录考勤：记录 1 次手动登录（异步容错，失败绝不影响登录主流程）
+    await recordLogin(user).catch((e) => console.warn('[auth-proxy] 记录登录失败:', e.message));
 
     return {
       success: true,
@@ -465,6 +534,10 @@ async function handleVerifySession(params) {
   if (!result.valid) {
     return { success: false, error: result.error };
   }
+
+  // 🆕 登录考勤：当天同账号首条会话活跃（去重标记，刷新多次只写 1 条）
+  await recordActiveIfNew(result.username, result.role)
+    .catch((e) => console.warn('[auth-proxy] 记录活跃失败:', e.message));
 
   return {
     success: true,
