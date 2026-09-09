@@ -70,6 +70,7 @@ class MockQuery {
     this._orderField = null;
     this._orderDir = 'asc';
     this._limitCount = null;
+    this._skipCount = null;
     this._fieldFilter = null;
   }
 
@@ -81,6 +82,7 @@ class MockQuery {
     cloned._orderField = this._orderField;
     cloned._orderDir = this._orderDir;
     cloned._limitCount = this._limitCount;
+    cloned._skipCount = this._skipCount;
     cloned._fieldFilter = this._fieldFilter;
 
     // 处理 db.command.or() — 将其拆分为 _orConditions 存储
@@ -100,6 +102,11 @@ class MockQuery {
 
   limit(n) {
     this._limitCount = n;
+    return this;
+  }
+
+  skip(n) {
+    this._skipCount = n;
     return this;
   }
 
@@ -148,6 +155,11 @@ class MockQuery {
         if (vb === undefined) return -1;
         return this._orderDir === 'desc' ? (vb > va ? 1 : -1) : (va > vb ? 1 : -1);
       });
+    }
+
+    // 应用 skip（排序后、limit 前）
+    if (this._skipCount !== null && this._skipCount > 0) {
+      docs = docs.slice(this._skipCount);
     }
 
     // 应用 limit

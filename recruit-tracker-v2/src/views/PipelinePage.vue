@@ -12,6 +12,7 @@ import { ownerFilter } from '../services/data-filter';
 import { handleError } from '../services/error-handler';
 import { isVersionConflict } from '../services/optimistic-lock';
 import { getInterviewRounds, getStagesForJob } from '../services/pipeline-engine';
+import { fetchAllApplications, buildApplicationIndex } from '../services/candidate-listing';
 import { useBatchSelection } from '../composables/useBatchSelection';
 import { useToast } from '../composables/useToast';
 import KanbanBoard from '../components/pipeline/KanbanBoard.vue';
@@ -156,20 +157,17 @@ async function loadUnassigned() {
   try {
     const dbInstance = db();
     const of = ownerFilter();
-    const unassignedFilter = {
-      jobId: '',
-      status: 'active',
-      isArchived: dbInstance.command.neq(true),
-      ...(of || {}),
-    };
-    const { data: apps } = await dbInstance
-      .collection('Application')
-      .where(unassignedFilter)
-      .orderBy('createdAt', 'desc')
-      .limit(50)
-      .get();
+    const isAdmin = !of;
+    const ownerId = of ? of.ownerId : null;
 
-    const appList = apps || [];
+    // 修复"已分配却滞留待分配"：分页拉全本人申请 → 统一判定，
+    // 只保留真正的「空 jobId + active」申请，已分配过的候选人不再出现在横幅
+    const allApps = await fetchAllApplications(dbInstance, { ownerId, isAdmin });
+    const idx = buildApplicationIndex(allApps);
+
+    const appList = [...idx.emptyActiveAppByCandidate.values()]
+      .sort((x, y) => new Date(y.createdAt || 0) - new Date(x.createdAt || 0))
+      .slice(0, 50);
 
     // 批量获取候选人信息
     if (appList.length > 0) {
@@ -201,6 +199,8 @@ async function loadUnassigned() {
       }
 
       unassignedCandidatesMap.value = newMap;
+    } else {
+      unassignedCandidatesMap.value = {};
     }
 
     unassignedApps.value = appList;

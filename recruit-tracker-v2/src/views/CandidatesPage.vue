@@ -14,6 +14,17 @@ import { handleError } from '../services/error-handler';
 import { captureError } from '../services/error-capture';
 import { isVersionConflict } from '../services/optimistic-lock';
 import { getAvailableTargets } from '../services/pipeline-engine';
+import {
+  fetchAllApplications,
+  fetchCandidatesByIds,
+  fetchCandidatesByOwner,
+  buildApplicationIndex,
+  selectTabApps,
+  collectUnassignedEntries,
+  sortByUpdatedDesc,
+  rowMatch,
+  pickPage,
+} from '../services/candidate-listing';
 import { useToast } from '../composables/useToast';
 import CandidateFilter from '../components/candidates/CandidateFilter.vue';
 import CandidateTable from '../components/candidates/CandidateTable.vue';
@@ -95,152 +106,93 @@ async function loadData(filters = {}) {
 
   try {
     const dbInstance = db();
+    const of = ownerFilter();
+    const isAdmin = !of;
+    const ownerId = of ? of.ownerId : null;
 
-    // 🆕 待分配 Tab：查询没有 Application 的 Candidate
+    // 待分配 Tab：统一基于全量数据判定（见 loadUnassigned）
     if (activeTab.value === 'unassigned') {
       await loadUnassigned(dbInstance, filters);
       return;
     }
 
-    let query = dbInstance.collection('Application');
+    // 1) 分页拉全本人(admin=全量)申请 —— 修复"前 200 截断导致入库却搜不到"
+    const allApps = await fetchAllApplications(dbInstance, { ownerId, isAdmin });
 
-    const conditions = {};
+    // 2) 按 Tab 语义选出作为行的申请
+    let appList = selectTabApps(allApps, activeTab.value);
 
+    // 3) 附加筛选（在内存中对全量生效）
     if (filters.stage) {
-      conditions.stage = filters.stage;
+      appList = appList.filter((a) => a.stage === filters.stage);
     }
     if (filters.jobId) {
-      conditions.jobId = filters.jobId;
+      appList = appList.filter((a) => a.jobId === filters.jobId);
     }
     if (filters.source) {
-      conditions['funnelMeta.entrySource'] = filters.source;
+      appList = appList.filter((a) => (a.funnelMeta?.entrySource || '') === filters.source);
     }
-
-    // 根据当前 Tab 决定查询状态
-    if (activeTab.value === 'ended') {
-      conditions.status = dbInstance.command.in(['rejected', 'withdrawn']);
-    } else if (!filters.stage || !['rejected', 'withdrawn'].includes(filters.stage)) {
-      conditions.status = 'active';
-    }
-
-    // Phase 1 数据隔离：专员只能看自己的候选人
-    const of = ownerFilter();
-    if (of) conditions.ownerId = of.ownerId;
-
-    // 🆕 修复：CloudBase SDK 的 .where() 是替换语义，不能链式调用
-    // 必须将所有条件合并到同一个对象，只调用一次 .where()
     if (filters.dateFrom) {
-      conditions.createdAt = dbInstance.command.gte(new Date(filters.dateFrom));
+      const t = new Date(filters.dateFrom).getTime();
+      appList = appList.filter((a) => new Date(a.createdAt).getTime() >= t);
     }
-
-    if (Object.keys(conditions).length > 0) {
-      query = query.where(conditions);
-    }
-
-    query = query.orderBy('updatedAt', 'desc');
-
-    const { data: allApps } = await query.limit(200).get();
-    let appList = allApps || [];
-
-    // isArchived 在 JS 端过滤（避免与 status 条件一起放 CloudBase where 时被忽略）
-    appList = appList.filter(a => a.isArchived !== true);
-
-    // 🆕 活跃/流程中 Tab：排除未分配岗位的候选人（jobId 为空），它们应出现在"待分配"Tab
-    if (activeTab.value === 'active' || activeTab.value === 'in-progress') {
-      appList = appList.filter(a => a.jobId && a.jobId !== '');
-    }
-
-    // 🆕 流程中 Tab：额外排除简历阶段和入职阶段（流程首尾端点不算"流程中"）
-    if (activeTab.value === 'in-progress') {
-      appList = appList.filter(a => a.stage !== 'resume' && a.stage !== 'onboard');
-    }
-
     if (filters.dateTo) {
-      const toDate = new Date(filters.dateTo);
-      toDate.setHours(23, 59, 59, 999);
-      appList = appList.filter((a) => new Date(a.createdAt) <= toDate);
+      const d = new Date(filters.dateTo);
+      d.setHours(23, 59, 59, 999);
+      const t = d.getTime();
+      appList = appList.filter((a) => new Date(a.createdAt).getTime() <= t);
     }
 
-    if (appList.length > 0) {
-      const candidateIds = [...new Set(appList.map((a) => a.candidateId).filter(Boolean))];
-      const candidatesMap = {};
+    appList = sortByUpdatedDesc(appList);
 
-      const batchSize = 50;
-      for (let i = 0; i < candidateIds.length; i += batchSize) {
-        const batch = candidateIds.slice(i, i + batchSize);
-        try {
-          const { data: candidates } = await dbInstance
-            .collection('Candidate')
-            .where({ _id: dbInstance.command.in(batch) })
-            .get();
+    // 4) 载入候选人 + 岗位
+    const candidateIds = [...new Set(appList.map((a) => a.candidateId).filter(Boolean))];
+    const candidatesMap = await fetchCandidatesByIds(dbInstance, candidateIds);
 
-          for (const c of (candidates || [])) {
-            candidatesMap[c._id] = c;
-          }
-        } catch (err) {
-          for (const id of batch) {
-            if (candidatesMap[id]) continue;
-            try {
-              const { data } = await dbInstance.collection('Candidate').doc(id).get();
-              if (data?.[0]) candidatesMap[id] = data[0];
-            } catch { /* skip */ }
-          }
-        }
-      }
-
-      const jobIds = [...new Set(appList.map((a) => a.jobId).filter(Boolean))];
-      const jobsMap = {};
-      for (const jobId of jobIds) {
-        const job = jobStore.getById(jobId);
-        if (job) jobsMap[jobId] = job;
-      }
-
-      let merged = appList.map((app) => {
-        const candidate = candidatesMap[app.candidateId] || {};
-        const job = jobsMap[app.jobId] || {};
-
-        return {
-          _id: app._id,
-          appId: app._id,
-          candidateId: app.candidateId,
-          name: candidate.name,
-          phone: candidate.phone,
-          email: candidate.email,
-          expectedPosition: candidate.expectedPosition,
-          sourceEmailSubject: candidate.sourceEmailSubject || '',
-          jobTitle: job.title || job.name,
-          jobName: job.title || job.name,
-          jobId: app.jobId,
-          stage: app.stage,
-          source: app.funnelMeta?.entrySource || candidate.source,
-          status: app.status,
-          ownerId: candidate.ownerId || app.ownerId,
-          createdBy: candidate.createdBy,
-          createdAt: app.createdAt,
-          updatedAt: app.updatedAt,
-          _candidate: candidate,
-          _application: app,
-          _job: job,
-        };
-      });
-
-      if (filters.search) {
-        const q = filters.search.toLowerCase();
-        merged = merged.filter((row) => {
-          return (row.name || '').toLowerCase().includes(q)
-            || (row.phone || '').includes(q)
-            || (row.email || '').toLowerCase().includes(q);
-        });
-      }
-
-      totalCount.value = merged.length;
-
-      const start = (page.value - 1) * pageSize;
-      rows.value = merged.slice(start, start + pageSize);
-    } else {
-      rows.value = [];
-      totalCount.value = 0;
+    const jobIds = [...new Set(appList.map((a) => a.jobId).filter(Boolean))];
+    const jobsMap = {};
+    for (const jobId of jobIds) {
+      const job = jobStore.getById(jobId);
+      if (job) jobsMap[jobId] = job;
     }
+
+    let merged = appList.map((app) => {
+      const candidate = candidatesMap.get(app.candidateId) || {};
+      const job = jobsMap[app.jobId] || {};
+
+      return {
+        _id: app._id,
+        appId: app._id,
+        candidateId: app.candidateId,
+        name: candidate.name,
+        phone: candidate.phone,
+        email: candidate.email,
+        expectedPosition: candidate.expectedPosition,
+        sourceEmailSubject: candidate.sourceEmailSubject || '',
+        jobTitle: job.title || job.name,
+        jobName: job.title || job.name,
+        jobId: app.jobId,
+        stage: app.stage,
+        source: app.funnelMeta?.entrySource || candidate.source,
+        status: app.status,
+        ownerId: candidate.ownerId || app.ownerId,
+        createdBy: candidate.createdBy,
+        createdAt: app.createdAt,
+        updatedAt: app.updatedAt,
+        _candidate: candidate,
+        _application: app,
+        _job: job,
+      };
+    });
+
+    // 5) 真搜索：在全量行集上匹配（不再受前 200 条窗口限制）
+    if (filters.search) {
+      merged = merged.filter((row) => rowMatch(row, filters.search));
+    }
+
+    const paged = pickPage(merged, page.value, pageSize);
+    totalCount.value = paged.total;
+    rows.value = paged.rows;
   } catch (err) {
     console.error('[CandidatesPage] 加载失败:', err.message);
     error.value = '加载候选人失败：' + err.message;
@@ -254,106 +206,34 @@ async function loadData(filters = {}) {
 async function loadUnassigned(dbInstance, filters = {}) {
   try {
     const of = ownerFilter();
+    const isAdmin = !of;
+    const ownerId = of ? of.ownerId : null;
 
-    // 1. 以 Application 集合为数据隔离依据——只查当前用户的申请记录
-    //    这样 email-imported 的候选人即使 Candidate.ownerId 缺失也能正确筛选
-    let appQuery = dbInstance.collection('Application')
-      .where({ isArchived: dbInstance.command.neq(true) });
-    if (of) appQuery = appQuery.where({ ownerId: of.ownerId });
+    // 1) 分页拉全本人(admin=全量)申请 —— 修复"前 500 截断导致假待分配"
+    const allApps = await fetchAllApplications(dbInstance, { ownerId, isAdmin });
+    const idx = buildApplicationIndex(allApps);
 
-    const { data: myApps } = await appQuery.limit(500).get();
-
-    const assignedIds = new Set();
-    const endedIds = new Set();  // 🆕 已结束（淘汰/放弃）且未分配岗位的候选人
-    const joblessAppMap = {};
-    const myCandidateIds = new Set();
-
-    for (const app of (myApps || [])) {
-      if (!app.candidateId) continue;
-      myCandidateIds.add(app.candidateId);
-
-      if (app.jobId && app.jobId !== '') {
-        // 已分配到实际岗位
-        assignedIds.add(app.candidateId);
-      } else if (app.status === 'active') {
-        // jobId 为空 → 待分配，保留 Application 信息供后续使用
-        if (!joblessAppMap[app.candidateId]) {
-          joblessAppMap[app.candidateId] = app;
-        }
-      } else if (app.status === 'rejected' || app.status === 'withdrawn') {
-        // 🐛 修复：已淘汰/放弃且未分配岗位的候选人，不应出现在待分配中
-        // 但如果该候选人同时有另一个 active 的待分配申请（joblessAppMap），
-        // 则以 joblessAppMap 为准——下面 filter 中会优先判断
-        if (!joblessAppMap[app.candidateId]) {
-          endedIds.add(app.candidateId);
-        }
-      }
+    // 2) 孤儿候选人兜底（专员：Candidate.ownerId==me 且本人名下无申请引用）
+    let orphanCandidates = [];
+    if (!isAdmin && ownerId) {
+      orphanCandidates = await fetchCandidatesByOwner(dbInstance, ownerId);
     }
 
-    // 2. 查询 Candidate——两个来源合并
-    const candidates = [];
-    const seenIds = new Set();
+    // 3) 统一判定：候选人存在任一已分配申请 → 绝不出现在待分配
+    const entries = collectUnassignedEntries(allApps, idx, orphanCandidates, { ownerId, isAdmin });
 
-    // 2a. 通过 Application 关联的候选人（数据隔离通过 Application.ownerId 保证）
-    if (myCandidateIds.size > 0) {
-      const idsArray = [...myCandidateIds];
-      for (let i = 0; i < idsArray.length; i += 100) {
-        const batch = idsArray.slice(i, i + 100);
-        const { data } = await dbInstance.collection('Candidate')
-          .where({ _id: dbInstance.command.in(batch) })
-          .orderBy('createdAt', 'desc')
-          .get();
-        for (const c of (data || [])) {
-          if (!seenIds.has(c._id)) {
-            seenIds.add(c._id);
-            candidates.push(c);
-          }
-        }
-      }
-    }
+    // 4) 载入候选人文档（孤儿条目已自带 candidate）
+    const needIds = entries.filter((e) => !e.orphan).map((e) => e.candidateId);
+    const candidatesMap = await fetchCandidatesByIds(dbInstance, needIds);
 
-    // 2b. 孤儿兜底：ownerId 匹配但无 Application 的候选人（手动录入未创建申请等异常情况）
-    if (of) {
-      const { data: orphanData } = await dbInstance.collection('Candidate')
-        .where({ ownerId: of.ownerId })
-        .orderBy('createdAt', 'desc')
-        .limit(200)
-        .get();
-      for (const c of (orphanData || [])) {
-        if (!seenIds.has(c._id)) {
-          seenIds.add(c._id);
-          candidates.push(c);
-        }
-      }
-    }
-
-    // 3. 筛选未分配：不在 assignedIds 中，且不在 endedIds 中（已淘汰/放弃的排除）
-    //    joblessAppMap 优先——如果有 active 待分配申请，即使另一申请已结束也算待分配
-    let unassigned = candidates.filter(c => {
-      if (assignedIds.has(c._id)) return false;
-      if (joblessAppMap[c._id]) return true;
-      if (endedIds.has(c._id)) return false;
-      return true;  // 孤儿候选人（无 Application）→ 待分配
-    });
-
-    // 搜索过滤
-    if (filters.search) {
-      const q = filters.search.toLowerCase();
-      unassigned = unassigned.filter(c =>
-        (c.name || '').toLowerCase().includes(q)
-        || (c.phone || '').includes(q)
-        || (c.email || '').toLowerCase().includes(q)
-      );
-    }
-
-    // 4. 转换为行数据
-    totalCount.value = unassigned.length;
-    const start = (page.value - 1) * pageSize;
-    rows.value = unassigned.slice(start, start + pageSize).map(c => {
-      const joblessApp = joblessAppMap[c._id] || null;
+    // 5) 组装行（字段形状与旧版一致）
+    let rowsAll = entries.map((e) => {
+      const c = e.orphan ? e.candidate : (candidatesMap.get(e.candidateId) || {});
+      const cid = c._id || e.candidateId;
+      const joblessApp = e.app || null;
       return {
-        _id: joblessApp?._id || c._id,
-        candidateId: c._id,
+        _id: joblessApp?._id || cid,
+        candidateId: cid,
         appId: joblessApp?._id || '',
         name: c.name,
         phone: c.phone,
@@ -366,7 +246,7 @@ async function loadUnassigned(dbInstance, filters = {}) {
         stage: joblessApp?.stage || '',
         source: joblessApp?.funnelMeta?.entrySource || c.source || 'email',
         status: 'unassigned',
-        ownerId: c.ownerId || of?.ownerId || '',
+        ownerId: c.ownerId || ownerId || '',
         createdBy: c.createdBy,
         createdAt: joblessApp?.createdAt || c.createdAt,
         updatedAt: c.updatedAt,
@@ -375,6 +255,20 @@ async function loadUnassigned(dbInstance, filters = {}) {
         _job: null,
       };
     });
+
+    // 6) 搜索 + 排序 + 分页（基于全量，真搜索）
+    if (filters.search) {
+      rowsAll = rowsAll.filter((r) => rowMatch(r, filters.search));
+    }
+    rowsAll.sort((x, y) => {
+      const ta = new Date(x.updatedAt || x.createdAt || 0).getTime();
+      const tb = new Date(y.updatedAt || y.createdAt || 0).getTime();
+      return tb - ta;
+    });
+
+    const paged = pickPage(rowsAll, page.value, pageSize);
+    totalCount.value = paged.total;
+    rows.value = paged.rows;
   } catch (err) {
     handleError(err, { context: '加载待分配候选人' });
     error.value = '加载待分配候选人失败：' + err.message;
