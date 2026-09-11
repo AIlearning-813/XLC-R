@@ -2,7 +2,7 @@
 /* 新励成招聘管理系统 V2.0 — 候选人列表（含批量操作+行内操作+岗位分配） */
 
 import { ref, computed, onMounted, watch } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRouter, useRoute } from 'vue-router';
 import { useJobStore } from '../stores/useJobStore';
 import { useApplicationStore } from '../stores/useApplicationStore';
 import { useCandidateStore } from '../stores/useCandidateStore';
@@ -14,17 +14,7 @@ import { handleError } from '../services/error-handler';
 import { captureError } from '../services/error-capture';
 import { isVersionConflict } from '../services/optimistic-lock';
 import { getAvailableTargets } from '../services/pipeline-engine';
-import {
-  fetchAllApplications,
-  fetchCandidatesByIds,
-  fetchCandidatesByOwner,
-  buildApplicationIndex,
-  selectTabApps,
-  collectUnassignedEntries,
-  sortByUpdatedDesc,
-  rowMatch,
-  pickPage,
-} from '../services/candidate-listing';
+import { loadWorkspace } from '../services/candidate-listing';
 import { useToast } from '../composables/useToast';
 import CandidateFilter from '../components/candidates/CandidateFilter.vue';
 import CandidateTable from '../components/candidates/CandidateTable.vue';
@@ -32,6 +22,7 @@ import StageTransitionDialog from '../components/pipeline/StageTransitionDialog.
 import AssignDemandDialog from '../components/candidates/AssignDemandDialog.vue';
 
 const router = useRouter();
+const route = useRoute();
 const jobStore = useJobStore();
 const appStore = useApplicationStore();
 const candidateStore = useCandidateStore();
@@ -53,6 +44,14 @@ const activeTab = ref('active'); // 'active' | 'in-progress' | 'unassigned' | 'e
 const page = ref(1);
 const pageSize = 20;
 const totalCount = ref(0);
+
+// 四个 Tab 各自的条数（角标常显用）。
+// 刻意不复用 totalCount —— 它是"当前视图条数"，页头「共 N 位候选人」也在用，
+// 复用会让页头数字被角标污染。
+const tabCounts = ref({ active: 0, 'in-progress': 0, unassigned: 0, ended: 0 });
+
+// 是否处于跨 Tab 搜索状态（搜索模式下行来自多个 Tab）
+const isSearching = computed(() => !!(currentFilters.value.search || '').trim());
 
 const totalPages = computed(() => Math.max(1, Math.ceil(totalCount.value / pageSize)));
 
@@ -100,6 +99,15 @@ const editForm = ref({ name: '', phone: '', email: '', expectedPosition: '' });
 
 // ===== 数据加载 =====
 
+/**
+ * 统一加载入口。
+ *
+ * 取数 / Tab 语义 / 搜索 / 排序 / 分页 / 角标计数全部收敛到 loadWorkspace，
+ * 页面只负责把结果写进响应式状态。
+ *
+ * 关键行为：filters.search 非空时会跨「活跃 / 已结束 / 待分配」三个 Tab 合并搜索，
+ * 修复"邮箱归集来的候选人只落在待分配 Tab，在默认的活跃 Tab 里怎么搜都搜不到"。
+ */
 async function loadData(filters = {}) {
   loading.value = true;
   error.value = '';
@@ -110,168 +118,22 @@ async function loadData(filters = {}) {
     const isAdmin = !of;
     const ownerId = of ? of.ownerId : null;
 
-    // 待分配 Tab：统一基于全量数据判定（见 loadUnassigned）
-    if (activeTab.value === 'unassigned') {
-      await loadUnassigned(dbInstance, filters);
-      return;
-    }
-
-    // 1) 分页拉全本人(admin=全量)申请 —— 修复"前 200 截断导致入库却搜不到"
-    const allApps = await fetchAllApplications(dbInstance, { ownerId, isAdmin });
-
-    // 2) 按 Tab 语义选出作为行的申请
-    let appList = selectTabApps(allApps, activeTab.value);
-
-    // 3) 附加筛选（在内存中对全量生效）
-    if (filters.stage) {
-      appList = appList.filter((a) => a.stage === filters.stage);
-    }
-    if (filters.jobId) {
-      appList = appList.filter((a) => a.jobId === filters.jobId);
-    }
-    if (filters.source) {
-      appList = appList.filter((a) => (a.funnelMeta?.entrySource || '') === filters.source);
-    }
-    if (filters.dateFrom) {
-      const t = new Date(filters.dateFrom).getTime();
-      appList = appList.filter((a) => new Date(a.createdAt).getTime() >= t);
-    }
-    if (filters.dateTo) {
-      const d = new Date(filters.dateTo);
-      d.setHours(23, 59, 59, 999);
-      const t = d.getTime();
-      appList = appList.filter((a) => new Date(a.createdAt).getTime() <= t);
-    }
-
-    appList = sortByUpdatedDesc(appList);
-
-    // 4) 载入候选人 + 岗位
-    const candidateIds = [...new Set(appList.map((a) => a.candidateId).filter(Boolean))];
-    const candidatesMap = await fetchCandidatesByIds(dbInstance, candidateIds);
-
-    const jobIds = [...new Set(appList.map((a) => a.jobId).filter(Boolean))];
-    const jobsMap = {};
-    for (const jobId of jobIds) {
-      const job = jobStore.getById(jobId);
-      if (job) jobsMap[jobId] = job;
-    }
-
-    let merged = appList.map((app) => {
-      const candidate = candidatesMap.get(app.candidateId) || {};
-      const job = jobsMap[app.jobId] || {};
-
-      return {
-        _id: app._id,
-        appId: app._id,
-        candidateId: app.candidateId,
-        name: candidate.name,
-        phone: candidate.phone,
-        email: candidate.email,
-        expectedPosition: candidate.expectedPosition,
-        sourceEmailSubject: candidate.sourceEmailSubject || '',
-        jobTitle: job.title || job.name,
-        jobName: job.title || job.name,
-        jobId: app.jobId,
-        stage: app.stage,
-        source: app.funnelMeta?.entrySource || candidate.source,
-        status: app.status,
-        ownerId: candidate.ownerId || app.ownerId,
-        createdBy: candidate.createdBy,
-        createdAt: app.createdAt,
-        updatedAt: app.updatedAt,
-        _candidate: candidate,
-        _application: app,
-        _job: job,
-      };
+    const result = await loadWorkspace(dbInstance, {
+      ownerId,
+      isAdmin,
+      tab: activeTab.value,
+      filters,
+      page: page.value,
+      pageSize,
+      jobsLookup: (jobId) => jobStore.getById(jobId),
     });
 
-    // 5) 真搜索：在全量行集上匹配（不再受前 200 条窗口限制）
-    if (filters.search) {
-      merged = merged.filter((row) => rowMatch(row, filters.search));
-    }
-
-    const paged = pickPage(merged, page.value, pageSize);
-    totalCount.value = paged.total;
-    rows.value = paged.rows;
+    rows.value = result.rows;
+    totalCount.value = result.total;
+    tabCounts.value = result.tabCounts;
   } catch (err) {
     console.error('[CandidatesPage] 加载失败:', err.message);
     error.value = '加载候选人失败：' + err.message;
-  } finally {
-    loading.value = false;
-  }
-}
-
-// ===== 待分配候选人的加载 =====
-
-async function loadUnassigned(dbInstance, filters = {}) {
-  try {
-    const of = ownerFilter();
-    const isAdmin = !of;
-    const ownerId = of ? of.ownerId : null;
-
-    // 1) 分页拉全本人(admin=全量)申请 —— 修复"前 500 截断导致假待分配"
-    const allApps = await fetchAllApplications(dbInstance, { ownerId, isAdmin });
-    const idx = buildApplicationIndex(allApps);
-
-    // 2) 孤儿候选人兜底（专员：Candidate.ownerId==me 且本人名下无申请引用）
-    let orphanCandidates = [];
-    if (!isAdmin && ownerId) {
-      orphanCandidates = await fetchCandidatesByOwner(dbInstance, ownerId);
-    }
-
-    // 3) 统一判定：候选人存在任一已分配申请 → 绝不出现在待分配
-    const entries = collectUnassignedEntries(allApps, idx, orphanCandidates, { ownerId, isAdmin });
-
-    // 4) 载入候选人文档（孤儿条目已自带 candidate）
-    const needIds = entries.filter((e) => !e.orphan).map((e) => e.candidateId);
-    const candidatesMap = await fetchCandidatesByIds(dbInstance, needIds);
-
-    // 5) 组装行（字段形状与旧版一致）
-    let rowsAll = entries.map((e) => {
-      const c = e.orphan ? e.candidate : (candidatesMap.get(e.candidateId) || {});
-      const cid = c._id || e.candidateId;
-      const joblessApp = e.app || null;
-      return {
-        _id: joblessApp?._id || cid,
-        candidateId: cid,
-        appId: joblessApp?._id || '',
-        name: c.name,
-        phone: c.phone,
-        email: c.email,
-        sourceEmailSubject: c.sourceEmailSubject || '',
-        expectedPosition: c.expectedPosition || '',
-        jobTitle: '',
-        jobName: '',
-        jobId: '',
-        stage: joblessApp?.stage || '',
-        source: joblessApp?.funnelMeta?.entrySource || c.source || 'email',
-        status: 'unassigned',
-        ownerId: c.ownerId || ownerId || '',
-        createdBy: c.createdBy,
-        createdAt: joblessApp?.createdAt || c.createdAt,
-        updatedAt: c.updatedAt,
-        _candidate: c,
-        _application: joblessApp,
-        _job: null,
-      };
-    });
-
-    // 6) 搜索 + 排序 + 分页（基于全量，真搜索）
-    if (filters.search) {
-      rowsAll = rowsAll.filter((r) => rowMatch(r, filters.search));
-    }
-    rowsAll.sort((x, y) => {
-      const ta = new Date(x.updatedAt || x.createdAt || 0).getTime();
-      const tb = new Date(y.updatedAt || y.createdAt || 0).getTime();
-      return tb - ta;
-    });
-
-    const paged = pickPage(rowsAll, page.value, pageSize);
-    totalCount.value = paged.total;
-    rows.value = paged.rows;
-  } catch (err) {
-    handleError(err, { context: '加载待分配候选人' });
-    error.value = '加载待分配候选人失败：' + err.message;
   } finally {
     loading.value = false;
   }
@@ -646,14 +508,20 @@ async function batchAssignJobs(ids, jobId) {
 // ===== 事件处理 =====
 
 function handleFilter(filters) {
+  const wasSearching = isSearching.value;
   currentFilters.value = filters;
   page.value = 1;
+  // 进出搜索模式时行集完全不同（跨 Tab ↔ 单 Tab），清空选择避免跨 Tab 混选
+  if (wasSearching !== !!(filters.search || '').trim()) {
+    selectedIds.value = new Set();
+  }
   loadData(filters);
 }
 
 function handleReset() {
   currentFilters.value = {};
   page.value = 1;
+  selectedIds.value = new Set();
   loadData({});
 }
 
@@ -670,6 +538,8 @@ function handleRowClick(row) {
 }
 
 function handleToggleSelect(id) {
+  // 搜索结果是跨 Tab 合并的，混选后批量操作会拿"待分配行"的 appId 去跑只有活跃行才该有的逻辑
+  if (isSearching.value) return;
   const newSet = new Set(selectedIds.value);
   if (newSet.has(id)) {
     newSet.delete(id);
@@ -680,6 +550,7 @@ function handleToggleSelect(id) {
 }
 
 function handleSelectAll(select) {
+  if (isSearching.value) return;
   if (select) {
     selectedIds.value = new Set(rows.value.map((r) => r._id));
   } else {
@@ -694,9 +565,21 @@ function goToPage(p) {
   }
 }
 
+// 外部带词跳转过来时预填搜索框（如导入表单查重命中后的「去候选人模块查看」）
+const initialSearch = ref('');
+
 onMounted(async () => {
   await jobStore.fetchActive();
-  loadData({});
+
+  const search = (route.query.search || '').toString().trim();
+  if (search) {
+    initialSearch.value = search;
+    currentFilters.value = { search };
+    // 预填后立刻清掉 query，避免刷新 / 浏览器回退时重复触发
+    router.replace({ path: route.path, query: {} });
+  }
+
+  loadData(currentFilters.value);
 });
 </script>
 
@@ -723,7 +606,8 @@ onMounted(async () => {
       </div>
     </div>
 
-    <!-- Tab 切换：活跃 / 已结束 / 待分配 -->
+    <!-- Tab 切换：活跃 / 流程中 / 待分配 / 已结束
+         角标常显（不再绑定 activeTab），让"待分配积压"这类数据在切过去之前就看得见 -->
     <div class="tab-switcher">
       <button
         class="tab-btn"
@@ -731,6 +615,7 @@ onMounted(async () => {
         @click="switchTab('active')"
       >
         活跃候选人
+        <span v-if="tabCounts.active > 0" class="tab-badge">{{ tabCounts.active }}</span>
       </button>
       <button
         class="tab-btn"
@@ -738,7 +623,7 @@ onMounted(async () => {
         @click="switchTab('in-progress')"
       >
         流程中
-        <span v-if="activeTab === 'in-progress'" class="tab-badge">{{ totalCount }}</span>
+        <span v-if="tabCounts['in-progress'] > 0" class="tab-badge">{{ tabCounts['in-progress'] }}</span>
       </button>
       <button
         class="tab-btn"
@@ -746,7 +631,7 @@ onMounted(async () => {
         @click="switchTab('unassigned')"
       >
         待分配
-        <span v-if="activeTab === 'unassigned'" class="tab-badge">{{ totalCount }}</span>
+        <span v-if="tabCounts.unassigned > 0" class="tab-badge tab-badge-alert">{{ tabCounts.unassigned }}</span>
       </button>
       <button
         class="tab-btn"
@@ -754,6 +639,7 @@ onMounted(async () => {
         @click="switchTab('ended')"
       >
         已结束
+        <span v-if="tabCounts.ended > 0" class="tab-badge">{{ tabCounts.ended }}</span>
       </button>
     </div>
 
@@ -785,9 +671,15 @@ onMounted(async () => {
     <!-- 筛选栏 -->
     <CandidateFilter
       :jobs="jobStore.activeJobs"
+      :initial-search="initialSearch"
       @filter="handleFilter"
       @reset="handleReset"
     />
+
+    <!-- 搜索时的跨 Tab 提示：搜索结果可能来自其他 Tab，行内会标注来源 -->
+    <div v-if="isSearching" class="search-scope-hint">
+      已在<strong>全部标签页</strong>中搜索（活跃 / 已结束 / 待分配），结果行会标注来源标签页
+    </div>
 
     <!-- 错误 -->
     <div v-if="error" class="pipeline-error" style="margin-top: var(--spacing-md);">
@@ -802,6 +694,7 @@ onMounted(async () => {
         :loading="loading"
         :selected-ids="selectedIds"
         :active-tab="activeTab"
+        :selectable="!isSearching"
         @row-click="handleRowClick"
         @toggle-select="handleToggleSelect"
         @select-all="handleSelectAll"
@@ -1053,6 +946,23 @@ onMounted(async () => {
   background: var(--primary); color: #fff;
   font-size: 11px; font-weight: 600;
   margin-left: 4px;
+}
+
+/* 待分配积压：用警示色，让未处理数量在 Tab 上就能被注意到 */
+.tab-badge-alert {
+  background: var(--warning);
+  color: #fff;
+}
+
+/* 跨 Tab 搜索范围提示 */
+.search-scope-hint {
+  margin-bottom: var(--spacing-md);
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--primary-bg);
+  border-left: 3px solid var(--primary);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  color: var(--gray-600);
 }
 
 /* === 批量操作工具栏 === */

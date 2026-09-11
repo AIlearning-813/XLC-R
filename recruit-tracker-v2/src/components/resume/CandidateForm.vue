@@ -5,12 +5,14 @@
  */
 
 import { ref, reactive, computed, onMounted, watch } from 'vue';
+import { useRouter } from 'vue-router';
 import cloudbase from '../../services/cloudbase';
 import { useConfigStore } from '../../stores/useConfigStore';
 import { useJobStore } from '../../stores/useJobStore';
 import { useRecruitmentDemandStore } from '../../stores/useRecruitmentDemandStore';
 
 const db = cloudbase.db();
+const router = useRouter();
 
 const props = defineProps({
   parseResult: { type: Object, default: () => ({}) },
@@ -124,13 +126,40 @@ const isFormValid = computed(() => {
   return basicInfo.name.trim() && selectedJobId.value;
 });
 
+const hasDuplicates = computed(() => props.duplicates.length > 0);
+
+/**
+ * 硬阻断级重复：exact（文件哈希相同）与 high（手机号 / 邮箱完全相同）。
+ * 这两级基本可以确定是同一个人，勾选"已知晓"就能放行是重复数据滚雪球的主因，
+ * 因此不给放行入口，只能去候选人模块查看已有记录。
+ * medium（姓名相同 + ≥2 维交叉）同名不同人的情况真实存在，仍保留勾选放行。
+ */
+const blockingDuplicates = computed(() =>
+  props.duplicates.filter((d) => d.matchLevel === 'exact' || d.matchLevel === 'high')
+);
+
+const hasBlockingDuplicates = computed(() => blockingDuplicates.value.length > 0);
+
+/** 面向上传者的阻断原因说明 */
+const blockingReason = computed(() => {
+  const levels = new Set(blockingDuplicates.value.map((d) => d.matchLevel));
+  if (levels.has('exact')) return '同一份简历文件已录入过';
+  if (levels.has('high')) return '手机号或邮箱与已有候选人完全相同';
+  return '已存在重复候选人';
+});
+
 const canSubmit = computed(() => {
   if (!isFormValid.value || props.submitting) return false;
-  if (props.duplicates.length > 0 && !duplicateAcknowledged.value) return false;
+  if (hasBlockingDuplicates.value) return false;              // 硬阻断，无放行入口
+  if (hasDuplicates.value && !duplicateAcknowledged.value) return false;
   return true;
 });
 
-const hasDuplicates = computed(() => props.duplicates.length > 0);
+/** 跳转到候选人模块，带上姓名搜索词直接定位到已有记录 */
+function goToExistingCandidate() {
+  const name = blockingDuplicates.value[0]?.candidate?.name || basicInfo.name.trim();
+  router.push({ path: '/candidates', query: name ? { search: name } : {} });
+}
 
 // ===== 监听：选需求 → 自动填岗位 =====
 watch(selectedDemandId, (newDemandId) => {
@@ -346,14 +375,25 @@ function handleSubmit() {
     </section>
 
     <!-- 重复检测提示 -->
-    <section v-if="hasDuplicates" class="duplicate-warning">
+    <section
+      v-if="hasDuplicates"
+      class="duplicate-warning"
+      :class="{ 'is-blocked': hasBlockingDuplicates }"
+    >
       <div class="duplicate-header">
         <svg class="duplicate-icon" viewBox="0 0 24 24" fill="currentColor">
           <path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/>
         </svg>
         <div>
           <h4 class="duplicate-title">发现可能重复的候选人（{{ duplicates.length }} 条）</h4>
-          <p class="duplicate-desc">同一候选人投不同岗位是正常行为，系统不会阻止录入，但请确认是否为同一个人</p>
+          <p class="duplicate-desc">
+            <template v-if="hasBlockingDuplicates">
+              系统库中已存在该候选人，已阻止重复录入。请到候选人模块查看已有记录，直接在其上关联岗位。
+            </template>
+            <template v-else>
+              同一候选人投不同岗位是正常行为，系统不会阻止录入，但请确认是否为同一个人
+            </template>
+          </p>
         </div>
       </div>
 
@@ -379,7 +419,30 @@ function handleSubmit() {
         </div>
       </div>
 
-      <div class="duplicate-ack">
+      <!-- 硬阻断：不给放行入口，引导去已有记录上操作 -->
+      <div v-if="hasBlockingDuplicates" class="duplicate-blocked">
+        <div class="duplicate-blocked-reason">{{ blockingReason }}</div>
+        <ul class="duplicate-blocked-list">
+          <li v-for="(dup, i) in blockingDuplicates" :key="i">
+            <span class="duplicate-badge" :class="`badge-${dup.matchLevel}`">
+              {{ dup.matchLevel === 'exact' ? '完全重复' : '高置信度' }}
+            </span>
+            <span class="duplicate-name">
+              {{ dup.candidate?.name || '未知' }}
+              <template v-if="dup.candidate?.phone"> · {{ dup.candidate.phone }}</template>
+            </span>
+          </li>
+        </ul>
+        <button type="button" class="btn btn-sm btn-primary" @click="goToExistingCandidate">
+          去候选人模块查看
+        </button>
+        <p class="duplicate-blocked-hint">
+          如需为该候选人追加投递岗位，请在候选人列表中找到 TA 并关联岗位，不要重复录入。
+        </p>
+      </div>
+
+      <!-- 疑似重复（同名 + 多维交叉）：保留人工确认放行 -->
+      <div v-else class="duplicate-ack">
         <label class="duplicate-ack-label">
           <input
             v-model="duplicateAcknowledged"
@@ -549,6 +612,52 @@ function handleSubmit() {
 .duplicate-ack {
   padding-top: var(--spacing-sm);
   border-top: 1px solid rgba(212, 162, 78, 0.2);
+}
+
+/* === 硬阻断（exact / high）=== */
+.duplicate-warning.is-blocked {
+  background: var(--danger-bg);
+  border-color: rgba(220, 53, 69, 0.3);
+}
+
+.duplicate-warning.is-blocked .duplicate-icon {
+  color: var(--danger);
+}
+
+.duplicate-blocked {
+  padding-top: var(--spacing-sm);
+  border-top: 1px solid rgba(220, 53, 69, 0.2);
+}
+
+.duplicate-blocked-reason {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--danger);
+  margin-bottom: var(--spacing-sm);
+}
+
+.duplicate-blocked-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 var(--spacing-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.duplicate-blocked-list li {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  font-size: var(--font-size-sm);
+  color: var(--gray-600);
+}
+
+.duplicate-blocked-hint {
+  margin-top: var(--spacing-sm);
+  font-size: var(--font-size-xs);
+  color: var(--gray-400);
+  line-height: 1.5;
 }
 
 .duplicate-ack-label {

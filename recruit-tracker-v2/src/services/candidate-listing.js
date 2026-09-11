@@ -6,6 +6,9 @@
  *      申请量大的账号，更早入库的候选人（含已分配的）被排挤出窗口，列表与搜索都看不到。
  *   2. 候选人「已分配却滞留待分配」—— 同一候选人若同时存在「空 jobId 残留申请」与
  *      「已分配申请」，旧逻辑只取本人前 500 条申请做排除，已分配那条排到窗口外即漏判。
+ *   3. 候选人「搜不到」但查重又说已存在 —— 搜索只在当前 Tab 内进行，邮箱归集来的候选人
+ *      （jobId 为空）只落在「待分配」Tab，用户在默认的「活跃候选人」Tab 里怎么搜都没有；
+ *      而重复检测是查全库的，两边口径不一致。现已改为：有搜索词时跨 Tab 合并搜索并标注来源 Tab。
  *
  * 定位：一次性分页拉全当前用户（或 admin=全量）数据，在内存中统一完成
  *       归属判定 / Tab 语义 / 搜索 / 排序 / 分页 —— 所有计算基于全量，从根上消除截断失真。
@@ -229,4 +232,257 @@ export function pickPage(list, page = 1, pageSize = 20) {
   const total = arr.length;
   const start = Math.max(0, (page - 1) * pageSize);
   return { rows: arr.slice(start, start + pageSize), total };
+}
+
+// ===================== 跨 Tab 搜索 + 角标计数（A / B） =====================
+
+/**
+ * 跨 Tab 搜索时纳入的 Tab 集合。
+ * 有意不并入 'in-progress' —— 它是 'active' 的子集（selectTabApps 里 in-progress 只是再排除
+ * resume/onboard 两端），并入会让同一份 Application 在结果中出现两次。
+ */
+export const SEARCH_TABS = ['active', 'ended', 'unassigned'];
+
+/**
+ * 给每行打上来源 Tab 标记（纯函数，不改原数组）
+ * href: <td> 与非搜索模式共用一个表格组件，靠 sourceTab 决定行内操作（如"重新激活"）
+ * @returns {Array} 每行新增 sourceTab 字段
+ */
+export function tagRows(rows, tab) {
+  return (rows || []).map((r) => ({ ...r, sourceTab: tab }));
+}
+
+/**
+ * 四个 Tab 各自的条数（纯函数）—— 用于 Tab 角标常显。
+ * 口径是"未叠加筛选条件的积压量"，因此在有筛选时也不变，便于用户判断积压规模。
+ * @param {Array} apps - 本人(或全量)申请
+ * @param {Array} unassignedEntries - collectUnassignedEntries 的结果
+ * @returns {{ active:number, 'in-progress':number, unassigned:number, ended:number }}
+ */
+export function countByTab(apps, unassignedEntries) {
+  return {
+    active: selectTabApps(apps, 'active').length,
+    'in-progress': selectTabApps(apps, 'in-progress').length,
+    unassigned: (unassignedEntries || []).length,
+    ended: selectTabApps(apps, 'ended').length,
+  };
+}
+
+/**
+ * 按 _id 去重并保持首次出现顺序（纯函数）
+ * 跨 Tab 合并时的防御：待分配行 _id = appId || candidateId，孤儿行 _id = candidateId，
+ * 普通行 _id = appId，理论上不重叠，但仍做一次兜底。
+ */
+export function dedupeById(rows) {
+  const seen = new Set();
+  const out = [];
+  for (const r of (rows || [])) {
+    if (!r || seen.has(r._id)) continue;
+    seen.add(r._id);
+    out.push(r);
+  }
+  return out;
+}
+
+/**
+ * 对申请列表套用非搜索类筛选条件（纯函数）
+ * 注意：日期按 createdAt 比较，dateTo 取当天 23:59:59.999
+ */
+export function applyAppFilters(appList, filters = {}) {
+  let list = appList || [];
+  if (filters.stage) {
+    list = list.filter((a) => a.stage === filters.stage);
+  }
+  if (filters.jobId) {
+    list = list.filter((a) => a.jobId === filters.jobId);
+  }
+  if (filters.source) {
+    list = list.filter((a) => (a.funnelMeta?.entrySource || '') === filters.source);
+  }
+  if (filters.dateFrom) {
+    const t = new Date(filters.dateFrom).getTime();
+    list = list.filter((a) => new Date(a.createdAt).getTime() >= t);
+  }
+  if (filters.dateTo) {
+    const d = new Date(filters.dateTo);
+    d.setHours(23, 59, 59, 999);
+    const t = d.getTime();
+    list = list.filter((a) => new Date(a.createdAt).getTime() <= t);
+  }
+  return list;
+}
+
+/**
+ * 把已分配的申请装配成列表行（纯函数）
+ * 行字段形状与重构前完全一致，避免牵连 CandidateTable / 详情跳转 / 弹窗。
+ * @param {Array} appList - 已筛选排序的 Application[]
+ * @param {Map} candidatesMap - candidateId -> Candidate
+ * @param {Object} jobsMap - jobId -> Job
+ */
+export function buildApplicationRows(appList, candidatesMap, jobsMap = {}) {
+  return (appList || []).map((app) => {
+    const candidate = candidatesMap.get(app.candidateId) || {};
+    const job = jobsMap[app.jobId] || {};
+
+    return {
+      _id: app._id,
+      appId: app._id,
+      candidateId: app.candidateId,
+      name: candidate.name,
+      phone: candidate.phone,
+      email: candidate.email,
+      expectedPosition: candidate.expectedPosition,
+      sourceEmailSubject: candidate.sourceEmailSubject || '',
+      jobTitle: job.title || job.name,
+      jobName: job.title || job.name,
+      jobId: app.jobId,
+      stage: app.stage,
+      source: app.funnelMeta?.entrySource || candidate.source,
+      status: app.status,
+      ownerId: candidate.ownerId || app.ownerId,
+      createdBy: candidate.createdBy,
+      createdAt: app.createdAt,
+      updatedAt: app.updatedAt,
+      _candidate: candidate,
+      _application: app,
+      _job: job,
+    };
+  });
+}
+
+/**
+ * 把待分配条目装配成列表行（纯函数）
+ * 待分配行没有已分配岗位，故 jobTitle/jobName/jobId 恒为空、status 恒为 'unassigned'。
+ * @param {Array} entries - collectUnassignedEntries 的结果
+ * @param {Map} candidatesMap - candidateId -> Candidate（孤儿条目自带 candidate，无需查）
+ * @param {Object} opts
+ * @param {string|null} opts.ownerId
+ */
+export function buildUnassignedRows(entries, candidatesMap, { ownerId = null } = {}) {
+  return (entries || []).map((e) => {
+    const c = e.orphan ? e.candidate : (candidatesMap.get(e.candidateId) || {});
+    const cid = c._id || e.candidateId;
+    const joblessApp = e.app || null;
+
+    return {
+      _id: joblessApp?._id || cid,
+      candidateId: cid,
+      appId: joblessApp?._id || '',
+      name: c.name,
+      phone: c.phone,
+      email: c.email,
+      sourceEmailSubject: c.sourceEmailSubject || '',
+      expectedPosition: c.expectedPosition || '',
+      jobTitle: '',
+      jobName: '',
+      jobId: '',
+      stage: joblessApp?.stage || '',
+      source: joblessApp?.funnelMeta?.entrySource || c.source || 'email',
+      status: 'unassigned',
+      ownerId: c.ownerId || ownerId || '',
+      createdBy: c.createdBy,
+      createdAt: joblessApp?.createdAt || c.createdAt,
+      updatedAt: c.updatedAt,
+      _candidate: c,
+      _application: joblessApp,
+      _job: null,
+    };
+  });
+}
+
+/**
+ * 装配单个 Tab 的行集（内部函数，含 DB 取数）
+ * @param {Object} ctx - { apps, unassignedEntries, ownerId, filters, jobsLookup }
+ */
+async function buildRowsForTab(db, tabName, ctx) {
+  const { apps, unassignedEntries, ownerId, filters = {}, jobsLookup = null } = ctx;
+
+  // 待分配：保持原有语义 —— 只认搜索词，忽略 stage/jobId/source/date
+  if (tabName === 'unassigned') {
+    const needIds = unassignedEntries.filter((e) => !e.orphan).map((e) => e.candidateId);
+    const candidatesMap = await fetchCandidatesByIds(db, needIds);
+    return tagRows(buildUnassignedRows(unassignedEntries, candidatesMap, { ownerId }), 'unassigned');
+  }
+
+  const appList = applyAppFilters(selectTabApps(apps, tabName), filters);
+
+  const candidateIds = [...new Set(appList.map((a) => a.candidateId).filter(Boolean))];
+  const candidatesMap = await fetchCandidatesByIds(db, candidateIds);
+
+  const jobIds = [...new Set(appList.map((a) => a.jobId).filter(Boolean))];
+  const jobsMap = {};
+  for (const jobId of jobIds) {
+    const job = jobsLookup ? jobsLookup(jobId) : null;
+    if (job) jobsMap[jobId] = job;
+  }
+
+  return tagRows(buildApplicationRows(appList, candidatesMap, jobsMap), tabName);
+}
+
+/**
+ * 候选人工作区统一加载入口（编排）—— 替换页面里两套重复的取数/合并/排序逻辑。
+ *
+ * 行为约定：
+ *   - 有搜索词 → 跨 active / ended / unassigned 三个 Tab 合并搜索，每行带 sourceTab
+ *     （修复"待分配的候选人在活跃 Tab 永远搜不到"）
+ *   - 无搜索词 → 只构建当前 Tab，行集与排序与重构前逐条一致
+ *   - 非搜索类筛选（stage/jobId/source/date）仅在「当前 Tab」上生效，保持原语义
+ *
+ * @param {Object} db - cloudbase.db() 实例
+ * @param {Object} options
+ * @param {string|null} options.ownerId
+ * @param {boolean} options.isAdmin
+ * @param {string} options.tab - 'active'|'in-progress'|'unassigned'|'ended'
+ * @param {Object} options.filters - { search, stage, jobId, source, dateFrom, dateTo }
+ * @param {number} options.page
+ * @param {number} options.pageSize
+ * @param {Function|null} options.jobsLookup - jobId -> Job（由页面注入 jobStore）
+ * @returns {Promise<{ rows: Array, total: number, tabCounts: Object }>}
+ */
+export async function loadWorkspace(db, options = {}) {
+  const {
+    ownerId = null,
+    isAdmin = false,
+    tab = 'active',
+    filters = {},
+    page = 1,
+    pageSize = 20,
+    jobsLookup = null,
+  } = options;
+
+  // 两个分页拉取互相独立，并发执行以缩短首屏等待（数据量大的账号收益明显）
+  const [apps, orphanCandidates] = await Promise.all([
+    fetchAllApplications(db, { ownerId, isAdmin }),
+    // 孤儿候选人兜底（专员：Candidate.ownerId==me 且本人名下无申请引用）
+    // 角标计数依赖它，因此在所有 Tab 下都要取，不能只给待分配 Tab 用
+    (!isAdmin && ownerId) ? fetchCandidatesByOwner(db, ownerId) : Promise.resolve([]),
+  ]);
+  const idx = buildApplicationIndex(apps);
+
+  const unassignedEntries = collectUnassignedEntries(apps, idx, orphanCandidates, { ownerId, isAdmin });
+  const tabCounts = countByTab(apps, unassignedEntries);
+
+  const q = (filters.search || '').trim();
+  const ctx = { apps, unassignedEntries, ownerId, jobsLookup };
+
+  let merged;
+  if (q) {
+    const parts = [];
+    for (const t of SEARCH_TABS) {
+      // 非搜索类筛选只作用于当前 Tab，其他 Tab 保持全量参与搜索
+      const tabFilters = t === tab ? filters : {};
+      parts.push(await buildRowsForTab(db, t, { ...ctx, filters: tabFilters }));
+    }
+    merged = dedupeById(parts.flat());
+  } else {
+    merged = await buildRowsForTab(db, tab, { ...ctx, filters });
+  }
+
+  merged = sortByUpdatedDesc(merged);
+  if (q) {
+    merged = merged.filter((row) => rowMatch(row, q));
+  }
+
+  const paged = pickPage(merged, page, pageSize);
+  return { rows: paged.rows, total: paged.total, tabCounts };
 }

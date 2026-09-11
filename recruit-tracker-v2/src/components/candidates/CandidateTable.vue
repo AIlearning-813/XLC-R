@@ -10,6 +10,8 @@ const props = defineProps({
   loading: { type: Boolean, default: false },
   selectedIds: { type: Set, default: () => new Set() },
   activeTab: { type: String, default: 'active' },
+  // 跨 Tab 搜索结果里行来自多个标签页，混选会让批量操作作用到不该作用的行上，故禁用勾选
+  selectable: { type: Boolean, default: true },
 });
 
 const emit = defineEmits(['row-click', 'toggle-select', 'select-all', 'action']);
@@ -111,6 +113,30 @@ function sourceLabel(source) {
   return map[source] || source || '';
 }
 
+/**
+ * 该行实际所属的标签页。
+ * 跨 Tab 搜索时行自带 sourceTab；非搜索模式下行只属于当前标签页，回退到 activeTab。
+ */
+function rowTab(row) {
+  return row?.sourceTab || props.activeTab;
+}
+
+/** 已结束行 —— 决定行内操作是「重新激活」还是「淘汰/放弃/删除简历」 */
+function isEndedRow(row) {
+  return rowTab(row) === 'ended';
+}
+
+/** 来源标签页徽章文案（仅跨 Tab 搜索时展示） */
+const SOURCE_TAB_LABEL = {
+  active: '活跃',
+  ended: '已结束',
+  unassigned: '待分配',
+};
+
+function sourceTabLabel(tab) {
+  return SOURCE_TAB_LABEL[tab] || tab;
+}
+
 function onToggleAll() {
   emit('select-all', !allSelected.value);
 }
@@ -140,6 +166,7 @@ function getAvailableStages(row) {
             <input
               type="checkbox"
               :checked="allSelected"
+              :disabled="!selectable"
               @change="onToggleAll"
             />
           </th>
@@ -184,12 +211,18 @@ function getAvailableStages(row) {
             <input
               type="checkbox"
               :checked="selectedIds.has(row._id)"
+              :disabled="!selectable"
               @change="emit('toggle-select', row._id)"
             />
           </td>
           <td class="col-name">
             <div class="name-cell">
               <span class="name-text">{{ row.name || '未命名' }}</span>
+              <span
+                v-if="row.sourceTab"
+                class="source-tab-badge"
+                :class="'source-tab-' + row.sourceTab"
+              >{{ sourceTabLabel(row.sourceTab) }}</span>
               <span class="name-email-subject" v-if="row.sourceEmailSubject" :title="row.sourceEmailSubject">{{ row.sourceEmailSubject }}</span>
               <span class="name-phone" v-if="row.phone">{{ row.phone }}</span>
             </div>
@@ -272,8 +305,8 @@ function getAvailableStages(row) {
 
                   <div class="dropdown-divider"></div>
 
-                  <!-- 已结束 Tab：重新激活 -->
-                  <template v-if="activeTab === 'ended'">
+                  <!-- 已结束 Tab：重新激活（跨 Tab 搜索时按行自身来源判断） -->
+                  <template v-if="isEndedRow(row)">
                     <button
                       class="dropdown-item item-activate"
                       @click="handleAction('reactivate', row, $event)"
@@ -336,8 +369,8 @@ function getAvailableStages(row) {
             <span>关联需求</span>
           </button>
           <div class="dropdown-divider"></div>
-          <!-- 已结束：重新激活 -->
-          <button v-if="activeTab === 'ended'" class="dropdown-item item-activate" @click="handleContextAction('reactivate')">
+          <!-- 已结束：重新激活（跨 Tab 搜索时按行自身来源判断） -->
+          <button v-if="isEndedRow(contextMenu.row)" class="dropdown-item item-activate" @click="handleContextAction('reactivate')">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
             <span>重新激活</span>
           </button>
@@ -426,6 +459,34 @@ tbody td {
 .name-text {
   font-weight: 500;
   color: var(--gray-700);
+}
+
+/* 跨 Tab 搜索时的来源标签页徽章（只在搜索结果里出现） */
+.source-tab-badge {
+  align-self: flex-start;
+  margin-top: 3px;
+  padding: 1px 8px;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.5;
+  background: var(--gray-100);
+  color: var(--gray-500);
+}
+
+.source-tab-badge.source-tab-unassigned {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+
+.source-tab-badge.source-tab-active {
+  background: var(--primary-bg);
+  color: var(--primary);
+}
+
+.source-tab-badge.source-tab-ended {
+  background: var(--gray-100);
+  color: var(--gray-500);
 }
 
 .name-phone {

@@ -1,17 +1,49 @@
 <script setup>
 /* 新励成招聘管理系统 V2.0 — 候选人搜索筛选栏 */
 
-import { ref, computed } from 'vue';
+import { ref, computed, watch, onBeforeUnmount } from 'vue';
 import { FUNNEL_STAGES } from '../../config/constants';
 
 const props = defineProps({
   jobs: { type: Array, default: () => [] },
+  // 外部预填的搜索词（如从导入表单查重命中后带词跳转过来）
+  initialSearch: { type: String, default: '' },
 });
 
 const emit = defineEmits(['filter', 'reset']);
 
 // 搜索框
-const searchQuery = ref('');
+const searchQuery = ref(props.initialSearch || '');
+
+// 输入防抖：搜索现在会跨 Tab 拉全量比对，避免每敲一个字就触发一次全量查询
+const SEARCH_DEBOUNCE = 300;
+let searchTimer = null;
+
+function scheduleSearch() {
+  if (searchTimer) clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => {
+    searchTimer = null;
+    applyFilters();
+  }, SEARCH_DEBOUNCE);
+}
+
+function cancelScheduledSearch() {
+  if (searchTimer) {
+    clearTimeout(searchTimer);
+    searchTimer = null;
+  }
+}
+
+onBeforeUnmount(cancelScheduledSearch);
+
+watch(searchQuery, scheduleSearch);
+
+// 外部预填变化时同步（同路由内带词跳转时组件不会重新挂载）
+watch(() => props.initialSearch, (val) => {
+  if (val !== undefined && val !== null && val !== searchQuery.value) {
+    searchQuery.value = val;
+  }
+});
 
 // 筛选条件
 const filterStage = ref('');
@@ -43,6 +75,7 @@ function applyFilters() {
 }
 
 function resetFilters() {
+  cancelScheduledSearch(); // 避免清空后又被排队中的防抖再触发一次
   searchQuery.value = '';
   filterStage.value = '';
   filterJob.value = '';
@@ -52,8 +85,9 @@ function resetFilters() {
   emit('reset');
 }
 
-// 搜索回车触发
+// 回车 / 失焦：立即搜索，不等防抖
 function onSearchEnter() {
+  cancelScheduledSearch();
   applyFilters();
 }
 </script>
@@ -71,7 +105,7 @@ function onSearchEnter() {
         class="search-input"
         placeholder="搜索姓名、手机、邮箱..."
         @keyup.enter="onSearchEnter"
-        @blur="applyFilters"
+        @blur="onSearchEnter"
       />
     </div>
 

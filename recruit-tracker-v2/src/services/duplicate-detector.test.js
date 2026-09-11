@@ -347,3 +347,59 @@ describe('detectDuplicates', () => {
     expect(high.length).toBeGreaterThanOrEqual(1);
   });
 });
+
+// ===== 分级契约（供导入表单的硬阻断逻辑依赖）=====
+// 表单按 matchLevel 决定是否允许录入：exact / high 硬阻断，medium 可勾选放行。
+// 因此这两级的判定结果必须稳定且严格 —— 下面用强断言固化，不再用 if 弱断言。
+
+describe('detectDuplicates — 分级契约', () => {
+  it('exact 短路：哈希命中后不再继续查手机/姓名', async () => {
+    cloudbase.__setCollectionData('Candidate', [
+      makeCandidate({ _id: 'by_hash', fileHash: 'h1' }),
+      makeCandidate({ _id: 'by_phone', fileHash: 'other', phone: '13800138000' }),
+    ]);
+
+    const matches = await detectDuplicates(makeParsedData(), { fileHash: 'h1', db });
+
+    expect(matches).toHaveLength(1); // 只返回哈希命中那条
+    expect(matches[0].matchLevel).toBe('exact');
+    expect(matches[0].candidate._id).toBe('by_hash');
+  });
+
+  it('手机号 + 邮箱同时命中：唯一 high，confidence 0.95，原因逐项列出', async () => {
+    cloudbase.__setCollectionData('Candidate', [
+      makeCandidate({ _id: 'dup', phone: '13800138000', email: 'zhangsan@example.com' }),
+    ]);
+
+    const matches = await detectDuplicates(makeParsedData(), { db });
+
+    expect(matches).toHaveLength(1);
+    expect(matches[0].matchLevel).toBe('high');
+    expect(matches[0].matchConfidence).toBe(0.95);
+    expect(matches[0].matchReason).toContain('手机号完全相同');
+    expect(matches[0].matchReason).toContain('邮箱完全相同');
+  });
+
+  it('排除列表命中 candidateB 方向时同样不返回', async () => {
+    cloudbase.__setCollectionData('Candidate', [makeCandidate({ _id: 'c_b' })]);
+    cloudbase.__setCollectionData('DuplicateExclusion', [
+      { candidateA: 'some_other', candidateB: 'c_b' },
+    ]);
+
+    const matches = await detectDuplicates(makeParsedData(), { db });
+    expect(matches).toHaveLength(0);
+  });
+
+  it('medium 级候选人被排除后不再返回', async () => {
+    cloudbase.__setCollectionData('Candidate', [
+      // 手机/邮箱不同 → 只能走弱匹配
+      makeCandidate({ _id: 'weak', phone: '13999999999', email: 'diff@example.com' }),
+    ]);
+    cloudbase.__setCollectionData('DuplicateExclusion', [
+      { candidateA: 'weak', candidateB: 'irrelevant' },
+    ]);
+
+    const matches = await detectDuplicates(makeParsedData(), { db });
+    expect(matches.filter((m) => m.matchLevel === 'medium')).toHaveLength(0);
+  });
+});
