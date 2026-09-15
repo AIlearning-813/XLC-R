@@ -119,10 +119,10 @@
     },
     {
       "name": "rag-assistant-proxy",
-      "timeout": 30,
+      "timeout": 60,
       "memorySize": 256,
       "runtime": "Nodejs20.19",
-      "comment": "RAG 检索增强生成代理 — 招聘 AI 助手核心云函数，DEEPSEEK_API_KEY 由 CloudBase 控制台管理"
+      "comment": "RAG 检索增强生成代理 — 招聘 AI 助手核心云函数，DEEPSEEK_API_KEY 由 CloudBase 控制台管理。timeout 必须 ≥ 代码里的 API_TIMEOUT(50s)"
     },
     {
       "name": "web-search-agent",
@@ -158,20 +158,6 @@
       "memorySize": 256,
       "runtime": "Nodejs20.19",
       "comment": "一次性云函数：从员工花名册初始化四级部门树到 Config 集合"
-    },
-    {
-      "name": "cleanup-test-data",
-      "timeout": 300,
-      "memorySize": 512,
-      "runtime": "Nodejs20.19",
-      "comment": "一次性云函数：清空内测前测试数据（Candidate/Application/RecruitmentDemand 等9个集合）"
-    },
-    {
-      "name": "db-diagnose",
-      "timeout": 30,
-      "memorySize": 256,
-      "runtime": "Nodejs20.19",
-      "comment": "一次性云函数：诊断数据库状态"
     },
     {
       "name": "fix-missing-jobs",
