@@ -565,7 +565,7 @@ function goToPage(p) {
   }
 }
 
-// 外部带词跳转过来时预填搜索框（如导入表单查重命中后的「去候选人模块查看」）
+// 外部带词跳转过来时预填搜索框（如 /candidates?search=张三 这样的深链）
 const initialSearch = ref('');
 
 onMounted(async () => {

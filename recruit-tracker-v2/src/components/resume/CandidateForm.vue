@@ -5,14 +5,12 @@
  */
 
 import { ref, reactive, computed, onMounted, watch } from 'vue';
-import { useRouter } from 'vue-router';
 import cloudbase from '../../services/cloudbase';
 import { useConfigStore } from '../../stores/useConfigStore';
 import { useJobStore } from '../../stores/useJobStore';
 import { useRecruitmentDemandStore } from '../../stores/useRecruitmentDemandStore';
 
 const db = cloudbase.db();
-const router = useRouter();
 
 const props = defineProps({
   parseResult: { type: Object, default: () => ({}) },
@@ -129,10 +127,17 @@ const isFormValid = computed(() => {
 const hasDuplicates = computed(() => props.duplicates.length > 0);
 
 /**
- * 硬阻断级重复：exact（文件哈希相同）与 high（手机号 / 邮箱完全相同）。
- * 这两级基本可以确定是同一个人，勾选"已知晓"就能放行是重复数据滚雪球的主因，
- * 因此不给放行入口，只能去候选人模块查看已有记录。
- * medium（姓名相同 + ≥2 维交叉）同名不同人的情况真实存在，仍保留勾选放行。
+ * 强重复级：exact（文件哈希相同）与 high（手机号 / 邮箱完全相同）。
+ *
+ * 2026-09-15 变更（业务决定，方案乙）：
+ *   这两级原本是**硬阻断**——不给放行入口，只提示「请到候选人模块查看已有记录」。
+ *   实际使用中构成死结：候选人归属别的专员时，候选人列表按归属过滤，
+ *   当前用户**搜不到**这条记录，却又被禁止重复录入，等于卡死；
+ *   而那句指引要求用户去做一件 TA 做不到的事（卢思颖 × 徐哲湲 案例）。
+ *   现改为：仍然强提示，并写明**这条记录现在归属谁**，但允许放行——
+ *   两位专员各自保留一份自己的简历记录，岗位归属由各自的 Application 决定。
+ *
+ * medium（姓名相同 + ≥2 维交叉）：同名不同人真实存在，与上面两级一样只做提示。
  */
 const blockingDuplicates = computed(() =>
   props.duplicates.filter((d) => d.matchLevel === 'exact' || d.matchLevel === 'high')
@@ -140,7 +145,7 @@ const blockingDuplicates = computed(() =>
 
 const hasBlockingDuplicates = computed(() => blockingDuplicates.value.length > 0);
 
-/** 面向上传者的阻断原因说明 */
+/** 强重复原因说明 */
 const blockingReason = computed(() => {
   const levels = new Set(blockingDuplicates.value.map((d) => d.matchLevel));
   if (levels.has('exact')) return '同一份简历文件已录入过';
@@ -148,18 +153,27 @@ const blockingReason = computed(() => {
   return '已存在重复候选人';
 });
 
+/**
+ * 这条重复记录当前归属谁。
+ * detectDuplicates 全库查重（不限归属），所以命中别人的记录时 ownerId 就是对方账号，
+ * 这正是上传者需要知道的信息：不是"你不能录"，而是"这条现在谁在跟"。
+ */
+function duplicateOwner(dup) {
+  return dup?.candidate?.ownerId || dup?.candidate?.createdBy || '未知';
+}
+
+/** 命中的归属人去重汇总，用于顶部说明文案 */
+const duplicateOwners = computed(() => {
+  const owners = props.duplicates.map((d) => duplicateOwner(d)).filter((o) => o && o !== '未知');
+  return [...new Set(owners)];
+});
+
 const canSubmit = computed(() => {
   if (!isFormValid.value || props.submitting) return false;
-  if (hasBlockingDuplicates.value) return false;              // 硬阻断，无放行入口
+  // 所有重复级别一律「勾选已知晓即可放行」，不再有硬阻断入口
   if (hasDuplicates.value && !duplicateAcknowledged.value) return false;
   return true;
 });
-
-/** 跳转到候选人模块，带上姓名搜索词直接定位到已有记录 */
-function goToExistingCandidate() {
-  const name = blockingDuplicates.value[0]?.candidate?.name || basicInfo.name.trim();
-  router.push({ path: '/candidates', query: name ? { search: name } : {} });
-}
 
 // ===== 监听：选需求 → 自动填岗位 =====
 watch(selectedDemandId, (newDemandId) => {
@@ -388,7 +402,8 @@ function handleSubmit() {
           <h4 class="duplicate-title">发现可能重复的候选人（{{ duplicates.length }} 条）</h4>
           <p class="duplicate-desc">
             <template v-if="hasBlockingDuplicates">
-              系统库中已存在该候选人，已阻止重复录入。请到候选人模块查看已有记录，直接在其上关联岗位。
+              {{ blockingReason }}。<template v-if="duplicateOwners.length">当前归属：{{ duplicateOwners.join('、') }}。</template>
+              你可以继续录入，系统会为你另存一份记录；如要在这条已有记录上追加投递岗位，请与归属人对接。
             </template>
             <template v-else>
               同一候选人投不同岗位是正常行为，系统不会阻止录入，但请确认是否为同一个人
@@ -415,34 +430,13 @@ function handleSubmit() {
           <span class="duplicate-name">
             — {{ dup.candidate?.name || '未知' }}
             <template v-if="dup.candidate?.phone"> · {{ dup.candidate.phone }}</template>
+            · 归属：{{ duplicateOwner(dup) }}
           </span>
         </div>
       </div>
 
-      <!-- 硬阻断：不给放行入口，引导去已有记录上操作 -->
-      <div v-if="hasBlockingDuplicates" class="duplicate-blocked">
-        <div class="duplicate-blocked-reason">{{ blockingReason }}</div>
-        <ul class="duplicate-blocked-list">
-          <li v-for="(dup, i) in blockingDuplicates" :key="i">
-            <span class="duplicate-badge" :class="`badge-${dup.matchLevel}`">
-              {{ dup.matchLevel === 'exact' ? '完全重复' : '高置信度' }}
-            </span>
-            <span class="duplicate-name">
-              {{ dup.candidate?.name || '未知' }}
-              <template v-if="dup.candidate?.phone"> · {{ dup.candidate.phone }}</template>
-            </span>
-          </li>
-        </ul>
-        <button type="button" class="btn btn-sm btn-primary" @click="goToExistingCandidate">
-          去候选人模块查看
-        </button>
-        <p class="duplicate-blocked-hint">
-          如需为该候选人追加投递岗位，请在候选人列表中找到 TA 并关联岗位，不要重复录入。
-        </p>
-      </div>
-
-      <!-- 疑似重复（同名 + 多维交叉）：保留人工确认放行 -->
-      <div v-else class="duplicate-ack">
+      <!-- 所有重复级别统一：人工确认后即可放行，不再有硬阻断 -->
+      <div class="duplicate-ack">
         <label class="duplicate-ack-label">
           <input
             v-model="duplicateAcknowledged"
@@ -614,7 +608,7 @@ function handleSubmit() {
   border-top: 1px solid rgba(212, 162, 78, 0.2);
 }
 
-/* === 硬阻断（exact / high）=== */
+/* === 强重复告警（exact / high）：只提示归属，不阻断录入 === */
 .duplicate-warning.is-blocked {
   background: var(--danger-bg);
   border-color: rgba(220, 53, 69, 0.3);
@@ -622,42 +616,6 @@ function handleSubmit() {
 
 .duplicate-warning.is-blocked .duplicate-icon {
   color: var(--danger);
-}
-
-.duplicate-blocked {
-  padding-top: var(--spacing-sm);
-  border-top: 1px solid rgba(220, 53, 69, 0.2);
-}
-
-.duplicate-blocked-reason {
-  font-size: var(--font-size-sm);
-  font-weight: 600;
-  color: var(--danger);
-  margin-bottom: var(--spacing-sm);
-}
-
-.duplicate-blocked-list {
-  list-style: none;
-  padding: 0;
-  margin: 0 0 var(--spacing-md);
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-xs);
-}
-
-.duplicate-blocked-list li {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-sm);
-  font-size: var(--font-size-sm);
-  color: var(--gray-600);
-}
-
-.duplicate-blocked-hint {
-  margin-top: var(--spacing-sm);
-  font-size: var(--font-size-xs);
-  color: var(--gray-400);
-  line-height: 1.5;
 }
 
 .duplicate-ack-label {
