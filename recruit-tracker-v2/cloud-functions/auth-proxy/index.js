@@ -20,6 +20,9 @@
 const cloudbase = require('@cloudbase/node-sdk');
 const crypto = require('crypto');
 
+// 会话令牌的签发/校验/授权判定（抽成可测模块，回归测试见 session-token.test.js）
+const { createSessionTokenService, timingSafeStringEqual, VALID_ROLES } = require('./session-token');
+
 const app = cloudbase.init({ env: cloudbase.SYMBOL_CURRENT_ENV });
 const db = app.database();
 
@@ -32,9 +35,29 @@ const PBKDF2_DIGEST = 'sha256';
 const MAX_LOGIN_ATTEMPTS = 5;
 const LOCK_DURATION_MS = 15 * 60 * 1000; // 15 分钟
 
-// P1-5 会话签名参数
-const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 小时
-const SESSION_SIGNING_KEY = process.env.MASTER_SECRET || 'default-dev-key-change-in-production';
+// ===== P1-5 会话签名 =====
+
+const SESSION_SIGNING_KEY = process.env.MASTER_SECRET || '';
+
+if (!SESSION_SIGNING_KEY) {
+  // 原实现是 process.env.MASTER_SECRET || 'default-dev-key-change-in-production'。
+  // 那个兜底串一旦生效，等于把签名密钥公开在源码里 —— 任何读过源码的人都能伪造
+  // 任意角色的会话令牌，属于「沉默地不安全」。改为缺失即拒绝服务并大声告警。
+  console.error(
+    '[auth-proxy] 致命配置错误：环境变量 MASTER_SECRET 未配置。' +
+    '会话令牌将无法签发/校验，登录不可用。请在 CloudBase 控制台为本函数配置 MASTER_SECRET。'
+  );
+}
+
+/** 密钥缺失时的降级实现：一律拒绝，绝不退回默认串 */
+const sessions = SESSION_SIGNING_KEY
+  ? createSessionTokenService(SESSION_SIGNING_KEY)
+  : {
+      generate: () => { throw new Error('服务配置错误：缺少签名密钥 MASTER_SECRET'); },
+      verify: () => ({ valid: false, error: '服务配置错误：缺少签名密钥' }),
+      authorizeAdmin: () => ({ ok: false, error: '服务配置错误：缺少签名密钥' }),
+      authorizeSelf: () => ({ ok: false, error: '服务配置错误：缺少签名密钥' }),
+    };
 
 /** 生成指定长度的随机密码 */
 function generateRandomPassword(length = 12) {
@@ -81,69 +104,6 @@ function hashPassword(password, salt) {
 function verifyPassword(password, salt, storedHash) {
   const hash = hashPassword(password, salt);
   return crypto.timingSafeEqual(Buffer.from(hash), Buffer.from(storedHash));
-}
-
-// ===== P1-5 会话签名 =====
-
-/**
- * 生成服务端签名会话令牌
- *
- * 格式：base64(payload).base64(signature)
- * payload = username|role|name|expiryTimestamp
- * signature = HMAC-SHA256(signingKey, payload)
- *
- * HMAC 签名确保客户端无法伪造会话令牌（即使知道 payload 格式），
- * 因为没有 MASTER_SECRET 签名密钥无法生成有效签名。
- */
-function generateSessionToken(username, role, name) {
-  const expiry = Date.now() + SESSION_TTL_MS;
-  const payload = `${username}|${role}|${name}|${expiry}`;
-  const signature = crypto.createHmac('sha256', SESSION_SIGNING_KEY).update(payload).digest('base64');
-  const payloadB64 = Buffer.from(payload).toString('base64');
-  return `${payloadB64}.${signature}`;
-}
-
-/**
- * 验证会话令牌
- * @returns {{ valid: false, error: string } | { valid: true, username: string, role: string, name: string, expiry: number }}
- */
-function verifySessionToken(token) {
-  if (!token || typeof token !== 'string') {
-    return { valid: false, error: '令牌不能为空' };
-  }
-
-  try {
-    const parts = token.split('.');
-    if (parts.length !== 2) {
-      return { valid: false, error: '令牌格式无效' };
-    }
-
-    const payload = Buffer.from(parts[0], 'base64').toString('utf-8');
-    const providedSig = parts[1];
-
-    // 验证签名
-    const expectedSig = crypto.createHmac('sha256', SESSION_SIGNING_KEY).update(payload).digest('base64');
-    if (!crypto.timingSafeEqual(Buffer.from(providedSig), Buffer.from(expectedSig))) {
-      return { valid: false, error: '签名不匹配，令牌可能被篡改' };
-    }
-
-    // 解析 payload
-    const fields = payload.split('|');
-    if (fields.length !== 4) {
-      return { valid: false, error: '令牌载荷格式无效' };
-    }
-
-    const [username, role, name, expiryStr] = fields;
-    const expiry = parseInt(expiryStr, 10);
-
-    if (isNaN(expiry) || Date.now() > expiry) {
-      return { valid: false, error: '令牌已过期' };
-    }
-
-    return { valid: true, username, role, name, expiry };
-  } catch (err) {
-    return { valid: false, error: `令牌解析失败：${err.message}` };
-  }
 }
 
 // ===== 登录考勤埋点（管理员登录看板数据源：记录专员登录/活跃到 LoginLog）=====
@@ -212,14 +172,21 @@ async function recordActiveIfNew(username, role) {
   }
 }
 
-// ===== 管理员权限校验 =====
+// ===== 调用者身份校验 =====
 
-/** 验证调用者是否为管理员 */
-async function verifyAdmin(callerUsername) {
-  if (!callerUsername) return false;
+/**
+ * 查库确认某账号当前是否为管理员。
+ *
+ * ⚠️ 它只回答「数据库里存不存在一个叫这个名字的管理员」，**不验证调用者是谁**。
+ * 单靠它做鉴权等于没鉴权：请求体里的 callerUsername 是调用方自称的字段，
+ * 任何人都能填 'admin'（这个用户名还硬编码在 DEFAULT_USERS 里，猜都不用猜）。
+ * 管理员操作的唯一入口是下面的 requireAdmin。
+ */
+async function verifyAdmin(username) {
+  if (!username) return false;
   try {
     const { data } = await db.collection('Users')
-      .where({ username: callerUsername, role: 'admin' })
+      .where({ username, role: 'admin' })
       .limit(1)
       .get();
     return data && data.length > 0;
@@ -227,6 +194,28 @@ async function verifyAdmin(callerUsername) {
     console.error('[auth-proxy] 校验管理员失败:', err.message);
     return false;
   }
+}
+
+/**
+ * 管理员操作的真实入口：先验令牌，再回查数据库。
+ *
+ * 两步缺一不可：
+ *   1. authorizeAdmin 校验 HMAC 签名 —— 令牌无法伪造，身份可信；
+ *      且令牌里的 username 是唯一可信的身份来源，绝不采信请求体里的自称字段
+ *   2. verifyAdmin 回查数据库 —— 令牌里的角色是**签发时的快照**，
+ *      账号可能已被删除或降级，而旧令牌尚未过期
+ *
+ * @returns {{ok:true, username: string, role: string, name: string} | {ok:false, error: string}}
+ */
+async function requireAdmin(params) {
+  const auth = sessions.authorizeAdmin(params && params.sessionToken);
+  if (!auth.ok) return { ok: false, error: auth.error };
+
+  if (!(await verifyAdmin(auth.username))) {
+    return { ok: false, error: '无权限，账号状态已变更，请重新登录' };
+  }
+
+  return { ok: true, username: auth.username, role: auth.role, name: auth.name };
 }
 
 // ===== 核心操作 =====
@@ -304,7 +293,7 @@ async function handleLogin(params) {
     console.log(`[auth-proxy] 登录成功: ${user.username} (${user.role})`);
 
     // P1-5：生成服务端签名会话令牌（防 localStorage 篡改）
-    const sessionToken = generateSessionToken(user.username, user.role, user.name);
+    const sessionToken = sessions.generate(user.username, user.role, user.name);
 
     // 🆕 登录考勤：记录 1 次手动登录（异步容错，失败绝不影响登录主流程）
     await recordLogin(user).catch((e) => console.warn('[auth-proxy] 记录登录失败:', e.message));
@@ -326,10 +315,9 @@ async function handleLogin(params) {
 
 /** 列出所有用户（管理员） */
 async function handleListUsers(params) {
-  const { callerUsername } = params;
-
-  if (!(await verifyAdmin(callerUsername))) {
-    return { success: false, error: '无权限，仅管理员可查看用户列表' };
+  const auth = await requireAdmin(params);
+  if (!auth.ok) {
+    return { success: false, error: auth.error };
   }
 
   try {
@@ -347,11 +335,12 @@ async function handleListUsers(params) {
 
 /** 添加用户（管理员） */
 async function handleAddUser(params) {
-  const { callerUsername, username, password, role, name } = params;
-
-  if (!(await verifyAdmin(callerUsername))) {
-    return { success: false, error: '无权限，仅管理员可添加用户' };
+  const auth = await requireAdmin(params);
+  if (!auth.ok) {
+    return { success: false, error: auth.error };
   }
+
+  const { username, password, role, name } = params;
 
   if (!username || !password) {
     return { success: false, error: '账号和密码不能为空' };
@@ -361,11 +350,17 @@ async function handleAddUser(params) {
     return { success: false, error: '密码至少 8 位' };
   }
 
-  if (!['admin', 'recruiter'].includes(role)) {
+  if (!VALID_ROLES.includes(role)) {
     return { success: false, error: '角色只能是 admin 或 recruiter' };
   }
 
   const trimmedUsername = username.trim();
+
+  // 会话令牌的载荷是 `username|role|name|expiry` 这种竖线分隔格式，
+  // 字段里若含竖线会让令牌解析出错（该用户将永远登录不上）。在此拦掉。
+  if ([trimmedUsername, name].some((v) => typeof v === 'string' && v.includes('|'))) {
+    return { success: false, error: '账号和姓名不能包含竖线字符 |' };
+  }
 
   try {
     // 检查是否已存在
@@ -388,7 +383,7 @@ async function handleAddUser(params) {
       role,
       name: name || trimmedUsername,
       createdAt: new Date(),
-      createdBy: callerUsername,
+      createdBy: auth.username,  // 取自校验通过的令牌，而非请求体自称
     });
 
     console.log(`[auth-proxy] 用户已添加: ${trimmedUsername} (${role})`);
@@ -402,17 +397,19 @@ async function handleAddUser(params) {
 
 /** 删除用户（管理员） */
 async function handleDeleteUser(params) {
-  const { callerUsername, username } = params;
-
-  if (!(await verifyAdmin(callerUsername))) {
-    return { success: false, error: '无权限，仅管理员可删除用户' };
+  const auth = await requireAdmin(params);
+  if (!auth.ok) {
+    return { success: false, error: auth.error };
   }
+
+  const { username } = params;
 
   if (!username) {
     return { success: false, error: '请指定要删除的账号' };
   }
 
-  if (username === callerUsername) {
+  // 身份来自令牌，这条自删保护才是真的（原先比的是请求体自称的 callerUsername，可被绕过）
+  if (username === auth.username) {
     return { success: false, error: '不能删除自己的账号' };
   }
 
@@ -439,11 +436,12 @@ async function handleDeleteUser(params) {
 
 /** 重置密码（管理员） */
 async function handleResetPassword(params) {
-  const { callerUsername, username, newPassword } = params;
-
-  if (!(await verifyAdmin(callerUsername))) {
-    return { success: false, error: '无权限，仅管理员可重置密码' };
+  const auth = await requireAdmin(params);
+  if (!auth.ok) {
+    return { success: false, error: auth.error };
   }
+
+  const { username, newPassword } = params;
 
   if (!username || !newPassword) {
     return { success: false, error: '账号和新密码不能为空' };
@@ -477,12 +475,28 @@ async function handleResetPassword(params) {
   }
 }
 
-/** 修改自己的密码（所有用户可用） */
+/**
+ * 修改自己的密码（所有已登录用户可用）
+ *
+ * 必须持有效会话令牌，且令牌内用户名与被改账号一致。
+ *
+ * 原实现只校验 oldPassword，既不要求令牌、也没有失败计数，由此产生两个问题：
+ *   1. 它是个无鉴权的密码预言机 —— 攻击者可无限次试密码，
+ *      完全绕过 handleLogin 的「5 次失败锁 15 分钟」，那道防线形同虚设
+ *   2. 猜中时返回值从「旧密码错误」变为「密码修改成功」，等于确认了正确密码
+ * 要求持令牌之后，必须先成功登录才能走到这里，该通道即关闭。
+ */
 async function handleChangePassword(params) {
-  const { username, oldPassword, newPassword } = params;
+  const auth = sessions.authorizeSelf(params && params.sessionToken, params && params.username);
+  if (!auth.ok) {
+    return { success: false, error: auth.error };
+  }
 
-  if (!username || !oldPassword || !newPassword) {
-    return { success: false, error: '账号、旧密码和新密码不能为空' };
+  const username = auth.username;  // 身份取自令牌，不采信请求体
+  const { oldPassword, newPassword } = params;
+
+  if (!oldPassword || !newPassword) {
+    return { success: false, error: '旧密码和新密码不能为空' };
   }
 
   if (newPassword.length < 8) {
@@ -529,7 +543,7 @@ async function handleVerifySession(params) {
     return { success: false, error: '缺少会话令牌' };
   }
 
-  const result = verifySessionToken(sessionToken);
+  const result = sessions.verify(sessionToken);
 
   if (!result.valid) {
     return { success: false, error: result.error };
@@ -563,8 +577,25 @@ async function ensureUsersCollection() {
   }
 }
 
-/** 初始化默认账号（仅当 Users 集合为空时） */
-async function handleSeedDefaults() {
+/**
+ * 初始化默认账号（仅当 Users 集合为空时）。
+ *
+ * ⚠️ 这是唯一一个「无需既有身份就能造出管理员」的操作，因此绝不可对公网开放：
+ * 环境重建后 Users 为空，任何人调用它都能创建 9 个默认账号并拿到初始密码，
+ * 进而直接取得管理员权限。
+ *
+ * 现要求携带 bootstrapKey，与 MASTER_SECRET 常数时间比对。该密钥只存在于
+ * 云函数环境变量与控制台，前端已移除全部调用入口。
+ * 部署/重建环境时由运维执行一次：
+ *   tcb fn invoke auth-proxy --params '{"action":"seedDefaults","bootstrapKey":"<MASTER_SECRET>"}'
+ */
+async function handleSeedDefaults(params) {
+  const provided = (params && params.bootstrapKey) || '';
+  if (!timingSafeStringEqual(provided, SESSION_SIGNING_KEY)) {
+    console.warn('[auth-proxy] seedDefaults 被拒绝：部署密钥缺失或不匹配');
+    return { success: false, error: '无权限：初始化需要正确的部署密钥' };
+  }
+
   try {
     // 确保集合存在
     await ensureUsersCollection();
@@ -630,7 +661,7 @@ exports.main = async (event, context) => {
     case 'changePassword':
       return handleChangePassword(params);
     case 'seedDefaults':
-      return handleSeedDefaults();
+      return handleSeedDefaults(params);
     default:
       return { success: false, error: `未知操作: ${action}` };
   }

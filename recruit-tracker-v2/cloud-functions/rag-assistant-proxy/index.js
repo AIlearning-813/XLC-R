@@ -13,6 +13,10 @@
 
 const cloudbase = require('@cloudbase/node-sdk');
 
+// 意图 JSON 解析（括号配对扫描，替换原先会截断嵌套对象的非贪婪正则）
+// 零依赖纯函数模块，回归测试见同目录 intent-parser.test.js
+const { parseIntent, fallbackIntent } = require('./intent-parser');
+
 const app = cloudbase.init({ env: cloudbase.SYMBOL_CURRENT_ENV });
 const db = app.database();
 
@@ -61,14 +65,26 @@ async function recognizeIntent(userMessage) {
     }
 
     const data = await response.json();
-    const text = data.choices?.[0]?.message?.content || '{}';
+    const text = data.choices?.[0]?.message?.content || '';
 
-    // 提取 JSON（P1 修复：非贪婪匹配，防止跨多个 JSON 对象错误匹配）
-    const jsonMatch = text.match(/\{[\s\S]*?\}/);
-    return jsonMatch ? JSON.parse(jsonMatch[0]) : { intent: 'general', entities: {}, keywords: [] };
+    // 括号配对解析，取代原先的 /\{[\s\S]*?\}/
+    // 旧写法有两个方向都错：非贪婪会在 entities 内层 } 处截断（2026-09-14 线上实测的
+    // 「Expected ',' or '}' after property value」即由此而来），而改回贪婪又会跨多个
+    // JSON 对象过度匹配。parseIntent 逐个尝试每个 { 起点并返回第一个完整配对的对象，
+    // 两种毛病一并解决；任何异常输入它都安全降级为 general，不抛错。
+    const parsed = parseIntent(text);
+
+    // parseIntent 对解析失败与「模型确实判定为 general」都会返回 general。
+    // 用原始输出里有没有 "intent" 字段区分这两种情况，把解析失败单独记下来——
+    // 否则下次再出问题仍然无从诊断（此次排查就卡在没有原文可看）。
+    if (!text.includes('"intent"')) {
+      console.warn('[rag-assistant-proxy] 意图识别未取到有效 JSON，原始输出前 200 字:', text.slice(0, 200));
+    }
+
+    return parsed;
   } catch (err) {
     console.warn('[rag-assistant-proxy] 意图识别失败，回退到 general:', err.message);
-    return { intent: 'general', entities: {}, keywords: [] };
+    return fallbackIntent();
   }
 }
 
@@ -179,7 +195,10 @@ function buildEnhancedPrompt(userMessage, intent, knowledge) {
     const ins = knowledge.insights;
     systemPrompt += '【历史招聘数据】\n';
     if (ins.avgTimeToHire) systemPrompt += `- 平均招聘周期：${ins.avgTimeToHire}天\n`;
-    if (ins.salaryRange) systemPrompt += `- 历史薪资范围：${ins.salaryRange.min}k-${ins.salaryRange.max}k\n`;
+    // 仅在确有薪资数据时注入，避免把 0k-0k 当作历史事实喂给模型
+    if (ins.salaryRange && (ins.salaryRange.min > 0 || ins.salaryRange.max > 0)) {
+      systemPrompt += `- 历史薪资范围：${ins.salaryRange.min}k-${ins.salaryRange.max}k\n`;
+    }
     if (ins.successfulProfile) systemPrompt += `- 成功候选人画像：${ins.successfulProfile}\n`;
     if (ins.commonRejectReasons?.length) systemPrompt += `- 常见淘汰原因：${ins.commonRejectReasons.join('、')}\n`;
     systemPrompt += '\n';

@@ -1,0 +1,6 @@
+{
+  "name": "xlc-shared-cloud-fn-modules",
+  "private": true,
+  "description": "云函数共享模块的 canonical 源。各云函数目录下的同名副本由 scripts/sync-shared.cjs 生成，勿直接改副本。",
+  "type": "commonjs"
+}

@@ -11,10 +11,28 @@
  *   - scan：扫描所有启用的邮箱
  *   - test：测试单个邮箱的 IMAP 连接
  *
+ * 访问控制（2026-09-14 第 3 阶段加固）：
+ *   加固前**所有动作都无鉴权**，公网可直接 createConfig / updateConfig /
+ *   deleteConfig / rotateKeys / diagnose / debugInbox。
+ *   现在：除「定时器触发的 scan」外，一律要求有效 sessionToken 并回查账号状态；
+ *   配置类动作按**归属**校验（专员只能操作自己的邮箱配置，见 access-policy.js）；
+ *   rotateKeys / debugInbox 仅管理员。
+ *
+ *   ⚠️ 已知残余风险：定时触发器无法携带密钥，`Type: 'Timer'` 可被伪造，
+ *      因此外部调用者能触发一次计划扫描。它**不泄露数据、不能改配置**，
+ *      仅消耗一次 IMAP 连接与解析资源；已用 ProcessingLock 限频到每 5 分钟一次。
+ *
  * 超时保护：剩余 < 60s 时停止处理下一个邮箱
  */
 
 const cloudbase = require('@cloudbase/node-sdk');
+const { createAccessGuard, guardError } = require('./access-guard');
+const {
+  canManageConfig,
+  resolveScanUserId,
+  resolveConfigOwner,
+  isAdminOnlyAction,
+} = require('./access-policy');
 
 // ===== 模块加载（逐个 try-catch，防止启动崩溃）=====
 
@@ -62,6 +80,91 @@ try {
 const app = cloudbase.init({ env: cloudbase.SYMBOL_CURRENT_ENV });
 const db = app.database();
 
+// ===== 访问守卫（2026-09-14 第 3 阶段加固）=====
+// 加固前本函数**所有动作都无鉴权**，公网可直接调用 createConfig / updateConfig /
+// deleteConfig / rotateKeys / diagnose / debugInbox。其中 createConfig 的 userId
+// 取自请求体，updateConfig / deleteConfig 只凭一个 id 就改删。
+const SIGNING_KEY = process.env.MASTER_SECRET || '';
+if (!SIGNING_KEY) {
+  console.error('[email-scanner] 致命配置错误：环境变量 MASTER_SECRET 未配置，所有请求将被拒绝');
+}
+
+/** 按用户名回查账号当前状态（守卫生效的前提） */
+async function findUser(username) {
+  const { data } = await db.collection('Users')
+    .where({ username })
+    .field({ username: true, role: true, name: true })
+    .limit(1)
+    .get();
+  return data && data[0] ? data[0] : null;
+}
+
+/** 密钥缺失时的降级实现：一律拒绝，绝不退回「不校验」 */
+const guard = SIGNING_KEY
+  ? createAccessGuard({ signingKey: SIGNING_KEY, findUser })
+  : {
+      requireUser: async () => ({
+        ok: false,
+        code: 'FORBIDDEN',
+        error: '服务配置错误：缺少签名密钥 MASTER_SECRET',
+      }),
+      requireAdmin: async () => ({
+        ok: false,
+        code: 'FORBIDDEN',
+        error: '服务配置错误：缺少签名密钥 MASTER_SECRET',
+      }),
+    };
+
+/** 取一条邮箱配置（用于归属校验） */
+async function findEmailConfig(id) {
+  const { data } = await db.collection('EmailConfig').doc(id).get();
+  return data && data[0] ? data[0] : null;
+}
+
+/** 定时扫描的互斥锁标识与有效期 */
+const SCHEDULED_SCAN_LOCK = 'email-scanner:scheduled-scan';
+const SCHEDULED_SCAN_LOCK_TTL_MS = 5 * 60 * 1000;
+
+/**
+ * 给「无令牌的定时器路径」加一把限频锁。
+ *
+ * 定时触发器无法携带密钥，因此这条路径天生无法与伪造请求区分
+ * （见 exports.main 里的说明）。这里退而求其次做限频：
+ * 同一时刻只允许一次定时扫描，把可被滥用的程度压到「每 5 分钟一次」。
+ * 定时任务本身一天只跑 4 次，不会与这把锁冲突。
+ *
+ * 失败关闭：拿不到锁就跳过，不因异常而放行。
+ */
+async function acquireScheduledScanLock() {
+  const now = new Date();
+  try {
+    await db.collection('ProcessingLock')
+      .where({ lockKey: SCHEDULED_SCAN_LOCK, expiresAt: db.command.lt(now) })
+      .remove();
+  } catch (cleanErr) {
+    console.warn('[email-scanner] 清理过期扫描锁失败:', cleanErr.message);
+  }
+
+  try {
+    const { data } = await db.collection('ProcessingLock')
+      .where({ lockKey: SCHEDULED_SCAN_LOCK, expiresAt: db.command.gt(now) })
+      .limit(1)
+      .get();
+    if (data && data.length > 0) return false;
+
+    await db.collection('ProcessingLock').add({
+      lockKey: SCHEDULED_SCAN_LOCK,
+      createdAt: now,
+      expiresAt: new Date(now.getTime() + SCHEDULED_SCAN_LOCK_TTL_MS),
+      instanceId: `anon-${Math.random().toString(36).slice(2, 10)}`,
+    });
+    return true;
+  } catch (err) {
+    console.error('[email-scanner] 获取扫描锁失败，按拒绝处理:', err.message);
+    return false;
+  }
+}
+
 // ===== 主入口 =====
 
 exports.main = async (event, context) => {
@@ -69,6 +172,32 @@ exports.main = async (event, context) => {
   const action = event?.action || 'scan';
 
   console.log(`[email-scanner] 收到 ${action} 请求`);
+
+  // ---- 身份校验（2026-09-14 第 3 阶段加固）----
+  // 定时触发不带 sessionToken。scan 是唯一保留「无令牌」入口的动作
+  // （否则定时扫描会失效），其余动作一律要求有效令牌。
+  // ⚠️ 已知残余风险：外部调用者可以伪造 `Type: 'Timer'` 从而触发一次扫描。
+  //    这**不会泄露数据、也不允许改配置**——只是让系统去连自己的收件箱，
+  //    代价是资源消耗；因此下面用 ProcessingLock 做了限频。
+  const actor = await guard.requireUser(event?.sessionToken);
+  const isTimerPath = action === 'scan' && event?.Type === 'Timer';
+
+  if (!actor.ok && !isTimerPath) {
+    console.warn(`[email-scanner] 拒绝 ${action}：${actor.error}`);
+    return guardError(actor);
+  }
+  if (isTimerPath && !actor.ok) {
+    console.log('[email-scanner] 定时触发路径：无令牌，按计划任务扫描全部启用邮箱');
+  }
+
+  // 仅管理员可执行的动作（一次性密钥迁移、收件箱结构排查）
+  if (isAdminOnlyAction(action)) {
+    const admin = await guard.requireAdmin(event?.sessionToken);
+    if (!admin.ok) {
+      console.warn(`[email-scanner] 拒绝 ${action}（仅管理员）：${admin.error}`);
+      return guardError(admin);
+    }
+  }
 
   // ---- 测试连接 ----
   if (action === 'test') {
@@ -85,17 +214,17 @@ exports.main = async (event, context) => {
 
   // ---- 创建邮箱配置（云函数端加密密码）----
   if (action === 'createConfig') {
-    return handleCreateConfig(event);
+    return handleCreateConfig(event, actor);
   }
 
   // ---- 更新邮箱配置（云函数端加密密码）----
   if (action === 'updateConfig') {
-    return handleUpdateConfig(event);
+    return handleUpdateConfig(event, actor);
   }
 
   // ---- 删除邮箱配置 ----
   if (action === 'deleteConfig') {
-    return handleDeleteConfig(event);
+    return handleDeleteConfig(event, actor);
   }
 
   // ---- 诊断邮箱 ----
@@ -136,6 +265,25 @@ exports.main = async (event, context) => {
 
     const forceRescan = event?.force === true;
 
+    // 扫描范围由服务端决定：非管理员一律只扫自己的邮箱，请求体里的 userId 不作数
+    // （原实现直接采信 event.userId，专员传别人的名字即可让系统去连别人的邮箱）
+    const scope = actor.ok
+      ? resolveScanUserId(actor, event?.userId)
+      : { ok: true, userId: '' }; // 定时器路径：扫全部启用邮箱
+    if (!scope.ok) {
+      return { success: false, message: scope.reason };
+    }
+
+    // 匿名（定时器）路径限频：外部调用者虽可伪造 Type:'Timer'，
+    // 但最多每 5 分钟触发一次，无法造成无限制扫描。
+    if (!actor.ok) {
+      const locked = await acquireScheduledScanLock();
+      if (!locked) {
+        console.log('[email-scanner] 定时扫描锁被占用，本次跳过');
+        return { success: true, message: '已有扫描在进行中，本次跳过', skippedByLock: true };
+      }
+    }
+
     const scanResult = {
       success: true,
       totalEmails: 0,
@@ -149,7 +297,7 @@ exports.main = async (event, context) => {
       // 1. 查询启用的邮箱配置
       // 手动扫描按 userId 过滤：专员只扫自己的邮箱；管理员/定时器不传 userId 扫全部
       const scanWhere = { enabled: true };
-      if (event?.userId) scanWhere.userId = event.userId;
+      if (scope.userId) scanWhere.userId = scope.userId;
       const { data: configs } = await db
         .collection('EmailConfig')
         .where(scanWhere)
@@ -233,9 +381,15 @@ exports.main = async (event, context) => {
 // ===== EmailConfig CRUD（云函数端，绕过前端直接操作数据库的权限问题）=====
 
 // 创建邮箱配置（云函数端加密密码后存储）
-async function handleCreateConfig(event) {
+async function handleCreateConfig(event, actor) {
   const { config } = event;
   if (!config) return { success: false, message: '缺少配置数据' };
+
+  // 归属由服务端决定：专员新建的配置一律归自己，请求体里的 userId 不作数
+  const owner = resolveConfigOwner(actor, config.userId);
+  if (!owner.ok) {
+    return { success: false, message: owner.reason };
+  }
 
   try {
     // 加密密码：前端永远传明文（通过 HTTPS），必须在云函数端加密后存储
@@ -248,7 +402,7 @@ async function handleCreateConfig(event) {
     }
 
     const doc = {
-      userId: config.userId,
+      userId: owner.userId,
       email: config.email,
       imapHost: config.imapHost || 'imap.qq.com',
       imapPort: config.imapPort || 993,
@@ -274,11 +428,18 @@ async function handleCreateConfig(event) {
 }
 
 // 更新邮箱配置（云函数端加密密码）
-async function handleUpdateConfig(event) {
+async function handleUpdateConfig(event, actor) {
   const { id, updates } = event;
   if (!id) return { success: false, message: '缺少配置 ID' };
 
   try {
+    // 归属校验：原实现只凭 id 就改，任何人都能改任何人的收件邮箱配置
+    const existing = await findEmailConfig(id);
+    const perm = canManageConfig(actor, existing);
+    if (!perm.allowed) {
+      console.warn(`[email-scanner] 拒绝 updateConfig ${id}：${perm.reason}`);
+      return { success: false, message: perm.reason };
+    }
     const updateData = { ...updates };
 
     // 如果包含密码更新，在云函数端加密（前端永远传明文）
@@ -298,11 +459,19 @@ async function handleUpdateConfig(event) {
 }
 
 // 删除邮箱配置
-async function handleDeleteConfig(event) {
+async function handleDeleteConfig(event, actor) {
   const { id } = event;
   if (!id) return { success: false, message: '缺少配置 ID' };
 
   try {
+    // 归属校验：原实现只凭 id 就删
+    const existing = await findEmailConfig(id);
+    const perm = canManageConfig(actor, existing);
+    if (!perm.allowed) {
+      console.warn(`[email-scanner] 拒绝 deleteConfig ${id}：${perm.reason}`);
+      return { success: false, message: perm.reason };
+    }
+
     await db.collection('EmailConfig').doc(id).remove();
     return { success: true, message: '邮箱配置已删除' };
   } catch (err) {

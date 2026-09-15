@@ -195,12 +195,22 @@ exports.main = async (event, context) => {
       const sources = topSources(apps);
       const successProfile = await generateSuccessfulProfile(apps, jobType);
 
-      // 平均薪资范围（从入职 Application 关联的 Job 获取）
+      // 平均薪资范围：从本批 Application 关联的真实岗位 Job.salaryRange 聚合
+      // min/max 同时为 0 表示样本不足或岗位未维护薪资，下游一律视为「无数据」
       const salaryRange = { min: 0, max: 0 };
-      const onboardApps = apps.filter(a => a.stage === 'onboard' && a.status === 'active');
-      // 薪资来自岗位数据，此处简化为默认值
-      salaryRange.min = 6; // k
-      salaryRange.max = 20; // k
+      {
+        const mins = [];
+        const maxs = [];
+        for (const app of apps) {
+          const job = jobs?.find(j => j._id === app.jobId);
+          const r = job?.salaryRange;
+          if (!r) continue;
+          if (r.min > 0) mins.push(r.min);
+          if (r.max > 0) maxs.push(r.max);
+        }
+        if (mins.length) salaryRange.min = Math.round(mins.reduce((s, v) => s + v, 0) / mins.length);
+        if (maxs.length) salaryRange.max = Math.round(maxs.reduce((s, v) => s + v, 0) / maxs.length);
+      }
 
       const insightDoc = {
         cacheKey: `insight:${jobType}`,

@@ -7,6 +7,14 @@
  *   3. 未命中则实时聚合 Application/Job/ParseQueue 数据
  *   4. 写入 ReportCache 后返回精简结果（<10KB）
  *
+ * 访问控制（2026-09-14 第 3 阶段加固）：
+ *   加固前本函数无任何鉴权，公网可读全部招聘数据。现在：
+ *     · 除 ping 外一律要求有效 sessionToken，并回查数据库确认账号状态
+ *     · 非管理员的 ownerId 被**强制为本人**，请求体传什么都不作数
+ *     · login_attendance（全员登录考勤）仅管理员可访问
+ *   注意归属强制必须与缓存键使用同一份 params，否则会出现
+ *   「专员读到管理员缓存的全部数据」这类串号问题——见 main() 里的注释。
+ *
  * 四种聚合维度：
  *   - overview:    Dashboard 统计卡片（活跃/入职/待跟进/待解析）
  *   - job_funnel:  单岗位 12 步漏斗（计数 + 转化率）
@@ -15,10 +23,46 @@
  */
 
 const cloudbase = require('@cloudbase/node-sdk');
+const { createAccessGuard, guardError } = require('./access-guard');
 
 const app = cloudbase.init({ env: cloudbase.SYMBOL_CURRENT_ENV });
 const db = app.database();
 const _ = db.command;
+
+// ========== 访问守卫（2026-09-14 第 3 阶段加固）==========
+// 加固前本函数对公网完全敞开：main 直接拿 event 聚合，连身份参数都没有。
+// 任何人都能读到全部招聘数据，还能通过 params.ownerId 指定看谁的数据，
+// login_attendance 更是把全员登录考勤暴露出去。
+const SIGNING_KEY = process.env.MASTER_SECRET || '';
+if (!SIGNING_KEY) {
+  console.error('[report-aggregator] 致命配置错误：环境变量 MASTER_SECRET 未配置，所有请求将被拒绝');
+}
+
+/** 按用户名回查账号当前状态（守卫生效的前提） */
+async function findUser(username) {
+  const { data } = await db.collection('Users')
+    .where({ username })
+    .field({ username: true, role: true, name: true })
+    .limit(1)
+    .get();
+  return data && data[0] ? data[0] : null;
+}
+
+/** 密钥缺失时的降级实现：一律拒绝，绝不退回「不校验」 */
+const guard = SIGNING_KEY
+  ? createAccessGuard({ signingKey: SIGNING_KEY, findUser })
+  : {
+      requireUser: async () => ({
+        ok: false,
+        code: 'FORBIDDEN',
+        error: '服务配置错误：缺少签名密钥 MASTER_SECRET',
+      }),
+      ownerFilterFor: () => ({
+        ok: false,
+        code: 'FORBIDDEN',
+        error: '服务配置错误：缺少签名密钥 MASTER_SECRET',
+      }),
+    };
 
 // ========== 漏斗阶段定义 ==========
 // P2-20：所有岗位共用的基础阶段（13 步 + 2 个结束状态，含背景调查）
@@ -367,7 +411,7 @@ async function aggregateJobFunnel(jobId, jobType, ownerId) {
 /**
  * 3. trend — 按月漏斗转化趋势
  */
-async function aggregateTrend(months, jobId) {
+async function aggregateTrend(months, jobId, ownerId) {
   const numMonths = months || 12;
 
   // 生成月份列表
@@ -385,6 +429,9 @@ async function aggregateTrend(months, jobId) {
   // 查询所有未归档申请（游标分页）
   const baseFilter = { isArchived: _.neq(true) };
   if (jobId) baseFilter.jobId = jobId;
+  // 2026-09-14 修复：前端 funnel-report.js 一直在传 ownerId（专员期望只看自己的数据），
+  // 但本函数此前只接 (months, jobId)，ownerId 被静默丢弃 → 专员看到的是全公司趋势。
+  if (ownerId) baseFilter.ownerId = ownerId;
 
   const allApps = [];
   let hasMore = true;
@@ -1172,10 +1219,43 @@ async function aggregateLoginAttendance(params = {}) {
   return { year: y, month: m, daysInMonth, recruiters, computedAt: new Date().toISOString() };
 }
 
-exports.main = async (event, context) => {
-  const { type, params = {} } = event;
+exports.main = async (event = {}, context) => {
+  const { type, sessionToken } = event;
+  let { params = {} } = event;
 
-  console.log(`[report-aggregator] 请求类型: ${type}, 参数:`, JSON.stringify(params));
+  // ping 是唯一免鉴权的动作：main.js 在应用启动时（**登录之前**）就调用它做时钟校准，
+  // 且它只回一个服务器时间、不含任何业务数据。
+  if (type === 'ping') {
+    return { success: true, data: null, serverTime: new Date().toISOString(), fromCache: false };
+  }
+
+  // ---- 鉴权：验令牌 + 回查数据库（角色以库中当前值为准）----
+  const actor = await guard.requireUser(sessionToken);
+  if (!actor.ok) {
+    console.warn(`[report-aggregator] 身份校验失败，类型=${type}:`, actor.error);
+    return guardError(actor);
+  }
+
+  // ---- 归属强制：非管理员一律只能看自己的数据，请求体里的 ownerId 不作数 ----
+  const ownership = guard.ownerFilterFor(actor, params.ownerId);
+  if (!ownership.ok) {
+    console.warn(`[report-aggregator] 归属判定失败，调用者=${actor.username}:`, ownership.error);
+    return guardError(ownership);
+  }
+  // 覆盖后再往下走：下面所有聚合与缓存键都读 params，改这一处即可全局生效。
+  // ownerId 为空串表示「不限」，与各聚合函数原有的 `if (params.ownerId)` 假值判断一致。
+  params = { ...params, ownerId: ownership.ownerId };
+
+  // 全员登录考勤只对管理员开放
+  if (type === 'login_attendance' && actor.role !== 'admin') {
+    console.warn(`[report-aggregator] 拒绝 ${actor.username}(${actor.role}) 访问登录考勤`);
+    return { success: false, error: '无权限，仅管理员可查看登录考勤', code: 'FORBIDDEN' };
+  }
+
+  console.log(
+    `[report-aggregator] 请求类型: ${type}, 调用者: ${actor.username}(${actor.role}), ` +
+    `实际归属: ${params.ownerId || '全部'}, 参数:`, JSON.stringify(params)
+  );
 
   try {
     let result;
@@ -1202,7 +1282,7 @@ exports.main = async (event, context) => {
         break;
 
       case 'trend':
-        result = await aggregateTrend(params.months, params.jobId);
+        result = await aggregateTrend(params.months, params.jobId, params.ownerId);
         break;
 
       case 'dept_monthly':
@@ -1247,9 +1327,7 @@ exports.main = async (event, context) => {
         result = await aggregateLoginAttendance(params);
         break;
 
-      // P0-5：返回服务器时间用于客户端时钟校准
-      case 'ping':
-        return { success: true, data: null, serverTime: new Date().toISOString(), fromCache: false };
+      // 注：ping（客户端时钟校准）已在 main() 开头提前返回，不进入鉴权与缓存流程
 
       default:
         return {
