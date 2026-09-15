@@ -7,12 +7,15 @@
  */
 import { ref, watch } from 'vue';
 import cloudbase from '../../services/cloudbase';
+import { useAuthStore } from '../../stores/useAuthStore';
 import DOMPurify from 'dompurify';
 import mammoth from 'mammoth';
 
 const props = defineProps({
   candidate: { type: Object, default: () => ({}) },
 });
+
+const auth = useAuthStore();
 
 // ===== 状态 =====
 const fileUrl = ref('');
@@ -97,11 +100,18 @@ async function loadFileUrl() {
   docxHtml.value = '';
 
   try {
-    // 只传 fileId：身份由 sessionToken 决定（cloudbase.callFunction 自动注入），
-    // 文件归属由服务端按 fileId 反查数据库得出。
-    // 这里不再传 callerUsername / candidateOwnerId——它们是自称字段，服务端已不采信。
+    // 入参同时带上新旧两套身份信息，以兼容两种服务端实现：
+    //   - 线上现行版本（2026-06-25 部署）要求 callerUsername，且以
+    //     callerUsername === candidateOwnerId 判断专员是否有权下载；
+    //     缺了它会直接返回「缺少调用者身份信息」，预览整块不可用。
+    //   - 加固版本只读 sessionToken（由 cloudbase.callFunction 统一注入），
+    //     不再采信上面两个自称字段，多传无副作用。
+    // 因此这里保留旧字段、同时依赖自动注入的令牌，两边都能跑。
+    // 待加固版 get-file-url 上线后，这两个字段即可删除。
     const result = await cloudbase.callFunction('get-file-url', {
       fileId: props.candidate.fileId,
+      callerUsername: auth.currentUsername,
+      candidateOwnerId: props.candidate.ownerId || props.candidate.createdBy || '',
     });
     if (!result?.success) throw new Error(result?.error || '获取文件失败');
 
