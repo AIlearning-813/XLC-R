@@ -800,13 +800,10 @@ describe('useConfigStore', () => {
 
       it('多层级嵌套', async () => {
         // 使用小延迟确保每个节点获得唯一的 Date.now() ID
-        const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 
         store.addDepartmentNode(null, '总部');
-        await delay(1);
         const rootId = store.departmentTree[0].id;
         store.addDepartmentNode(rootId, '销售部');
-        await delay(1);
         const salesId = store.departmentTree[0].children[0].id;
         store.addDepartmentNode(salesId, 'CC组');
 
@@ -846,6 +843,58 @@ describe('useConfigStore', () => {
       });
     });
 
+    /**
+     * 回归（2026-09-14）：原实现 id 是 'dept_' + Date.now()，同一毫秒内创建的多个
+     * 节点会拿到完全相同的 id，导致 findNode/removeFromTree 命中错误节点，
+     * 且重复 id 会经 saveToCloudBase 持久化进 Config 集合。
+     *
+     * 本组用例刻意**不插任何 delay**——有 bug 时必然失败。
+     * 原先散落在各测试里的 10 处 `await delay(1)` 正是为绕开该问题而写的变通，
+     * 而那只是把「必现」变成「偶发」（setTimeout 不保证跨毫秒）。
+     */
+    describe('部门 ID 唯一性', () => {
+      it('同一毫秒内连续创建多个根节点，id 互不相同', () => {
+        store.addDepartmentNode(null, '总部');
+        store.addDepartmentNode(null, '分部');
+        store.addDepartmentNode(null, '分公司');
+
+        const ids = store.departmentTree.map((n) => n.id);
+        expect(ids).toHaveLength(3);
+        expect(new Set(ids).size).toBe(3);
+      });
+
+      it('同一毫秒内连续创建多个子节点，挂载与 id 都正确', () => {
+        store.addDepartmentNode(null, '总部');
+        const rootId = store.departmentTree[0].id;
+
+        store.addDepartmentNode(rootId, '销售部');
+        store.addDepartmentNode(rootId, '市场部');
+
+        const children = store.departmentTree[0].children;
+        expect(children).toHaveLength(2);
+        expect(children.map((c) => c.name)).toEqual(['销售部', '市场部']);
+        expect(new Set(children.map((c) => c.id)).size).toBe(2);
+      });
+
+      it('删除一个子节点不会连带误删同毫秒创建的另一个', () => {
+        store.addDepartmentNode(null, '总部');
+        const rootId = store.departmentTree[0].id;
+        store.addDepartmentNode(rootId, '销售部');
+        store.addDepartmentNode(rootId, '市场部');
+
+        store.removeDepartmentNode(store.departmentTree[0].children[0].id);
+
+        expect(store.departmentTree[0].children).toHaveLength(1);
+        expect(store.departmentTree[0].children[0].name).toBe('市场部');
+      });
+
+      it('批量创建 20 个节点，id 全部唯一', () => {
+        for (let i = 0; i < 20; i++) store.addDepartmentNode(null, `部门${i}`);
+        const ids = store.departmentTree.map((n) => n.id);
+        expect(new Set(ids).size).toBe(20);
+      });
+    });
+
     describe('removeDepartmentNode', () => {
       it('删除根节点', () => {
         store.addDepartmentNode(null, '总部');
@@ -857,13 +906,10 @@ describe('useConfigStore', () => {
       });
 
       it('删除子节点', async () => {
-        const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 
         store.addDepartmentNode(null, '总部');
-        await delay(1);
         const rootId = store.departmentTree[0].id;
         store.addDepartmentNode(rootId, 'CC部');
-        await delay(1);
         const childId = store.departmentTree[0].children[0].id;
 
         store.removeDepartmentNode(childId);
@@ -872,13 +918,10 @@ describe('useConfigStore', () => {
       });
 
       it('删除后扁平化同步到 departments（树层面验证）', async () => {
-        const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 
         store.addDepartmentNode(null, '总部');
-        await delay(1);
         const rootId = store.departmentTree[0].id;
         store.addDepartmentNode(rootId, 'CC部');
-        await delay(1);
         const childId = store.departmentTree[0].children[0].id;
 
         // 删除前确认 departments 包含两个节点
@@ -913,13 +956,10 @@ describe('useConfigStore', () => {
       });
 
       it('返回深层节点的完整层级路径', async () => {
-        const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 
         store.addDepartmentNode(null, '总部');
-        await delay(1);
         const rootId = store.departmentTree[0].id;
         store.addDepartmentNode(rootId, '销售部');
-        await delay(1);
         const salesId = store.departmentTree[0].children[0].id;
         store.addDepartmentNode(salesId, 'CC组');
 
@@ -945,13 +985,10 @@ describe('useConfigStore', () => {
 
     describe('树与扁平部门联动', () => {
       it('树中所有节点名称出现在扁平 departments 中', async () => {
-        const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 
         store.addDepartmentNode(null, 'A');
-        await delay(1);
         const aId = store.departmentTree[0].id;
         store.addDepartmentNode(aId, 'A-1');
-        await delay(1);
         const a1Id = store.departmentTree[0].children[0].id;
         store.addDepartmentNode(a1Id, 'A-1-1');
 

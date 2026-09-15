@@ -35,6 +35,25 @@ export const useConfigStore = defineStore('config', () => {
     return names;
   }
 
+  /**
+   * 生成唯一部门 ID。
+   *
+   * 原实现是 `'dept_' + Date.now()`，同一毫秒内创建的节点会撞成同一个 id：
+   * 实测同步循环创建 20 个节点只得到 2 个不同 id。后果是 findNode/removeFromTree
+   * 命中错误节点（删除/改名作用到别的部门上），且重复 id 会经 saveToCloudBase
+   * 持久化进 Config 集合。
+   *
+   * 优先用随机 UUID；环境不支持 crypto.randomUUID 时退回「时间戳 + 自增序号」，
+   * 自增序号保证同毫秒内也不会重复。
+   */
+  let deptIdSeq = 0;
+  function generateDeptId() {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return `dept_${crypto.randomUUID()}`;
+    }
+    return `dept_${Date.now()}_${++deptIdSeq}`;
+  }
+
   // ===== 计算属性 =====
 
   // 🔧 立即从 localStorage 加载缓存（store 创建时毫秒级读取，确保任何组件使用 store 时数据立即可用）
@@ -237,7 +256,7 @@ export const useConfigStore = defineStore('config', () => {
    * @param {string} name - 新部门名称
    */
   function addDepartmentNode(parentId, name) {
-    const node = { id: 'dept_' + Date.now(), name, level: 1, children: [] };
+    const node = { id: generateDeptId(), name, level: 1, children: [] };
     if (!parentId) {
       departmentTree.value.push(node);
     } else {
