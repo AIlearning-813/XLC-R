@@ -1,9 +1,10 @@
 /* 新励成招聘管理系统 V2.0 — 认证 Store（服务端角色校验 + 会话令牌签名） */
 
 import { defineStore } from 'pinia';
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import cloudbase from '../services/cloudbase';
 import { setActiveUser, clearAllUsersCache } from '../services/offline-cache';
+import { setSessionToken } from '../services/session-token-holder';
 
 export const useAuthStore = defineStore('auth', () => {
   // 状态
@@ -18,6 +19,11 @@ export const useAuthStore = defineStore('auth', () => {
   // 计算属性
   const isLoggedIn = computed(() => !!currentUser.value && !!currentUsername.value);
   const isAdmin = computed(() => userRole.value === 'admin');
+
+  // 把令牌同步给 services/session-token-holder，供 cloudbase.callFunction 统一注入。
+  // 用 watch 而非在每个赋值点手动调用：sessionToken 在登录、恢复会话、离线回退、
+  // 登出等 5 处被赋值，逐个手写必然漏。immediate 保证 store 初始化时就同步一次。
+  watch(sessionToken, (v) => setSessionToken(v), { immediate: true });
 
   // ===== 持久化 key =====
   const STORAGE_KEY = 'xlc_auth_session';
@@ -213,10 +219,13 @@ export const useAuthStore = defineStore('auth', () => {
 
   // ===== 账号管理（仅管理员） =====
 
-  /** 修改自己的密码（所有用户可用） */
+  /** 修改自己的密码（所有已登录用户可用）
+   *  必须带 sessionToken：服务端据此确认「改的是自己的账号」。
+   *  原先只传 username + oldPassword，服务端无从验证身份，形成无鉴权的试密码通道。 */
   async function changeOwnPassword(oldPassword, newPassword) {
     const result = await cloudbase.callFunction('auth-proxy', {
       action: 'changePassword',
+      sessionToken: sessionToken.value,
       username: currentUsername.value,
       oldPassword,
       newPassword,
@@ -225,21 +234,22 @@ export const useAuthStore = defineStore('auth', () => {
     return result;
   }
 
-  /** 获取所有用户列表 */
+  /** 获取所有用户列表（管理员）
+   *  身份由服务端从 sessionToken 判定；callerUsername 是自称字段，不再使用 */
   async function fetchUsers() {
     const result = await cloudbase.callFunction('auth-proxy', {
       action: 'listUsers',
-      callerUsername: currentUsername.value,
+      sessionToken: sessionToken.value,
     });
     if (!result.success) throw new Error(result.error);
     return result.data;
   }
 
-  /** 添加用户 */
+  /** 添加用户（管理员） */
   async function addUserAccount(username, password, role, name) {
     const result = await cloudbase.callFunction('auth-proxy', {
       action: 'addUser',
-      callerUsername: currentUsername.value,
+      sessionToken: sessionToken.value,
       username,
       password,
       role,
@@ -249,22 +259,22 @@ export const useAuthStore = defineStore('auth', () => {
     return result;
   }
 
-  /** 删除用户 */
+  /** 删除用户（管理员） */
   async function deleteUserAccount(username) {
     const result = await cloudbase.callFunction('auth-proxy', {
       action: 'deleteUser',
-      callerUsername: currentUsername.value,
+      sessionToken: sessionToken.value,
       username,
     });
     if (!result.success) throw new Error(result.error);
     return result;
   }
 
-  /** 重置用户密码 */
+  /** 重置用户密码（管理员） */
   async function resetUserPassword(username, newPassword) {
     const result = await cloudbase.callFunction('auth-proxy', {
       action: 'resetPassword',
-      callerUsername: currentUsername.value,
+      sessionToken: sessionToken.value,
       username,
       newPassword,
     });
@@ -272,15 +282,10 @@ export const useAuthStore = defineStore('auth', () => {
     return result;
   }
 
-  // ===== 初始化默认账号 =====
-
-  /** 初始化默认账号（仅当 Users 集合为空时） */
-  async function seedDefaultUsers() {
-    const result = await cloudbase.callFunction('auth-proxy', {
-      action: 'seedDefaults',
-    });
-    return result;
-  }
+  // 注：原 seedDefaultUsers() 已于 2026-09-14 移除。
+  // 它对应 auth-proxy 的 seedDefaults，而该接口在生产上无需任何凭证即可
+  // 创建 admin + 8 个专员账号，等于公网可拿管理员权限。现仅保留服务端，
+  // 且必须携带部署密钥（MASTER_SECRET）才能调用。
 
   return {
     // 状态
@@ -303,6 +308,5 @@ export const useAuthStore = defineStore('auth', () => {
     addUserAccount,
     deleteUserAccount,
     resetUserPassword,
-    seedDefaultUsers,
   };
 });

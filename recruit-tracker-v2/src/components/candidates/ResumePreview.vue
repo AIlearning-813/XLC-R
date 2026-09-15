@@ -7,15 +7,12 @@
  */
 import { ref, watch } from 'vue';
 import cloudbase from '../../services/cloudbase';
-import { useAuthStore } from '../../stores/useAuthStore';
 import DOMPurify from 'dompurify';
 import mammoth from 'mammoth';
 
 const props = defineProps({
   candidate: { type: Object, default: () => ({}) },
 });
-
-const auth = useAuthStore();
 
 // ===== 状态 =====
 const fileUrl = ref('');
@@ -100,10 +97,11 @@ async function loadFileUrl() {
   docxHtml.value = '';
 
   try {
+    // 只传 fileId：身份由 sessionToken 决定（cloudbase.callFunction 自动注入），
+    // 文件归属由服务端按 fileId 反查数据库得出。
+    // 这里不再传 callerUsername / candidateOwnerId——它们是自称字段，服务端已不采信。
     const result = await cloudbase.callFunction('get-file-url', {
       fileId: props.candidate.fileId,
-      callerUsername: auth.currentUsername,
-      candidateOwnerId: props.candidate.ownerId || props.candidate.createdBy || '',
     });
     if (!result?.success) throw new Error(result?.error || '获取文件失败');
 

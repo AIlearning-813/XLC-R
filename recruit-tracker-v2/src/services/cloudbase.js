@@ -2,6 +2,7 @@
 
 import cloudbase from '@cloudbase/js-sdk';
 import env from '../config/env';
+import { getSessionToken } from './session-token-holder';
 
 // 单例 CloudBase 实例
 let app = null;
@@ -55,10 +56,24 @@ function storage() {
 }
 
 // 调用云函数
+//
+// 统一注入 sessionToken（2026-09-14 第 3 阶段加固）：
+//   服务端已改为「验令牌 + 回查数据库」判定身份，令牌必须随每次调用提交。
+//   在这里集中注入而不是让各调用点自己带，是因为调用点太多（report-aggregator 9 处、
+//   email-scanner 6 处），漏一处就是线上功能「时好时坏」。
+//   注入位置是顶层字段、与 params 平级，因此不会被云函数里
+//   `JSON.stringify(params)` 之类的参数日志带进日志。
 async function callFunction(name, data, options = {}) {
   const app = getApp();
   if (!app) throw new Error('服务未初始化，无法调用云函数');
-  const res = await app.callFunction({ name, data, ...options });
+
+  const token = getSessionToken();
+  const payload =
+    token && data && typeof data === 'object' && !Array.isArray(data) && !data.sessionToken
+      ? { ...data, sessionToken: token }
+      : data;
+
+  const res = await app.callFunction({ name, data: payload, ...options });
   return res.result;
 }
 
