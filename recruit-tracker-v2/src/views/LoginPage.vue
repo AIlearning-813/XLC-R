@@ -59,28 +59,11 @@ async function handleLogin() {
   }
 }
 
-// 首次初始化：创建默认账号（仅 Users 集合为空时生效）
-const initLoading = ref(false);
-const initMsg = ref('');
-async function handleInitSystem() {
-  if (!confirm('将创建 1 个管理员账号（admin）和 8 个招聘专员账号。\n\n系统将自动生成随机初始密码，请妥善保存。\n\n仅首次初始化时需要，已有账号则跳过。确定继续？')) return;
-  initLoading.value = true;
-  initMsg.value = '';
-  try {
-    // 先初始化 SDK 连接
-    await auth.initSDK();
-    const result = await auth.seedDefaultUsers();
-    if (result.skipped) {
-      initMsg.value = '账号已存在，无需初始化。请使用已有账号登录。';
-    } else {
-      initMsg.value = result.message + '。请妥善保存初始密码，登录后请立即修改。';
-    }
-  } catch (err) {
-    initMsg.value = `初始化失败：${err.message}`;
-  } finally {
-    initLoading.value = false;
-  }
-}
+// 首次初始化入口已于 2026-09-14 移除：
+// 原「⚡ 初始化系统账号」按钮调用 seedDefaultUsers，无需任何凭证即可创建
+// admin + 8 个专员账号（密码随机但会直接显示在页面上），等于给公网留了一个
+// 「一键拿到管理员账号」的后门。现改为仅能通过部署密钥调用：
+//   tcb fn invoke auth-proxy --params '{"action":"seedDefaults","bootstrapKey":"<MASTER_SECRET>"}'
 </script>
 
 <template>
@@ -166,17 +149,6 @@ async function handleInitSystem() {
           {{ loading ? '正在登录…' : '登 录' }}
         </button>
 
-        <div class="init-section">
-          <div class="init-divider"><span>首次使用？</span></div>
-          <button
-            class="btn btn-sm btn-outline init-btn"
-            :disabled="initLoading"
-            @click="handleInitSystem"
-          >
-            {{ initLoading ? '初始化中…' : '⚡ 初始化系统账号' }}
-          </button>
-          <p v-if="initMsg" class="init-msg">{{ initMsg }}</p>
-        </div>
       </div>
     </div>
   </div>
@@ -368,55 +340,6 @@ async function handleInitSystem() {
 
 .login-btn {
   width: 100%;
-}
-
-/* === 初始化 === */
-.init-section {
-  margin-top: var(--spacing-lg);
-  text-align: center;
-}
-
-.init-divider {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-sm);
-  margin-bottom: var(--spacing-sm);
-  color: var(--gray-300);
-  font-size: var(--font-size-xs);
-}
-
-.init-divider::before,
-.init-divider::after {
-  content: '';
-  flex: 1;
-  height: 1px;
-  background: var(--gray-100);
-}
-
-.btn-outline {
-  border: 1px solid var(--gray-200);
-  background: #fff;
-  color: var(--gray-500);
-  cursor: pointer;
-  font-family: inherit;
-  padding: 6px 16px;
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-sm);
-  transition: all var(--transition);
-}
-
-.btn-outline:hover {
-  border-color: var(--primary);
-  color: var(--primary);
-}
-
-.init-msg {
-  margin-top: var(--spacing-sm);
-  font-size: var(--font-size-sm);
-  color: var(--success);
-  padding: var(--spacing-sm);
-  background: var(--success-bg);
-  border-radius: var(--radius-sm);
 }
 
 /* === 移动端适配 === */

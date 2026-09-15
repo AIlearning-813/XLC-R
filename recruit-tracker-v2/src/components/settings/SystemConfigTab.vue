@@ -105,20 +105,9 @@ async function handleResetPassword(newPwd) {
   }
 }
 
-async function handleSeedDefaults() {
-  if (!confirm('将创建默认管理员账号（admin）和 8 个招聘专员账号。\n\n系统将自动生成随机初始密码。\n\n仅当系统中没有用户时才会创建。确定继续？')) return;
-  try {
-    const result = await auth.seedDefaultUsers();
-    if (result.skipped) {
-      showMsg('账号已存在，跳过初始化');
-    } else {
-      showMsg(result.message);
-      await loadUsers();
-    }
-  } catch (err) {
-    showMsg(`初始化失败：${err.message}`, 'error');
-  }
-}
+// 「一键初始化默认账号」已于 2026-09-14 移除（公网可无凭证创建 admin，
+// 等于后门）。需要批量建号时用部署密钥调用 auth-proxy 的 seedDefaults，
+// 日常建号请用下方「+ 添加用户」。
 
 function roleLabel(role) {
   return role === 'admin' ? '管理员' : '招聘专员';
@@ -272,7 +261,7 @@ async function onChangeThreshold(stageKey, days) {
 
       <div class="user-list">
         <div v-if="usersLoading" class="text-muted">加载中…</div>
-        <div v-else-if="users.length === 0" class="text-muted">暂无用户，点击下方按钮初始化默认账号</div>
+        <div v-else-if="users.length === 0" class="text-muted">暂无用户，请点击下方「+ 添加用户」创建账号</div>
         <div v-else class="table-mini">
           <div class="table-row table-header">
             <span class="col-user">账号</span>
@@ -322,7 +311,6 @@ async function onChangeThreshold(stageKey, days) {
 
       <div class="user-actions" style="margin-top: var(--spacing-sm); display: flex; gap: var(--spacing-xs);">
         <button v-if="!showAddUserForm" class="btn-link" @click="showAddUserForm = true">+ 添加用户</button>
-        <button v-if="users.length === 0" class="btn-link" @click="handleSeedDefaults" style="color: var(--warning);">⚡ 初始化默认账号</button>
       </div>
     </section>
 
