@@ -30,9 +30,52 @@ export const BATCH_APP = 500;   // Application 分页批
 export const BATCH_CAND = 100;  // Candidate $in 批量
 export const BATCH_OWNER = 500; // Candidate.ownerId 分页批
 
+// 分批拉取时的并发度。取 6 是在「等待时间」与「云环境 QPS / 连接数」之间的折中：
+// 再高收益递减，且个人版环境可能限流。
+export const BATCH_CONCURRENCY = 6;
+
+// count() 推断批数的合理上限（200 批 ≈ 10 万条）。
+// 超过即认为 count 返回值不可信（API 抖动 / 规则异常），回退串行探测，
+// 避免异常大的 count 引发并发请求风暴。
+export const MAX_BATCHES = 200;
+
+/**
+ * 限流并发执行（并发池），结果顺序与入参一致（纯工具函数）。
+ * 用于把「一批批串行等待」改成「一批批并发发出」——总请求数不变，等待轮次大幅减少。
+ * @param {Array} items
+ * @param {number} limit - 最大并发数
+ * @param {Function} fn - (item, index) => Promise
+ * @returns {Promise<Array>}
+ */
+export async function mapLimit(items, limit, fn) {
+  const list = items || [];
+  const out = new Array(list.length);
+  if (list.length === 0) return out;
+
+  let cursor = 0;
+  const width = Math.max(1, Math.min(limit || 1, list.length));
+  const workers = Array.from({ length: width }, async () => {
+    for (;;) {
+      const i = cursor;
+      cursor += 1;
+      if (i >= list.length) return;
+      out[i] = await fn(list[i], i);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
 /**
  * 分页拉全当前用户的 Application（admin 拉全库）
  * 不过滤 isArchived —— 归档状态由调用方在内存中按语义处理。
+ *
+ * D-1 改造：批次由「串行等待」改为「并发发出」。
+ *   - 小账号（不足一批）：仍是 1 次请求，与改造前一致；
+ *   - 大账号：首批探测 + count 定总批数 + 余下批次并发。
+ *   - count 不可用时回退为逐批串行探测，功能不退化。
+ * 每次批次都重建查询链，避免复用同一个 query 对象在并发下互相覆盖条件。
+ *
  * @param {Object} db - cloudbase.db() 实例
  * @param {Object} opts
  * @param {string|null} opts.ownerId - 专员用户名；admin 传 null
@@ -41,15 +84,60 @@ export const BATCH_OWNER = 500; // Candidate.ownerId 分页批
  */
 export async function fetchAllApplications(db = cloudbase.db(), { ownerId = null, isAdmin = false } = {}) {
   if (!db) return [];
-  let query = db.collection('Application');
-  if (!isAdmin && ownerId) query = query.where({ ownerId });
 
-  const all = [];
-  let skip = 0;
-  for (;;) {
-    const { data } = await query.orderBy('_id', 'asc').skip(skip).limit(BATCH_APP).get();
-    const chunk = data || [];
+  const buildQuery = () => {
+    let q = db.collection('Application');
+    if (!isAdmin && ownerId) q = q.where({ ownerId });
+    return q.orderBy('_id', 'asc');
+  };
+  const fetchBatch = async (skip) => {
+    const { data } = await buildQuery().skip(skip).limit(BATCH_APP).get();
+    return data || [];
+  };
+
+  // 首批兼作「是否还有后续」的探针：不足一批即结束，小账号 1 次请求搞定。
+  const firstChunk = await fetchBatch(0);
+  const all = [...firstChunk];
+  if (firstChunk.length < BATCH_APP) return all;
+
+  let total = null;
+  try {
+    const countQuery = isAdmin
+      ? db.collection('Application')
+      : db.collection('Application').where({ ownerId });
+    const c = await countQuery.count();
+    if (c && typeof c.total === 'number') total = c.total;
+  } catch { /* 回退串行 */ }
+
+  if (total === null || !Number.isFinite(total) || total < 0 || Math.ceil(total / BATCH_APP) > MAX_BATCHES) {
+    let skip = BATCH_APP;
+    for (;;) {
+      const chunk = await fetchBatch(skip);
+      all.push(...chunk);
+      if (chunk.length < BATCH_APP) break;
+      skip += BATCH_APP;
+    }
+    return all;
+  }
+
+  const batchCount = Math.ceil(total / BATCH_APP);
+  const starts = [];
+  for (let i = 1; i < batchCount; i++) starts.push(i * BATCH_APP);
+  const chunks = starts.length
+    ? await mapLimit(starts, BATCH_CONCURRENCY, (skip) => fetchBatch(skip))
+    : [];
+  for (const chunk of chunks) all.push(...chunk);
+
+  // 收尾兜底 —— 这段是「取全不截断」契约的保险丝，不可删：
+  // count() 在 CloudBase 上可能被安全规则静默过滤而偏小，查询期间数据也可能新增，
+  // 两种情况都会让上面推断的批数偏少。只要「最后一批仍是满的」，就说明后面可能还有，
+  // 继续串行拉直到出现不足批。正常情况最后一批不满 500，这里一次额外请求都不会发。
+  let skip = Math.max(batchCount * BATCH_APP, BATCH_APP);
+  let tail = chunks.length ? chunks[chunks.length - 1] : firstChunk;
+  while (tail.length === BATCH_APP) {
+    const chunk = await fetchBatch(skip);
     all.push(...chunk);
+    tail = chunk;
     if (chunk.length < BATCH_APP) break;
     skip += BATCH_APP;
   }
@@ -58,6 +146,9 @@ export async function fetchAllApplications(db = cloudbase.db(), { ownerId = null
 
 /**
  * 按 id 批量取 Candidate（100/批 + 单条兜底），返回 Map<id, doc>
+ *
+ * D-1 改造：批次并发发出（原为串行 for 循环）。
+ * 写入仍按批次原顺序进行，且 id 已去重，故「同一 id 取首次出现」的语义不变。
  * @returns {Promise<Map>}
  */
 export async function fetchCandidatesByIds(db, ids) {
@@ -65,24 +156,36 @@ export async function fetchCandidatesByIds(db, ids) {
   const uniq = [...new Set((ids || []).filter(Boolean))];
   if (!db || uniq.length === 0) return map;
 
-  for (let i = 0; i < uniq.length; i += BATCH_CAND) {
-    const batch = uniq.slice(i, i + BATCH_CAND);
+  const batches = [];
+  for (let i = 0; i < uniq.length; i += BATCH_CAND) batches.push(uniq.slice(i, i + BATCH_CAND));
+
+  const results = await mapLimit(batches, BATCH_CONCURRENCY, async (batch) => {
     try {
       const { data } = await db.collection('Candidate')
         .where({ _id: db.command.in(batch) })
         .get();
-      for (const c of (data || [])) {
-        if (!map.has(c._id)) map.set(c._id, c);
-      }
-    } catch (err) {
-      // 批量失败时逐条降级（与旧列表逻辑一致）
-      for (const id of batch) {
-        if (map.has(id)) continue;
-        try {
-          const { data } = await db.collection('Candidate').doc(id).get();
-          if (data?.[0]) map.set(id, data[0]);
-        } catch { /* skip */ }
-      }
+      return { batch, data: data || [], failed: false };
+    } catch {
+      return { batch, data: [], failed: true };
+    }
+  });
+
+  const failedBatches = [];
+  for (const r of results) {
+    if (r.failed) { failedBatches.push(r.batch); continue; }
+    for (const c of r.data) {
+      if (!map.has(c._id)) map.set(c._id, c);
+    }
+  }
+
+  // 批量失败时逐条降级（与旧列表逻辑一致）
+  for (const batch of failedBatches) {
+    for (const id of batch) {
+      if (map.has(id)) continue;
+      try {
+        const { data } = await db.collection('Candidate').doc(id).get();
+        if (data?.[0]) map.set(id, data[0]);
+      } catch { /* skip */ }
     }
   }
   return map;
@@ -90,21 +193,55 @@ export async function fetchCandidatesByIds(db, ids) {
 
 /**
  * 分页拉取 ownerId==当前用户的全部 Candidate（孤儿候选人兜底用）
+ *
+ * D-1 改造：与 fetchAllApplications 同法 —— 首批探测，其余并发。
  * @returns {Promise<Array>}
  */
 export async function fetchCandidatesByOwner(db, ownerId) {
   if (!db || !ownerId) return [];
-  const all = [];
-  let skip = 0;
-  for (;;) {
-    const { data } = await db.collection('Candidate')
-      .where({ ownerId })
-      .orderBy('_id', 'asc')
-      .skip(skip)
-      .limit(BATCH_OWNER)
-      .get();
-    const chunk = data || [];
+
+  const buildQuery = () => db.collection('Candidate').where({ ownerId }).orderBy('_id', 'asc');
+  const fetchBatch = async (skip) => {
+    const { data } = await buildQuery().skip(skip).limit(BATCH_OWNER).get();
+    return data || [];
+  };
+
+  const firstChunk = await fetchBatch(0);
+  const all = [...firstChunk];
+  if (firstChunk.length < BATCH_OWNER) return all;
+
+  let total = null;
+  try {
+    const c = await db.collection('Candidate').where({ ownerId }).count();
+    if (c && typeof c.total === 'number') total = c.total;
+  } catch { /* 回退串行 */ }
+
+  if (total === null || !Number.isFinite(total) || total < 0 || Math.ceil(total / BATCH_OWNER) > MAX_BATCHES) {
+    let skip = BATCH_OWNER;
+    for (;;) {
+      const chunk = await fetchBatch(skip);
+      all.push(...chunk);
+      if (chunk.length < BATCH_OWNER) break;
+      skip += BATCH_OWNER;
+    }
+    return all;
+  }
+
+  const batchCount = Math.ceil(total / BATCH_OWNER);
+  const starts = [];
+  for (let i = 1; i < batchCount; i++) starts.push(i * BATCH_OWNER);
+  const chunks = starts.length
+    ? await mapLimit(starts, BATCH_CONCURRENCY, (skip) => fetchBatch(skip))
+    : [];
+  for (const chunk of chunks) all.push(...chunk);
+
+  // 收尾兜底：同 fetchAllApplications —— count 偏小时靠「最后一批是否满」续拉，保证不截断。
+  let skip = Math.max(batchCount * BATCH_OWNER, BATCH_OWNER);
+  let tail = chunks.length ? chunks[chunks.length - 1] : firstChunk;
+  while (tail.length === BATCH_OWNER) {
+    const chunk = await fetchBatch(skip);
     all.push(...chunk);
+    tail = chunk;
     if (chunk.length < BATCH_OWNER) break;
     skip += BATCH_OWNER;
   }
@@ -420,6 +557,38 @@ async function buildRowsForTab(db, tabName, ctx) {
 }
 
 /**
+ * 装配「已分配类」Tab 的行（active / in-progress / ended）—— 候选人只按「当前页」取。
+ *
+ * 为什么可以提前分页（这是 D-1 的正确性前提，改动前必须逐条核对）：
+ *   1. 筛选链路（selectTabApps + applyAppFilters）只读 Application 自身字段，与候选人无关；
+ *   2. 行的排序键 row.updatedAt === app.updatedAt，回退键 createdAt 同理（见 buildApplicationRows），
+ *      故对 appList 排序与对装配后的行排序结果一致；
+ *   3. 综上，「先排序取当页 → 再查这些行的候选人」与
+ *      「先查全部候选人 → 装配成行 → 再排序取当页」得到的行集与顺序一致。
+ *
+ * 不适用（仍在 loadWorkspace 走全量装配）：
+ *   - 搜索：要按候选人姓名/电话/邮箱匹配，必须拿到候选人才能过滤；
+ *   - 待分配 Tab：行按 Candidate.updatedAt 排序，必须拿到候选人才知道顺序。
+ */
+async function buildPagedApplicationRows(db, tabName, { apps, filters = {}, jobsLookup = null, page = 1, pageSize = 20 }) {
+  const appList = applyAppFilters(selectTabApps(apps, tabName), filters);
+  const { rows: pageApps, total } = pickPage(sortByUpdatedDesc(appList), page, pageSize);
+
+  const candidatesMap = await fetchCandidatesByIds(
+    db,
+    [...new Set(pageApps.map((a) => a.candidateId).filter(Boolean))]
+  );
+
+  const jobsMap = {};
+  for (const jobId of [...new Set(pageApps.map((a) => a.jobId).filter(Boolean))]) {
+    const job = jobsLookup ? jobsLookup(jobId) : null;
+    if (job) jobsMap[jobId] = job;
+  }
+
+  return { rows: tagRows(buildApplicationRows(pageApps, candidatesMap, jobsMap), tabName), total };
+}
+
+/**
  * 候选人工作区统一加载入口（编排）—— 替换页面里两套重复的取数/合并/排序逻辑。
  *
  * 行为约定：
@@ -465,7 +634,7 @@ export async function loadWorkspace(db, options = {}) {
   const q = (filters.search || '').trim();
   const ctx = { apps, unassignedEntries, ownerId, jobsLookup };
 
-  let merged;
+  // 搜索：要按候选人姓名/电话/邮箱匹配，必须拿到候选人才过滤 → 保持全量装配
   if (q) {
     const parts = [];
     for (const t of SEARCH_TABS) {
@@ -473,16 +642,21 @@ export async function loadWorkspace(db, options = {}) {
       const tabFilters = t === tab ? filters : {};
       parts.push(await buildRowsForTab(db, t, { ...ctx, filters: tabFilters }));
     }
-    merged = dedupeById(parts.flat());
-  } else {
-    merged = await buildRowsForTab(db, tab, { ...ctx, filters });
+    const matched = sortByUpdatedDesc(dedupeById(parts.flat()))
+      .filter((row) => rowMatch(row, q));
+    const paged = pickPage(matched, page, pageSize);
+    return { rows: paged.rows, total: paged.total, tabCounts };
   }
 
-  merged = sortByUpdatedDesc(merged);
-  if (q) {
-    merged = merged.filter((row) => rowMatch(row, q));
+  // 待分配 Tab：行按 Candidate.updatedAt 排序，须先拿到候选人才能定序 → 保持全量装配
+  if (tab === 'unassigned') {
+    const sorted = sortByUpdatedDesc(await buildRowsForTab(db, tab, { ...ctx, filters }));
+    const paged = pickPage(sorted, page, pageSize);
+    return { rows: paged.rows, total: paged.total, tabCounts };
   }
 
-  const paged = pickPage(merged, page, pageSize);
+  // 已分配类 Tab（active / in-progress / ended）：筛选与排序都只依赖 Application，
+  // 故提前分页，候选人只查当页 —— 首屏 Candidate 请求数从「整个 Tab 分批」降为 1 次。
+  const paged = await buildPagedApplicationRows(db, tab, { apps, filters, jobsLookup, page, pageSize });
   return { rows: paged.rows, total: paged.total, tabCounts };
 }

@@ -19,12 +19,76 @@ import { vi } from 'vitest';
 let __collections = {};
 let __callFunctionResults = {};
 let __authState = { loggedIn: true, uid: 'test-uid-001' };
+let __queryLog = [];
+let __queryDelay = 0;   // >0 时每次 .get() 模拟网络延迟，用于度量并发度
+let __inFlight = 0;
+let __maxInFlight = 0;
+let __countOverride = {}; // 集合 -> 强制 count() 返回值（模拟安全规则过滤导致 count 偏小）
+let __countError = {};    // 集合 -> count() 抛错（模拟 count 不可用）
+
+/** 强制某集合的 count() 返回指定值（用于验证「count 偏小时不截断」的兜底逻辑） */
+export function __setCountOverride(name, value) {
+  __countOverride[name] = value;
+}
+
+/** 让某集合的 count() 抛错（用于验证回退路径） */
+export function __setCountError(name, on = true) {
+  __countError[name] = !!on;
+}
 
 /** 重置所有 mock 状态（在每个测试前自动调用） */
 export function __resetAll() {
   __collections = {};
   __callFunctionResults = {};
   __authState = { loggedIn: true, uid: 'test-uid-001' };
+  __queryLog = [];
+  __queryDelay = 0;
+  __inFlight = 0;
+  __maxInFlight = 0;
+  __countOverride = {};
+  __countError = {};
+}
+
+/** 设置每次 .get() 的模拟网络延迟（毫秒）；0 = 关闭（默认） */
+export function __setQueryDelay(ms) {
+  __queryDelay = ms || 0;
+}
+
+/** 本次测试中出现过的最大并发在途查询数（>1 即证明存在并发） */
+export function __getMaxInFlight() {
+  return __maxInFlight;
+}
+
+function __enterQuery() {
+  __inFlight += 1;
+  if (__inFlight > __maxInFlight) __maxInFlight = __inFlight;
+}
+
+function __exitQuery() {
+  __inFlight -= 1;
+}
+
+/**
+ * 记录一次 .get() 查询（仅记录元信息，不记录数据）
+ * 用途：给"首屏网络往返次数"这类性能断言提供度量口径
+ */
+function __logQuery(collection, { skip = null, limit = null } = {}) {
+  __queryLog.push({ collection, skip, limit });
+}
+
+/** 获取查询日志（副本） */
+export function __getQueryLog() {
+  return __queryLog.slice();
+}
+
+/** 按集合统计查询次数 */
+export function __countQueries(collection) {
+  return __queryLog.filter((q) => q.collection === collection).length;
+}
+
+/** 清空查询日志（不影响数据） */
+export function __resetQueryLog() {
+  __queryLog = [];
 }
 
 /** 设置 mock 集合数据 */
@@ -116,6 +180,19 @@ class MockQuery {
   }
 
   async get() {
+    __logQuery(this._collection, { skip: this._skipCount, limit: this._limitCount });
+    __enterQuery();
+    try {
+      if (__queryDelay > 0) {
+        await new Promise((r) => setTimeout(r, __queryDelay));
+      }
+      return this.__exec();
+    } finally {
+      __exitQuery();
+    }
+  }
+
+  __exec() {
     let docs = (__collections[this._collection] || []).slice();
 
     // 应用条件过滤（支持 command 对象）
@@ -171,6 +248,14 @@ class MockQuery {
   }
 
   async count() {
+    if (__countError[this._collection]) {
+      __logQuery(this._collection, { skip: this._skipCount, limit: this._limitCount });
+      throw new Error('count not permitted');
+    }
+    if (__countOverride[this._collection] !== undefined) {
+      __logQuery(this._collection, { skip: this._skipCount, limit: this._limitCount });
+      return { total: __countOverride[this._collection] };
+    }
     const { data } = await this.get();
     return { total: data.length };
   }
@@ -292,6 +377,13 @@ const cloudbaseMock = {
   __getCollectionCount,
   __authState,
   __collections, // 直接暴露内存数据库，用于高级断言
+  __getQueryLog,
+  __countQueries,
+  __resetQueryLog,
+  __setQueryDelay,
+  __getMaxInFlight,
+  __setCountOverride,
+  __setCountError,
 };
 
 export default cloudbaseMock;
