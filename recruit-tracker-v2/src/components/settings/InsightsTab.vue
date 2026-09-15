@@ -70,6 +70,14 @@ function formatRate(rate) {
   if (rate === null || rate === undefined) return '—';
   return `${rate}%`;
 }
+
+function formatSalary(range) {
+  const min = range?.min || 0;
+  const max = range?.max || 0;
+  // 两端都为 0 表示岗位未维护薪资或样本不足，显示「暂无数据」而不是误导性的 0k-0k
+  if (!min && !max) return '暂无数据';
+  return `${min}k-${max}k`;
+}
 </script>
 
 <template>
@@ -125,7 +133,7 @@ function formatRate(rate) {
             <span class="metric-label">平均候选人/录用</span>
           </div>
           <div class="metric">
-            <span class="metric-value">{{ ins.salaryRange?.min || 0 }}k-{{ ins.salaryRange?.max || 0 }}k</span>
+            <span class="metric-value">{{ formatSalary(ins.salaryRange) }}</span>
             <span class="metric-label">薪资范围</span>
           </div>
         </div>
