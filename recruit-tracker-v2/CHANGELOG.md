@@ -191,10 +191,12 @@ const [apps, orphanCandidates] = await Promise.all([...]);   // ← 无论用于
 - 提交：`b8d2f39`（12 files changed, 2723 insertions），已推送 `origin/master`
   （远端会提示仓库已改名，GitHub 自动重定向到 `AIlearning-813/XLC-R`）。
 - 发布：`tcb hosting deploy dist/ -e xlc-recruit-d1gmbx8gybc8a3565`
-  → https://xlc-recruit-d1gmbx8gybc8a3565-1436974998.tcloudbaseapp.com
-- 产物核验：线上 `index.html` 与本地 `dist/index.html` **逐字节一致**；
-  `assets/index-Ct2D_9PA.js`、`assets/vue-vendor-C8dfGiRL.js`（D-2 代码所在 chunk）
-  的 sha256 与本地完全相同。
+- **线上入口是 `https://recruit.xlczg.com/`**（该域名为本环境绑定的自定义域名，非独立站点）。
+  CloudBase 默认域名 `…tcloudbaseapp.com` 只是同一个托管的别名，**不是给用户看的地址**，
+  对外沟通一律用 `recruit.xlczg.com`。
+- 产物核验：`https://recruit.xlczg.com/` 的 `index.html` 与本地 `dist/index.html` **逐字节一致**；
+  `assets/index-Ct2D_9PA.js`、`assets/vue-vendor-C8dfGiRL.js`（D-2 代码所在 chunk）的
+  sha256 与本地完全相同，响应头 `last-modified` 为本次发布时间。
 - 开关核验：新增 `.env.production` 显式写死 `VITE_LIST_PUSHDOWN=true`。
   并用「同一源码以 true / false 各构建一次、比产物哈希」验证该开关**确实生效**
   （两次构建的 `index-*.js` 与 `vue-vendor-*.js` 哈希不同，不是被内联/死代码消除）。
