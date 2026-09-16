@@ -184,7 +184,22 @@ const [apps, orphanCandidates] = await Promise.all([...]);   // ← 无论用于
 - **索引是否已被查询真正用上未实测**：索引已在控制台创建，但「建索引前后的耗时对比」没做
   （真机对拍时索引已存在）。下推耗时（188–532ms）已优于全量装配，符合预期。
 - CloudBase 个人版的聚合 QPS 容忍度未实测。
-- 仍未做：**部署**。线上仍是 D-1。
+- **已在 2026-09-16 部署上线**（见下节）。剩余未验证项只有浏览器登录态本身。
+
+### 上线记录（2026-09-16）
+
+- 提交：`b8d2f39`（12 files changed, 2723 insertions），已推送 `origin/master`
+  （远端会提示仓库已改名，GitHub 自动重定向到 `AIlearning-813/XLC-R`）。
+- 发布：`tcb hosting deploy dist/ -e xlc-recruit-d1gmbx8gybc8a3565`
+  → https://xlc-recruit-d1gmbx8gybc8a3565-1436974998.tcloudbaseapp.com
+- 产物核验：线上 `index.html` 与本地 `dist/index.html` **逐字节一致**；
+  `assets/index-Ct2D_9PA.js`、`assets/vue-vendor-C8dfGiRL.js`（D-2 代码所在 chunk）
+  的 sha256 与本地完全相同。
+- 开关核验：新增 `.env.production` 显式写死 `VITE_LIST_PUSHDOWN=true`。
+  并用「同一源码以 true / false 各构建一次、比产物哈希」验证该开关**确实生效**
+  （两次构建的 `index-*.js` 与 `vue-vendor-*.js` 哈希不同，不是被内联/死代码消除）。
+- 回滚：`.env.production` 改为 `false` → `npm run build` → 重新 `tcb hosting deploy`（约 2 分钟）。
+  另有代码内熔断：下推路径一旦出错会自动降级为全量装配并停止重试，无需改配置。
 
 ### ⚠️ 与 D-2 无关但已确认的生产问题（待用户决策，本次未改）
 
