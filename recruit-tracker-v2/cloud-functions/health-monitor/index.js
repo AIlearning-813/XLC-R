@@ -30,10 +30,15 @@ exports.main = async (event, context) => {
   try {
     const startTime = Date.now();
     let probeFileId = null;
-    try {
-      const { data: probeRows } = await db.collection('ParseQueue').limit(1).get();
-      probeFileId = probeRows && probeRows[0] ? probeRows[0].fileId : null;
-    } catch { /* 取样本失败不阻塞后续判断 */ }
+    // 依次尝试取样：Candidate 的 fileId 覆盖率实测极高，ParseQueue 次之。
+    // 用 limit(5) 而非 limit(1)，避免恰好取到没有 fileId 的那一条而白跑。
+    for (const coll of ['Candidate', 'ParseQueue']) {
+      try {
+        const { data: probeRows } = await db.collection(coll).limit(5).get();
+        const hit = (probeRows || []).find((r) => r && typeof r.fileId === 'string' && r.fileId !== '');
+        if (hit) { probeFileId = hit.fileId; break; }
+      } catch { /* 换下一个集合 */ }
+    }
 
     if (!probeFileId) {
       checks.storage = { ok: true, skipped: true, reason: '暂无可用于探测的文件记录' };
