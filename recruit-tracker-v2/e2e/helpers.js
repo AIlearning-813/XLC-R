@@ -33,10 +33,14 @@ function buildAuthPayload(opts = {}) {
     name = '管理员',
   } = opts;
   const payload = {
+    st: 'e2e-mock-session-token',
     u: username,
     r: role,
     n: name,
     e: Date.now() + TTL_MS,
+    username,
+    role,
+    name,
   };
   payload.sig = signPayload(payload);
   return payload;

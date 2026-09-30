@@ -279,10 +279,10 @@ const cloudbaseMock = {
   callFunction: async (name, data) => {
     const preset = MOCK_DB.callFunctionResults[name];
     if (preset !== undefined) {
-      if (typeof preset === 'function') return { result: await preset(data) };
-      return { result: preset };
+      if (typeof preset === 'function') return await preset(data);
+      return preset;
     }
-    return { result: { success: true } };
+    return { success: true };
   },
 
   isReady: () => true,
