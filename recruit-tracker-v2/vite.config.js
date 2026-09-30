@@ -14,22 +14,29 @@ export default defineConfig({
   },
 
   build: {
-    // 代码分割：CloudBase SDK 和 Vue 生态独立分包，避免主包过大
+    // 代码分割（2026-09-30 修复）
+    //
+    // 原实现用 id.includes('vue') 判定 Vue 生态，但应用自身的 .vue 文件
+    // 路径同样包含 'vue'，导致全部页面与组件被强行并入 vue-vendor 分块，
+    // router 里 16 条 () => import() 路由懒加载完全失效：产物只有
+    // index(4KB) + vue-vendor(1.56MB) + cloudbase，无任何按路由的 chunk。
+    //
+    // 现在只干预 node_modules 中的第三方库，应用代码交回默认分包，
+    // 使路由懒加载恢复正常。
     rollupOptions: {
       output: {
         manualChunks(id) {
-          // CloudBase SDK 独立分包
-          if (id.includes('@cloudbase/js-sdk') || id.includes('@cloudbase')) {
-            return 'cloudbase';
-          }
-          // Vue 生态独立分包
-          if (id.includes('vue') || id.includes('pinia') || id.includes('vue-router')) {
+          if (!id.includes('node_modules')) return undefined;
+          if (id.includes('@cloudbase')) return 'cloudbase';
+          if (/node_modules[\\/]@vue[\\/]/.test(id) ||
+              /node_modules[\\/](vue|vue-router|pinia)[\\/]/.test(id)) {
             return 'vue-vendor';
           }
+          return undefined;
         },
       },
     },
-    // 调整 chunk 大小警告阈值（CloudBase SDK 本身约 600KB）
+    // 调整 chunk 大小警告阈值
     chunkSizeWarningLimit: 700,
   },
 })
