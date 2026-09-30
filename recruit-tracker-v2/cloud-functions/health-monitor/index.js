@@ -22,10 +22,26 @@ exports.main = async (event, context) => {
   }
 
   // 2. 云存储可用性检查
+  //    原实现：await app.getTempFileURL({ fileList: [] })
+  //    云 API 对空 fileList 直接抛 INVALID_PARAM（file_list can not be empty），
+  //    因此这个检查**永远失败**——实测 2026-08-20~09-30 共产生 165 次「健康检查异常」误报。
+  //    改为取一条真实文件记录做探测；库里暂时没有可用于探测的文件时标记 skipped，
+  //    而不是判为失败，避免制造假告警。
   try {
     const startTime = Date.now();
-    await app.getTempFileURL({ fileList: [] });
-    checks.storage = { ok: true, latency: Date.now() - startTime };
+    let probeFileId = null;
+    try {
+      const { data: probeRows } = await db.collection('ParseQueue').limit(1).get();
+      probeFileId = probeRows && probeRows[0] ? probeRows[0].fileId : null;
+    } catch { /* 取样本失败不阻塞后续判断 */ }
+
+    if (!probeFileId) {
+      checks.storage = { ok: true, skipped: true, reason: '暂无可用于探测的文件记录' };
+    } else {
+      const urlRes = await app.getTempFileURL({ fileList: [probeFileId] });
+      const list = (urlRes && urlRes.fileList) || [];
+      checks.storage = { ok: list.length > 0, latency: Date.now() - startTime };
+    }
   } catch (err) {
     checks.storage = { ok: false, error: err.message };
   }

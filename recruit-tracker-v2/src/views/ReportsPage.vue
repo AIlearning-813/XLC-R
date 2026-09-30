@@ -66,11 +66,16 @@ async function loadJobs() {
   } catch (err) {
     console.warn('[Reports] 岗位列表加载失败:', err.message);
   }
-  // 加载专员列表
-  try {
-    recruiters.value = await auth.fetchUsers();
-  } catch (e) {
-    captureError('reports', '加载专员列表失败', { message: e?.message, context: 'ReportsPage.loadJobs' });
+  // 加载专员列表（仅管理员需要）
+  // 专员筛选下拉只在 auth.isAdmin 时渲染（见模板），而 auth-proxy 的 listUsers
+  // 也仅允许管理员调用——专员调用必然失败并往 ErrorLog 刷错误
+  // （实测 2026-08-20~09-30 共 34 次「加载专员列表失败」）。故按角色跳过。
+  if (auth.isAdmin) {
+    try {
+      recruiters.value = await auth.fetchUsers();
+    } catch (e) {
+      captureError('reports', '加载专员列表失败', { message: e?.message, context: 'ReportsPage.loadJobs' });
+    }
   }
 }
 
