@@ -1,5 +1,59 @@
 # 变更日志
 
+## 2026-09-30 — 首屏分包优化上线（首屏 JS -63%）
+
+### 上线内容
+
+同一份源码，仅调整构建分包配置，**业务代码零改动**：
+
+| 指标 | 上线前 | 上线后 | 变化 |
+|---|---|---|---|
+| 产物 chunk 数 | 8 | 62 | — |
+| `vue-vendor` | 1,561,750 B | 108,030 B | **-93%** |
+| 首屏 JS（index + vue-vendor + cloudbase） | 2,243,215 B | 822,431 B | **-63%** |
+
+### 根因
+
+`vite.config.js` 的 `manualChunks` 以 `id.includes('vue')` 判定 Vue 生态，
+而应用自身所有 `.vue` 文件的路径都含 `'vue'`（扩展名），导致 16 个页面与全部
+组件被强行并入 `vue-vendor`，`router` 中的路由级 `import()` 懒加载完全失效。
+改为只干预 `node_modules` 下的第三方库后，应用代码交回默认分包，路由懒加载恢复。
+
+### 发布记录
+
+- 代码：`e5f732e`
+- 发布命令：`tcb hosting deploy dist -e xlc-recruit-d1gmbx8gybc8a3565 --safe --verify`
+- 发布前已将线上旧版产物归档至 `E:\XLC-R-backup\prod-dist-BEFORE-perf`（归档时 6 个资源哈希与线上逐一核对一致）
+- 发布后核验：`recruit.xlczg.com` 与默认域名均返回新资源；真实浏览器加载 0 控制台错误、0 失败请求，路由 chunk 按需加载正常
+
+线上资源哈希（发布后）：
+
+```
+index-DWhqhWV-.js       vue-vendor-DWG60Eyz.js    index-D5CgQkXo.css
+cloudbase-DkSlVMU3.js   cloudbase-gtuk1dFD.js     rolldown-runtime-CJJwijRH.js
+error-capture-B1-_5ebJ.js
+```
+
+### 回滚
+
+```bash
+# A. 直接用归档产物回滚（最快）
+tcb hosting deploy "E:\XLC-R-backup\prod-dist-BEFORE-perf" -e xlc-recruit-d1gmbx8gybc8a3565 --safe --verify
+
+# B. 用 git 重建（构建已被证明可复现）
+cd E:\XLC-R && git revert --no-commit e5f732e && git commit -m "revert perf(build)"
+cd recruit-tracker-v2 && npm run build
+tcb hosting deploy dist -e xlc-recruit-d1gmbx8gybc8a3565 --safe --verify
+```
+
+### 同期工程化修复
+
+- **依赖可复现性**：补全 `package-lock.json` 缺失条目（`@cloudbase/mysql` 内联子包所需的三个精确版本），`npm ci` 恢复可用，npm 10 / npm 11 均通过校验
+- **清理仓库根陈旧残留**：删除 2026-06-23 布局调整前遗留的 `cloud-functions/` 与旧版规划书（内容保留于 git 历史）
+- **修复 E2E 套件**：mock 的 `callFunction` 契约与 `helpers.js` 登录载荷双重错位，33 个用例由 11 失败恢复至 **33/33 全绿**；过时的「初始化按钮」断言反转为防止安全修复被回退的护栏
+- **恢复 CI 门禁**：仓库根新增 `.github/workflows/ci.yml`（单元测试 + 生产构建，不引用 secrets、不自动部署）
+
+---
 ## D-2（2026-09-16）— 候选人列表「筛选 / 排序 / 分页 / 角标」整体下推到数据库
 
 ### 问题
