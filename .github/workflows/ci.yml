@@ -1,0 +1,46 @@
+# 新励成招聘管理系统 V2.0 — CI（单元测试 + 生产构建）
+#
+# 背景：原 recruit-tracker-v2/.github/workflows/ci-cd.yml 位于项目子目录内，
+# 而 GitHub Actions 只读取仓库根目录下的 .github/workflows/，因此该文件从未运行过；
+# 其内部路径（在仓库根执行 npm ci、cd cloud-functions/<fn>）也与实际布局不符。
+#
+# 本文件接手后重建，先只启用「单元测试 + 生产构建」门禁。
+# 部署（静态托管 + 云函数）由维护者在本地手动执行并校验产物哈希，
+# 因此这里不引用任何仓库 secrets，也不会误触发线上变更。
+
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: recruit-tracker-v2
+
+jobs:
+  test-and-build:
+    name: 单元测试 + 生产构建
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: recruit-tracker-v2/package-lock.json
+
+      - name: 安装依赖（npm ci）
+        run: npm ci --no-audit --no-fund
+
+      - name: 单元测试（Vitest）
+        run: npm test
+
+      - name: 生产构建（Vite）
+        run: npm run build
