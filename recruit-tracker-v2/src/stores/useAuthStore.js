@@ -184,6 +184,21 @@ export const useAuthStore = defineStore('auth', () => {
       userName.value = name;
       currentUsername.value = returnedUsername;
       sessionToken.value = serverToken || '';  // P1-5：存储服务端签名令牌
+
+      // 🆕 用自定义登录票据把 CloudBase 会话从「匿名」升级为真实身份。
+      // 数据库安全规则只能看到 auth.uid；不升级则规则永远无法区分合法用户
+      // 与外部匿名访客（这正是生产库一度对匿名访客开放读写的原因）。
+      // 服务端未下发票据时静默跳过，行为与改造前完全一致；
+      // 即便下发了但升级失败，也只降级不影响登录。
+      if (result.data.customTicket) {
+        try {
+          const auth = cloudbase.auth({ persistence: 'local' });
+          await auth.signInWithCustomTicket(() => Promise.resolve(result.data.customTicket));
+        } catch (err) {
+          console.warn('[auth] 自定义登录升级失败，维持匿名会话:', err && err.message);
+        }
+      }
+
       setActiveUser(returnedUsername);  // P1-9：用户切换时清除旧用户缓存
       saveSession();  // 🆕 持久化登录态，刷新不丢
       loginState.value = 'idle';

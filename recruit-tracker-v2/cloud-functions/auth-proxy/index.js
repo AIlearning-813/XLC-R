@@ -22,6 +22,8 @@ const crypto = require('crypto');
 
 // 会话令牌的签发/校验/授权判定（抽成可测模块，回归测试见 session-token.test.js）
 const { createSessionTokenService, timingSafeStringEqual, VALID_ROLES } = require('./session-token');
+// 自定义登录票据签发（抽成可测模块，回归测试见 custom-ticket.test.js）
+const { issueCustomTicket } = require('./custom-ticket');
 
 const app = cloudbase.init({ env: cloudbase.SYMBOL_CURRENT_ENV });
 const db = app.database();
@@ -295,6 +297,11 @@ async function handleLogin(params) {
     // P1-5：生成服务端签名会话令牌（防 localStorage 篡改）
     const sessionToken = sessions.generate(user.username, user.role, user.name);
 
+    // 🆕 自定义登录票据：前端用它把 CloudBase 会话从「匿名」升级为真实身份，
+    // 数据库安全规则才能据此拒绝匿名访客（否则规则拿不到 auth.uid）。
+    // 控制台未开启自定义登录时为 null，登录主流程不受影响。
+    const customTicket = await issueCustomTicket(app, user.username);
+
     // 🆕 登录考勤：记录 1 次手动登录（异步容错，失败绝不影响登录主流程）
     await recordLogin(user).catch((e) => console.warn('[auth-proxy] 记录登录失败:', e.message));
 
@@ -305,6 +312,8 @@ async function handleLogin(params) {
         role: user.role,
         name: user.name,
         sessionToken,  // 🆕 服务端 HMAC-SHA256 签名令牌
+        // 仅在签发成功时下发；前端据此升级会话，失败则维持匿名（兼容旧行为）
+        ...(customTicket ? { customTicket } : {}),
       },
     };
   } catch (err) {
