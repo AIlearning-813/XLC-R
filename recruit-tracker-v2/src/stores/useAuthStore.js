@@ -13,6 +13,10 @@ export const useAuthStore = defineStore('auth', () => {
   const userName = ref('');            // 显示名称
   const currentUsername = ref('');     // 登录账号名，用于 ownerId 数据隔离
   const sessionToken = ref('');        // P1-5：服务端 HMAC-SHA256 签名令牌（防篡改）
+  // 会话一致性守卫：CloudBase 当前会话是否为「匿名」。
+  // 自定义登录上线后，正常的登录态应是非匿名（真实 SDK 的 LoginState 带
+  // isAnonymousAuth 字段；匿名登录时为 true）。
+  const isAnonymousSdkSession = ref(false);
   const loginState = ref('idle');      // 'idle' | 'loading' | 'error'
   const loginError = ref('');          // 登录失败的具体原因
 
@@ -47,6 +51,17 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (!saved) return false;
+
+      // 守卫：本地存有登录态，但 CloudBase 会话仍是匿名 —— 这是「自定义登录
+      // 上线之前」遗留的旧会话。数据库规则（auth.loginType != 'ANONYMOUS'）
+      // 会拒绝它，界面上会表现为「已登录却到处报错」，反而更难排查。
+      // 因此主动清掉本地登录态，要求重新登录。
+      // 失败方向安全：万一判断有误，最多让用户多登录一次，不会损坏数据。
+      if (isAnonymousSdkSession.value === true) {
+        console.warn('[auth] CloudBase 会话为匿名而本地存有登录态（旧会话），要求重新登录');
+        localStorage.removeItem(STORAGE_KEY);
+        return false;
+      }
 
       const session = JSON.parse(saved);
 
@@ -138,8 +153,10 @@ export const useAuthStore = defineStore('auth', () => {
           throw new Error('登录后获取用户状态失败');
         }
         currentUser.value = newState.user;
+        isAnonymousSdkSession.value = true;
       } else {
         currentUser.value = loginResp.user;
+        isAnonymousSdkSession.value = !!loginResp.isAnonymousAuth;
       }
 
       // 尝试从 localStorage 恢复用户身份（避免刷新后需要重新登录）
@@ -194,6 +211,7 @@ export const useAuthStore = defineStore('auth', () => {
         try {
           const auth = cloudbase.auth({ persistence: 'local' });
           await auth.signInWithCustomTicket(() => Promise.resolve(result.data.customTicket));
+          isAnonymousSdkSession.value = false;
         } catch (err) {
           console.warn('[auth] 自定义登录升级失败，维持匿名会话:', err && err.message);
         }
