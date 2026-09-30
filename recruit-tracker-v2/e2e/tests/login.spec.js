@@ -47,9 +47,11 @@ test('登录表单元素完整', async ({ page }) => {
   expect(await btn.count()).toBeGreaterThanOrEqual(1);
 });
 
-test('初始化按钮存在', async ({ page }) => {
+test('登录页不再提供「初始化系统账号」入口（2026-09-14 安全移除）', async ({ page }) => {
+  // 该入口原本可让任何人在无凭证情况下创建默认管理员账号，
+  // 已由 bd0f169 移除；此断言用于防止它被无意恢复。
   const text = await page.locator('body').innerText();
-  expect(text).toMatch(/初始化/);
+  expect(text).not.toMatch(/初始化/);
 });
 
 test('登录页无崩溃无错误', async ({ page }) => {
