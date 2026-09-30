@@ -4,9 +4,9 @@
 # 而 GitHub Actions 只读取仓库根目录下的 .github/workflows/，因此该文件从未运行过；
 # 其内部路径（在仓库根执行 npm ci、cd cloud-functions/<fn>）也与实际布局不符。
 #
-# 本文件接手后重建，先只启用「单元测试 + 生产构建」门禁。
-# 部署（静态托管 + 云函数）由维护者在本地手动执行并校验产物哈希，
-# 因此这里不引用任何仓库 secrets，也不会误触发线上变更。
+# 本文件接手后重建，只启用「单元测试 + 生产构建」门禁。
+# 部署（静态托管 + 云函数）由维护者在本地执行并校验产物哈希，
+# 故此处不引用任何 secrets，也不会误触发线上变更。
 
 name: CI
 
@@ -20,6 +20,14 @@ on:
 defaults:
   run:
     working-directory: recruit-tracker-v2
+
+env:
+  # 构建期需要环境 ID，否则产物无法连上 CloudBase。
+  # 该值不是密钥（.env.development 已提交同一 ID，且它本就烘进前端公开产物）。
+  VITE_CLOUDBASE_ENV_ID: xlc-recruit-d1gmbx8gybc8a3565
+  # 单元测试不需要浏览器；跳过 Playwright 浏览器下载，
+  # 避免 npm ci 阶段拉取数百 MB 二进制拖慢或拖挂流水线。
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
 
 jobs:
   test-and-build:
