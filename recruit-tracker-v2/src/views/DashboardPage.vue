@@ -150,9 +150,12 @@ async function loadDuplicates() {
           phoneMap[phone].push(c);
         }
       }
-      // 姓名相同（简化版：只按姓名分组）
-      if (c.name) {
-        const nameKey = c.name.trim();
+      // 姓名 + 邮箱都相同才算疑似重复。
+      // 原实现只按姓名分组：全量扫描 5663 条会产生 272 组同名（"张伟""李娜"这类
+      // 常见姓名），几乎全是误报，面板会被淹没——原先的 limit(200) 只是把这个问题
+      // 藏了起来（代价是真实重复一组都看不到）。加上邮箱后才是可用信号。
+      if (c.name && c.email) {
+        const nameKey = c.name.trim() + '|' + String(c.email).trim().toLowerCase();
         if (!nameCompanyMap[nameKey]) nameCompanyMap[nameKey] = [];
         nameCompanyMap[nameKey].push(c);
       }
@@ -173,7 +176,7 @@ async function loadDuplicates() {
       if (list.length >= 2) {
         const filtered = list.filter(c => !highPhoneIds.has(c._id));
         if (filtered.length >= 2) {
-          groups.push({ type: 'name', reason: `姓名"${name}"相同`, candidates: filtered, confidence: 'medium' });
+          groups.push({ type: 'name', reason: '姓名与邮箱均相同', candidates: filtered, confidence: 'medium' });
         }
       }
     }

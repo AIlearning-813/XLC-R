@@ -166,6 +166,10 @@ export async function getSystemStatus() {
  * 🆕 获取重复候选人（按手机号）
  * 替代 DashboardPage 中的直接 Candidate 查询
  */
+/** 重复检测翻页参数：每批条数与安全上限（2 万条） */
+const DEDUP_PAGE_SIZE = 500;
+const DEDUP_MAX_PAGES = 40;
+
 export async function getDuplicateCandidates() {
   const db = cloudbase.db();
   if (!db) return [];
@@ -176,12 +180,57 @@ export async function getDuplicateCandidates() {
     const of = ownerFilter();
     if (of) conditions.ownerId = of.ownerId;
 
-    const { data: candidates } = await db.collection('Candidate')
+    // 重复检测必须覆盖**全库**，否则面板形同虚设。
+    // 原实现只取 `limit(200)`：在 5663 条的真实库上实测——36 组手机号重复
+    // **一组都看不到**（覆盖率 0%），管理员因此长期无法发现重复。
+    // 这里沿用 candidate-listing.js 的「取全不截断」契约：
+    // 首批探测 → 按 count 并发续拉 → count 失真时靠「最后一批是否满」兜底续拉。
+    const buildQuery = () => db.collection('Candidate')
       .where(conditions)
-      .field({ phone: true, name: true, _id: true })
-      .limit(200)
-      .get();
-    return candidates || [];
+      .field({ phone: true, name: true, email: true, _id: true });
+    const fetchBatch = async (skip) => {
+      const { data } = await buildQuery().skip(skip).limit(DEDUP_PAGE_SIZE).get();
+      return data || [];
+    };
+
+    const first = await fetchBatch(0);
+    const all = [...first];
+    if (first.length === DEDUP_PAGE_SIZE) {
+      let total = null;
+      try {
+        const c = await db.collection('Candidate').where(conditions).count();
+        if (c && typeof c.total === 'number') total = c.total;
+      } catch { /* count 不可用时回退串行续拉 */ }
+
+      const maxDocs = DEDUP_PAGE_SIZE * DEDUP_MAX_PAGES;
+      if (total === null || !Number.isFinite(total) || total < 0 || Math.ceil(total / DEDUP_PAGE_SIZE) > DEDUP_MAX_PAGES) {
+        for (let skip = DEDUP_PAGE_SIZE; skip < maxDocs; skip += DEDUP_PAGE_SIZE) {
+          const chunk = await fetchBatch(skip);
+          all.push(...chunk);
+          if (chunk.length < DEDUP_PAGE_SIZE) break;
+        }
+      } else {
+        const batches = Math.ceil(total / DEDUP_PAGE_SIZE);
+        const starts = [];
+        for (let i = 1; i < batches; i++) starts.push(i * DEDUP_PAGE_SIZE);
+        const chunks = starts.length ? await Promise.all(starts.map((s) => fetchBatch(s))) : [];
+        for (const chunk of chunks) all.push(...chunk);
+
+        // 收尾兜底（同 candidate-listing.js）：count 偏小时续拉，保证不截断
+        let tail = chunks.length ? chunks[chunks.length - 1] : first;
+        let skip = Math.max(batches * DEDUP_PAGE_SIZE, DEDUP_PAGE_SIZE);
+        while (tail.length === DEDUP_PAGE_SIZE && skip < maxDocs) {
+          const chunk = await fetchBatch(skip);
+          all.push(...chunk);
+          tail = chunk;
+          skip += DEDUP_PAGE_SIZE;
+        }
+      }
+      if (total !== null && total > maxDocs) {
+        console.warn(`[funnel-report] 候选人总数 ${total} 超过重复检测上限 ${maxDocs}，结果可能不完整`);
+      }
+    }
+    return all;
   } catch (err) {
     console.warn('[funnel-report] 重复检测查询失败:', err.message);
     return [];

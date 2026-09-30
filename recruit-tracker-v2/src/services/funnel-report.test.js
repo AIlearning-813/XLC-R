@@ -241,5 +241,20 @@ describe('funnel-report — 直接 DB 查询', () => {
       const result = await getDuplicateCandidates();
       expect(result).toEqual([]);
     });
+
+    it('全量拉取：count 偏小时也不截断（「取全不截断」契约）', async () => {
+      // 线上实测：原实现 limit(200) 使管理员重复面板在 5663 条库上
+      // 36 组手机号重复一组都看不到（覆盖率 0%）。此处按 candidate-listing.js
+      // 的同一契约验证：即使 count 失真偏小，也必须取全。
+      const many = [];
+      for (let i = 0; i < 1200; i++) {
+        many.push({ _id: 'c' + i, name: 'N' + i, phone: '138' + String(10000000 + i) });
+      }
+      cloudbase.__setCollectionData('Candidate', many);
+      cloudbase.__setCountOverride('Candidate', 500); // 模拟安全规则导致 count 偏小
+
+      const result = await getDuplicateCandidates();
+      expect(result).toHaveLength(1200);
+    });
   });
 });
