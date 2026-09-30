@@ -33,27 +33,42 @@ const LOGGED_IN_ONLY = [
   'LoginLog', 'AuditLog',
 ];
 
-const RULE_LOGGED_IN = JSON.stringify({ read: 'auth.uid != null', write: 'auth.uid != null' });
+// ⚠️ 不能用 auth.uid != null：**匿名用户同样有 auth.uid**（随机匿名 ID），
+// 那条规则会放行匿名访客，等于漏洞没修却以为修好了。
+// 官方文档：匿名登录的 auth.loginType 为 'ANONYMOUS'，据此排除。
+const RULE_LOGGED_IN = JSON.stringify({ read: "auth.loginType != 'ANONYMOUS'", write: "auth.loginType != 'ANONYMOUS'" });
 const RULE_PERMISSIVE = JSON.stringify({ read: true, write: true });
 
 const mode = process.argv.includes('--apply') ? 'apply'
   : process.argv.includes('--rollback') ? 'rollback'
+  : process.argv.includes('--print-rules') ? 'print'
   : 'status';
 const confirmed = process.argv.includes('--yes');
 
 function die(msg) { console.error('✘ ' + msg); process.exit(1); }
 
-if (!SECRET_ID || !SECRET_KEY) {
+if (mode !== 'print' && (!SECRET_ID || !SECRET_KEY)) {
   console.error('✘ 缺少腾讯云凭据。请先设置环境变量后重试：');
   console.error('    $env:TENCENTCLOUD_SECRETID="<SecretId>"');
   console.error('    $env:TENCENTCLOUD_SECRETKEY="<SecretKey>"');
   console.error('  （凭据只在本机进程内使用，不会写入任何文件）');
   process.exit(1);
 }
-if (mode !== 'status' && !confirmed) {
+if (mode !== 'status' && mode !== 'print' && !confirmed) {
   console.error('✘ 这是会改动线上权限的操作，请追加 --yes 明确确认。');
   console.error('  建议先执行 --status 查看当前状态。');
   process.exit(1);
+}
+
+if (mode === 'print') {
+  console.log('环境：' + ENV_ID);
+  console.log('');
+  console.log('--apply 将应用的规则：');
+  console.log('  Users'.padEnd(26) + '-> ADMINONLY（客户端完全禁止，仅云函数特权访问）');
+  for (const c of LOGGED_IN_ONLY) console.log(('  ' + c).padEnd(26) + '-> CUSTOM ' + RULE_LOGGED_IN);
+  console.log('');
+  console.log('--rollback 会把这些集合恢复为：' + RULE_PERMISSIVE);
+  process.exit(0);
 }
 
 function loadManagerNode() {
