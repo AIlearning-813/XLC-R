@@ -310,8 +310,13 @@ export async function parseWithDeepSeek(resumeText) {
  */
 export async function computeFileHash(file) {
   const arrayBuffer = await file.arrayBuffer();
+  // jsdom 环境下 file.arrayBuffer() 返回的缓冲区来自另一个 realm，
+  // Node 20 的 crypto.subtle.digest 会以 ERR_INVALID_ARG_TYPE 拒绝它
+  // （Node 24 不复现，故本地长期未暴露；CI 跑 Node 20 因而必红）。
+  // 因此先取当前 realm 的 Uint8Array 视图，再交给 digest。
+  const bytes = new Uint8Array(arrayBuffer);
   // 使用 Web Crypto API 计算 SHA-256（浏览器端 MD5 不可用，SHA-256 更安全）
-  const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', bytes);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
   return hashHex;
