@@ -109,12 +109,20 @@ export const useAuthStore = defineStore('auth', () => {
         }
       }
 
-      // 旧格式兼容（无服务端令牌，直接信任 localStorage）
+      // 旧格式（无服务端令牌）**一律拒绝**，不再信任。
+      //
+      // 原实现是「直接信任 localStorage」，有两个后果：
+      //   1. 鉴权可伪造——往 localStorage 写 {"username":"admin","role":"admin"}
+      //      即可拿到管理员界面，架空了 P1-5 的服务端签名令牌加固；
+      //   2. 该分支**没有过期检查**，用户会永远停留在未签名会话上、不再重新登录。
+      //      实测后果：多名专员长期不重新登录，LoginLog 始终 0 条，
+      //      登录考勤功能一直空白（recordLogin/recordActiveIfNew 只在真实登录
+      //      与会话校验时写入）。
+      // 现在要求必须持有服务端签名令牌（session.st），否则视为未登录。
       if (session.username && session.role) {
-        userRole.value = session.role;
-        userName.value = session.name || session.username;
-        currentUsername.value = session.username;
-        return true;
+        console.warn('[auth] 检测到无服务端令牌的旧会话，已拒绝并清除（需重新登录）');
+        localStorage.removeItem(STORAGE_KEY);
+        return false;
       }
     } catch (e) { /* ignore */ }
     return false;
