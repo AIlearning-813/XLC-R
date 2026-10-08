@@ -204,8 +204,12 @@ onMounted(async () => {
   await loadOverview();
   // P2-26：loadPeriodData 已由 watch+immediate 处理，此处移除重复调用
 
-  if (auth.currentUser?.uid) {
-    notify.fetchNotifications(auth.currentUser.uid);
+  // ⚠️ 2026-10-08 修复：通知的 userId 存的是**登录用户名**，不是 CloudBase 的 uid。
+  // 数据链：EmailConfig.userId = currentUsername → ParseQueue.userId → ParseNotification.userId。
+  // 原实现传 auth.currentUser.uid（匿名会话下是随机 ID，且登录升级会话后也未刷新），
+  // 因此 where({ userId }) 永远匹配不到 —— 表现为「通知功能从来显示不出任何内容」。
+  if (auth.currentUsername) {
+    notify.fetchNotifications(auth.currentUsername);
   }
 
   if (isAdmin.value) {
