@@ -292,11 +292,12 @@ async function main() {
     ? Object.entries(TARGETS)
     : all.map((c) => [c, baselineFor(c)]);
 
-  if (mode === 'apply' && ONLY) {
-    const unknown = ONLY.filter((c) => !TARGETS[c]);
-    if (unknown.length) die('--only 指定的集合不在目标清单里：' + unknown.join(', '));
+  if (ONLY) {
+    const valid = mode === 'apply' ? Object.keys(TARGETS) : all;
+    const unknown = ONLY.filter((c) => !valid.includes(c));
+    if (unknown.length) die('--only 指定的集合无效：' + unknown.join(', '));
     entries = entries.filter(([c]) => ONLY.includes(c));
-    console.log('金丝雀模式：仅对 ' + ONLY.join(', ') + ' 生效\n');
+    console.log('金丝雀模式（' + mode + '）：仅对 ' + ONLY.join(', ') + ' 生效\n');
   }
 
   if (mode === 'apply') {
