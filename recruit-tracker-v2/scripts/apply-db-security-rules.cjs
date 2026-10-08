@@ -104,6 +104,16 @@ const mode = process.argv.includes('--apply') ? 'apply'
   : 'status';
 const confirmed = process.argv.includes('--yes');
 
+/**
+ * 金丝雀开关：--only=ErrorLog 只对指定集合生效。
+ * 用途：正式收紧全库前，先在单个集合上确认「新判据真的能拦住匿名访客」，
+ * 再推全量——避免一次性改完才发现规则未生效。
+ */
+const onlyArg = process.argv.find((a) => a.startsWith('--only='));
+const ONLY = onlyArg
+  ? onlyArg.slice('--only='.length).split(',').map((s) => s.trim()).filter(Boolean)
+  : null;
+
 function die(msg) {
   console.error('✘ ' + msg);
   process.exit(1);
@@ -278,12 +288,19 @@ async function main() {
   }
 
   const targets = mode === 'apply' ? TARGETS : baselineFor;
-  const entries = mode === 'apply'
+  let entries = mode === 'apply'
     ? Object.entries(TARGETS)
     : all.map((c) => [c, baselineFor(c)]);
 
+  if (mode === 'apply' && ONLY) {
+    const unknown = ONLY.filter((c) => !TARGETS[c]);
+    if (unknown.length) die('--only 指定的集合不在目标清单里：' + unknown.join(', '));
+    entries = entries.filter(([c]) => ONLY.includes(c));
+    console.log('金丝雀模式：仅对 ' + ONLY.join(', ') + ' 生效\n');
+  }
+
   if (mode === 'apply') {
-    const problems = assertNoLoosening(TARGETS, current);
+    const problems = assertNoLoosening(Object.fromEntries(entries), current);
     if (problems.length) {
       console.error('✘ 「不得放宽」拦截：以下地方目标规则比现状宽松，已中止，未改动任何线上设置：');
       problems.forEach((p) => console.error('  · ' + p));
