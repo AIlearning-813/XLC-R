@@ -369,9 +369,11 @@ describe('useNotificationStore', () => {
       // 不应抛出错误，静默处理
       await expect(store.markAsRead('n1')).resolves.toBeUndefined();
 
-      // 本地状态未更新（源码是先 await db().update()，再更新本地）
-      // DB 失败时抛异常，本地不会被更新
-      expect(store.notifications[0].status).toBe('unread');
+      // ⚠️ 2026-10-08 行为变更：ParseNotification 是「仅管理端可写」，
+      // 客户端写库**必然失败**——线上实测 5000 条通知全部 unread、从未有一条被标记已读。
+      // 因此已读状态改由本地记录保证：即使服务端写入失败，也必须变为已读，
+      // 否则未读角标永远消不掉。此处断言的是修复后的正确行为。
+      expect(store.notifications[0].status).toBe('read');
     });
   });
 
@@ -477,8 +479,8 @@ describe('useNotificationStore', () => {
       // 不应抛出错误
       await expect(store.markAllAsRead('user1')).resolves.toBeUndefined();
 
-      // 异常被 catch 后本地状态保持不变
-      expect(store.notifications[0].status).toBe('unread');
+      // ⚠️ 2026-10-08 行为变更：同上——服务端写入失败也必须本地生效（否则角标永不消失）
+      expect(store.notifications[0].status).toBe('read');
     });
   });
 
