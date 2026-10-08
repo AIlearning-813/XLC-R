@@ -25,7 +25,41 @@ const { createSessionTokenService, timingSafeStringEqual, VALID_ROLES } = requir
 // 自定义登录票据签发（抽成可测模块，回归测试见 custom-ticket.test.js）
 const { issueCustomTicket } = require('./custom-ticket');
 
-const app = cloudbase.init({ env: cloudbase.SYMBOL_CURRENT_ENV });
+/**
+ * 自定义登录私钥。
+ *
+ * ⚠️ 关键：node-sdk **不会**从环境变量自动读取该私钥——已在 SDK 源码中核实
+ * （`private_key` / `env_id` 只出现在 auth/index.ts，全部取自 config.credentials），
+ * 因此必须**显式**传给 init()。否则 createTicket() 必然抛错，而
+ * custom-ticket.js 的容错契约会把它吞掉并返回 null —— 表现为「登录成功、但票据
+ * 永远签不出来」。后果是：控制台开了自定义登录、数据库规则一收紧，前端仍持匿名
+ * 会话 → 全站读写被拒，**故障只在切换那一刻才爆发**。
+ *
+ * 私钥来源：云开发控制台 → 登录授权/自定义登录 → 下载的私钥文件内容（JSON，
+ * 含 private_key_id / private_key / env_id），整段写入环境变量
+ * CLOUDBASE_CUSTOM_LOGIN_CREDENTIALS。
+ */
+function customLoginCredentials() {
+  const raw = process.env.CLOUDBASE_CUSTOM_LOGIN_CREDENTIALS;
+  if (!raw) return null;
+  try {
+    const cred = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (cred && typeof cred.private_key === 'string' && typeof cred.private_key_id === 'string') {
+      return cred;
+    }
+  } catch { /* 格式不对时按未配置处理 */ }
+  return null;
+}
+
+const customLogin = customLoginCredentials();
+if (!customLogin) {
+  console.warn('[auth-proxy] 未配置 CLOUDBASE_CUSTOM_LOGIN_CREDENTIALS：自定义登录票据无法签发，前端会退回匿名会话（数据库规则收紧后将无法读写）');
+}
+
+const app = cloudbase.init({
+  env: cloudbase.SYMBOL_CURRENT_ENV,
+  ...(customLogin ? { credentials: customLogin } : {}),
+});
 const db = app.database();
 
 // PBKDF2 参数
