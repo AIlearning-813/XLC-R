@@ -596,6 +596,14 @@ async function handleVerifySession(params) {
   await recordActiveIfNew(result.username, result.role)
     .catch((e) => console.warn('[auth-proxy] 记录活跃失败:', e.message));
 
+  // 🆕 会话自愈：每次会话校验都重新签发票据，前端据此把会话升级为「非匿名」。
+  // 动机：本 SDK 的 loginState **不含 isAnonymousAuth 字段**（2026-10-08 实测），
+  // 前端无法可靠判断当前会话是否匿名。若只在登录时签一次，那么在数据库规则收紧前
+  // 就已登录、且令牌尚未过期的用户会停留在匿名会话上（读写被拒）。改为每次校验都
+  // 下发，用户一打开应用即自动升级，无需手动重新登录。
+  // createTicket 是本地签名运算（无网络往返），开销可忽略。
+  const customTicket = await issueCustomTicket(app, result.username);
+
   return {
     success: true,
     data: {
@@ -603,6 +611,7 @@ async function handleVerifySession(params) {
       role: result.role,
       name: result.name,
       expiry: result.expiry,
+      ...(customTicket ? { customTicket } : {}),
     },
   };
 }

@@ -33,7 +33,12 @@ async function issueCustomTicket(authOrApp, username) {
 
   try {
     const res = await auth.createTicket(username);
-    const ticket = res && (res.ticket || (res.data && res.data.ticket));
+    // ⚠️ node-sdk 的 createTicket 返回的是**纯字符串**（形如 keyId/@@/签名），
+    // 不是 { ticket } 对象。早期实现只认 res.ticket，于是即便签发成功也返回 null
+    // ——「票据签得出来、却永远传不出去」。此处对三种形状都兼容。
+    const ticket = typeof res === 'string'
+      ? res
+      : (res && (res.ticket || (res.data && res.data.ticket)));
     return typeof ticket === 'string' && ticket !== '' ? ticket : null;
   } catch {
     return null;

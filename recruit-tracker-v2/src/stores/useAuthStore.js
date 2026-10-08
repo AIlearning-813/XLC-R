@@ -86,6 +86,19 @@ export const useAuthStore = defineStore('auth', () => {
           currentUsername.value = verifyResult.data.username;
           sessionToken.value = session.st;
 
+          // 🆕 会话自愈：服务端在会话校验时也会下发自定义登录票据，用它把当前会话
+          // 升级为「非匿名」。本 SDK 的 loginState 不含 isAnonymousAuth 字段（已实测），
+          // 无法靠"检测是否匿名"兜底，因此改为每次打开应用都主动升级，
+          // 避免老会话在数据库规则收紧后读写被拒。
+          if (verifyResult.data.customTicket) {
+            try {
+              await cloudbase
+                .auth({ persistence: 'local' })
+                .signInWithCustomTicket(() => Promise.resolve(verifyResult.data.customTicket));
+            } catch (e) {
+              console.warn('[auth] 会话升级失败（不影响已登录状态）:', e && e.message);
+            }
+          }
           // 刷新过期时间（令牌快过期时自动续期）
           if (verifyResult.data.expiry && verifyResult.data.expiry - Date.now() < SESSION_TTL_MS / 2) {
             saveSession();

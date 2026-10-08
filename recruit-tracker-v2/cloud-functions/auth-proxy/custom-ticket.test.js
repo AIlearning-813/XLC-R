@@ -48,4 +48,12 @@ describe('issueCustomTicket', () => {
     expect(await issueCustomTicket({ createTicket: async () => ({}) }, '王莉')).toBeNull();
     expect(await issueCustomTicket({ createTicket: async () => ({ ticket: '' }) }, '王莉')).toBeNull();
   });
+
+  // ⚠️ 这条钉的是 SDK 的**真实形态**：node-sdk 的 createTicket 返回纯字符串
+  // （形如 keyId/@@/签名），不是 { ticket } 对象。此前 8 个用例全部假设对象形态，
+  // 于是「签发成功却返回 null」的 bug 在单测全绿的情况下活了下来。
+  it('createTicket 返回纯字符串时取到票据（SDK 真实形态，2026-10-08 实测）', async () => {
+    const auth = { createTicket: async () => 'keyid/@@/signature-string' };
+    expect(await issueCustomTicket(auth, '王莉')).toBe('keyid/@@/signature-string');
+  });
 });
